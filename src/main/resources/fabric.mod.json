@@ -3,7 +3,7 @@
 	"id": "happy-artillery",
 	"version": "${version}",
 	"name": "Happy Artillery",
-	"description": "A Fabric mod that adds fireball shooting to Happy Ghasts when right-clicked by riders. Fully configurable.",
+	"description": "Turn Happy Ghasts into rideable artillery with fireballs, a cry ability, ammo, heat, and server-side configuration.",
 	"authors": [
 		"OG Moo-cow"
 	],
