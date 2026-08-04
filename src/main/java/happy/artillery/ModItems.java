@@ -334,8 +334,7 @@ public class ModItems {
             return;
         }
         
-        // FIRST: Check if it's temporary - if so, delete it immediately and inform player
-        logger.info("[HappyArtillery] Cleanup slot {}: checking for temporary tag (has tag: {})", slotIndex, CustomDataComponents.hasTemporaryTag(stack));
+        // FIRST: Check if it's temporary - if so, delete it immediately
         if (CustomDataComponents.hasTemporaryTag(stack)) {
             inventory.setItem(slotIndex, ItemStack.EMPTY);
             logger.info("[HappyArtillery] Deleted temporary item from cleanup slot {}", slotIndex);
