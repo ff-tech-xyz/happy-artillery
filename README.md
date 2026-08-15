@@ -1,5 +1,9 @@
 # Happy Artillery
 
+> **Rebuild groundwork:** this branch intentionally contains no working gameplay. `FEATURES.md`
+> preserves the required behavior and `ARCHITECTURE.md` defines the clean implementation structure.
+> Do not deploy its jar as a release.
+
 Happy Artillery turns the Happy Ghast into a rideable siege machine. Once you are in the saddle, the ghast can launch fireballs, let out a scream, and overheat if you push it too hard.
 
 The mod runs on the server, so players do not need to install it on their clients to join and use it.
