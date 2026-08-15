@@ -1,121 +1,70 @@
-# 🔥 Happy Artillery
+# Happy Artillery
 
-A Fabric mod for Minecraft 1.21.x that turns Happy Ghasts into rideable artillery. Mount up, aim, and lob fireballs.
+Happy Artillery turns the Happy Ghast into a rideable siege machine. Once you are in the saddle, the ghast can launch fireballs, let out a scream, and overheat if you push it too hard.
 
-**By OG Moo-cow / [Pyrehaven](https://pyrehaven.xyz)**
+The mod runs on the server, so players do not need to install it on their clients to join and use it.
 
----
+## What it does
 
-## What It Does
+- Adds fireball controls while riding a Happy Ghast.
+- Adds a Ghast Cry ability with its own cooldown.
+- Gives each Happy Ghast an ammo pool that refills over time.
+- Tracks heat while you fire. Keep shooting for too long and the ghast overheats in a messy burst of fireballs.
+- Changes heat behavior by biome and dimension. Hot places are riskier, cold places cool faster, and the Nether is exactly as bad an idea as it sounds.
+- Lets server owners tune the numbers in `config/happy-artillery.json`.
 
-- **Shoot fireballs** — right-click with a **Fire Charge** in hand while riding a Happy Ghast
-- **Ghast Cry** — right-click with a **Ghast Tear** to let out a terrifying scream
-- **Ammo system** — Ghasts hold up to 200 fireballs, regenerating passively over time
-- **Heat & Overheat** — rapid firing builds heat; overheat = big sphere explosion
-- **Biome mechanics** — heat behaviour differs in Nether, cold, and hot biomes
-- **Fully configurable** — every gameplay value is tunable via a JSON config file
+## How to use it
 
----
+Mount a Happy Ghast and use the control slots in your hotbar:
+
+- Slot 5 becomes Fire Control. Right-click with it to shoot a fireball.
+- Slot 6 becomes Cry Control. Right-click with it to make the ghast scream.
+
+If a control slot is empty, the mod creates a temporary Fire Charge or Ghast Tear for you. If there is already an item in the slot, the mod marks it as the control while you are riding and cleans it up when you dismount.
+
+## Heat and ammo
+
+Every shot costs ammo and adds heat. Ammo refills passively, but heat depends on where you are flying.
+
+| Area | Default behavior |
+|---|---|
+| Normal biomes | Standard heat gain and cooling |
+| Hot biomes | More heat per shot and slower cooling |
+| Cold biomes / End | Less heat per shot and faster cooling |
+| Nether | High heat and no passive cooling |
+
+Water cools a ghast quickly, but you cannot fire while submerged.
 
 ## Requirements
 
-- Minecraft **1.21.x** (tested on 1.21.11)
-- [Fabric Loader](https://fabricmc.net/) >= 0.16.14
-- [Fabric API](https://modrinth.com/mod/fabric-api)
+- Minecraft `26.1.2` / `26.2` line, with current releases also published for `1.21.11`
+- Fabric Loader `0.19.2` or newer
+- Fabric API
 - Java 21+
 
-Server-side only — clients don't need it installed.
-
----
-
-## Installation
-
-1. Install [Fabric Loader](https://fabricmc.net/use/)
-2. Drop [Fabric API](https://modrinth.com/mod/fabric-api) into your `mods/` folder
-3. Drop `happy-artillery-X.X.X.jar` into your `mods/` folder
-4. Launch — a default config is created at `config/happy-artillery.json`
-
----
-
-## Usage
-
-1. Find and mount a **Happy Ghast** (added in Minecraft 1.21.5)
-2. Hold a **Fire Charge** and right-click to shoot a fireball
-3. Hold a **Ghast Tear** and right-click to scream
-4. Watch your heat — overheat = your ghast explodes
-
----
-
-## Heat Mechanics
-
-Each shot adds heat. Hit the limit and the ghast detonates in a fireball sphere.
-
-| Biome Type | Overheat Limit | Heat/Shot | Cooling |
-|---|---|---|---|
-| Normal (BASE) | 60 | 1.0 | -1 every 3.0s |
-| Hot (temp ≥ 1.5) | 60 | 2.0 | -1 every 6.0s |
-| Cold (temp ≤ 0.0 / End) | 60 | 0.5 | -1 every 1.5s |
-| Nether | 60 | 3.0 | ❌ No cooling |
-
-Being **submerged in water** rapidly cools the ghast but prevents firing.
-
----
+Install it on the server. Clients do not need the mod.
 
 ## Configuration
 
-Config: `config/happy-artillery.json` (auto-created on first launch)
+A default config is created at `config/happy-artillery.json` on first launch. Server owners can adjust ammo, cooldowns, heat limits, biome behavior, explosion power, water cooling, and cry volume.
 
-```json
-{
-  "fireballAmmoMax": 200,
-  "fireballAmmoCost": 1,
-  "ammoDeliveryIntervalMin": 5,
-  "shootCooldownSeconds": 0.25,
-  "fireRestartDelaySeconds": 0.5,
-  "cryCooldownSeconds": 10.0,
-  "baseOverheatLimit": 60,
-  "baseHeatPerShot": 1.0,
-  "baseCoolIntervalSeconds": 3.0,
-  "hotBiomeOverheatLimit": 60,
-  "hotBiomeHeatPerShot": 2.0,
-  "hotBiomeCoolIntervalSeconds": 6.0,
-  "coldBiomeOverheatLimit": 60,
-  "coldBiomeHeatPerShot": 0.5,
-  "coldBiomeCoolIntervalSeconds": 1.5,
-  "netherOverheatLimit": 60,
-  "netherHeatPerShot": 3.0,
-  "netherNoCooldown": true,
-  "waterCooldownRate": 8,
-  "waterCooldownLimit": 5,
-  "fireballExplosionPower": 2,
-  "overheatExplosionPower": 4.0,
-  "overheatExplosionCreatesFire": true,
-  "cryVolume": 3.0
-}
-```
+Changes take effect after a server restart.
 
-Changes take effect on server restart.
-
----
-
-## Building From Source
+## Building from source
 
 ```bash
-git clone https://github.com/phred2026-cyber/happy-artillery
+git clone https://github.com/ff-tech-xyz/happy-artillery
 cd happy-artillery
 ./gradlew build
-# Output: build/libs/happy-artillery-1.0.0.jar
 ```
 
----
+Built jars are written to `build/libs/`.
 
 ## License
 
 MIT
 
----
-
 ## Credits
 
-- **OG Moo-cow** — author
-- **Pyrehaven** — [pyrehaven.xyz](https://pyrehaven.xyz)
+- OG Moo-cow, author
+- PyreHaven, https://pyrehaven.xyz
