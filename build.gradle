@@ -14,11 +14,24 @@ repositories {
 	mavenCentral()
 }
 
-def localMinecraftMetadata = file("gradle/minecraft/26.1.2-custom.json").toURI().toString()
+def localMinecraftMetadataServer = {
+	def metadataDir = file("gradle/minecraft")
+	def server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0)
+	server.createContext("/26.2-custom.json") { exchange ->
+		byte[] body = new File(metadataDir, "26.2-custom.json").bytes
+		exchange.responseHeaders.add("Content-Type", "application/json")
+		exchange.sendResponseHeaders(200, body.length)
+		exchange.responseBody.write(body)
+		exchange.close()
+	}
+	server.start()
+	gradle.buildFinished { server.stop(0) }
+	return "http://127.0.0.1:${server.address.port}/26.2-custom.json"
+}.call()
 
 loom {
 	noIntermediateMappings()
-	customMinecraftMetadata.set(localMinecraftMetadata)
+	customMinecraftMetadata.set(localMinecraftMetadataServer)
 
 	mods {
 		"happy-artillery" {
@@ -30,14 +43,14 @@ loom {
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings files("gradle/minecraft/identity-official-26.1.2.jar")
+	mappings files("gradle/minecraft/identity-official-26.2.jar")
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	compileOnly "net.fabricmc.fabric-api:fabric-command-api-v2:3.0.5+e2bdee784c"
-	compileOnly "net.fabricmc.fabric-api:fabric-entity-events-v1:5.0.2+e2bdee784c"
-	compileOnly "net.fabricmc.fabric-api:fabric-events-interaction-v0:5.1.10+c82f04614c"
-	compileOnly "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:4.1.0+6d50a0854c"
-	compileOnly "net.fabricmc.fabric-api:fabric-networking-api-v1:6.3.0+50a808ce4c"
-	compileOnly "net.fabricmc.fabric-api:fabric-api-base:2.0.3+ece063234c"
+	compileOnly "net.fabricmc.fabric-api:fabric-command-api-v2:3.1.0+00cb03469c"
+	compileOnly "net.fabricmc.fabric-api:fabric-entity-events-v1:5.0.5+06488ac19c"
+	compileOnly "net.fabricmc.fabric-api:fabric-events-interaction-v0:5.2.6+8f57f7ee9c"
+	compileOnly "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:4.1.3+4575b05f9c"
+	compileOnly "net.fabricmc.fabric-api:fabric-networking-api-v1:6.3.3+72073ef09c"
+	compileOnly "net.fabricmc.fabric-api:fabric-api-base:2.0.4+ece063239c"
 }
 
 processResources {

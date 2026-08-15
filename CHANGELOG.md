@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.2.2] - 2026-08-04
+
+### Fixed
+- Stopped routine inventory cleanup checks from flooding the server log while retaining messages when temporary control items are actually removed.
+
 ## [1.0.0] - 2026-03-01
 
 ### Added

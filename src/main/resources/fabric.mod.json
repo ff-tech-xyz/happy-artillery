@@ -9,7 +9,7 @@
 	],
 	"contact": {
 		"homepage": "https://pyrehaven.xyz",
-		"sources": "https://github.com/phred2026-cyber/happy-artillery"
+		"sources": "https://github.com/ff-tech-xyz/happy-artillery"
 	},
 	"license": "MIT",
 	"icon": "assets/happy-artillery/icon.png",
@@ -28,8 +28,8 @@
 		}
 	},
 	"depends": {
-		"fabricloader": ">=0.19.2",
-		"minecraft": "~26.1.2",
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
 		"java": ">=21",
 		"fabric-api": "*"
 	}
