@@ -38,7 +38,7 @@ Water cools a ghast quickly, but you cannot fire while submerged.
 ## Requirements
 
 - Minecraft `26.1.2` / `26.2` line, with current releases also published for `1.21.11`
-- Fabric Loader `0.19.2` or newer
+- Fabric Loader `0.19.3` or newer
 - Fabric API
 - Java 21+
 
