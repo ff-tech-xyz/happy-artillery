@@ -1,201 +1,330 @@
-# Happy Artillery Feature Contract
+# Happy Artillery 1.2.0 Feature Contract
 
-## Status
+## Purpose and authority
 
-This file preserves the product behavior required for Happy Artillery's next implementation. The
-current branch is structural groundwork only: the owner classes named in `ARCHITECTURE.md` compile,
-but no controls, abilities, state, displays, or server callbacks are active. The five test files
-establish the accepted suite layout; they do not yet contain executable gameplay tests. Do not deploy
-this groundwork as a working release.
+This is the behavior contract for the 1.2.0 clean implementation. It preserves player-facing behavior
+accepted in released documentation, records what the released code actually did (including defects),
+and leaves contradictory policy unresolved rather than selecting a cleaner answer without approval.
+`ARCHITECTURE.md` assigns owners; it does not change this behavior.
 
-## Runtime scope
+The current branch remains non-deployable structural groundwork: its owner shells and test layout are
+not gameplay. Nothing in the scaffold is evidence that a feature below has been implemented.
 
-- Happy Artillery is server-authoritative. A Fabric server runs every gameplay rule and inventory
-  mutation; joining players do not need the mod on their clients.
-- The released control setup gives controls only to the Happy Ghast's first passenger, but the released
-  interaction callback can accept another mounted passenger. The rebuild must choose one authorization
-  policy before controls are implemented.
-- The rebuild targets Minecraft 26.2, Fabric Loader 0.19.3 or newer, Fabric API, and Java 21.
-- Gameplay state is process-memory state keyed by UUID unless a later accepted feature explicitly
-  introduces persistence. Restarting the server resets ammo, heat, and cooldown state.
+Terms used below:
 
-## Rider controls
+- **Accepted** — product behavior the rebuild must provide unless Elijah changes it.
+- **Released evidence** — behavior of the `origin/main` / 1.1.2.2 implementation that must be covered
+  by characterization or an explicit migration decision; a defect is not silently promoted to policy.
+- **Open** — the rebuild must not guess. Resolve the decision and add a regression test before enabling
+  the affected path.
 
-- While controlling a Happy Ghast, hotbar slot 5 (inventory index 4) is Fire Control and slot 6
-  (inventory index 5) is Cry Control.
-- Right-clicking Fire Control attempts the fireball ability. Right-clicking Cry Control attempts the
-  cry ability. The released interaction path also accepts an ordinary Fire Charge or Ghast Tear held
-  by a mounted passenger even without a control marker; retaining that compatibility is an open decision.
-- If a control slot is empty, Happy Artillery creates a temporary Fire Charge or Ghast Tear for that
-  slot. The temporary item is visibly named for its control and has an enchantment glint.
-- If a control slot already contains an item, Happy Artillery decorates that item as the relevant
-  control without consuming or replacing it.
-- Released control markers are server-readable lore data. Hidden player mixin state and a second
-  inventory copy existed as unused residue and are not accepted features.
-- Moving an item into or out of a control slot while still riding updates the marker after the
-  inventory action completes. At most one fire marker and one cry marker may remain active for that
-  rider.
-- On dismount, death, loss of the Happy Ghast, or movement outside the control slots, the released code
-  deletes temporary controls and removes its marker, custom name, and glint from ordinary items. It does
-  not preserve a pre-existing custom name or glint; safe restoration is an open rebuild decision.
-- Cleanup covers the rider's inventory and Happy Artillery-marked drops created by death. Temporary
-  controls that were moved out of their assigned slots must not survive as ordinary inventory items.
+## Product and support boundary
 
-## Fireball ability
+- **Accepted:** server-authoritative Fabric mod; clients can join and use it without installing the
+  mod. Happy Ghasts become mounted artillery with fire, cry, ammo, heat, cooling, overheat, and rider
+  presentation. Gameplay configuration is server-owned.
+- **1.2.0 target:** Minecraft 26.2, Fabric Loader >=0.19.3, Fabric API, and Java >=21. The mod id and
+  config path remain `happy-artillery` and `config/happy-artillery.json`.
+- **Released metadata:** environment `*`, main entrypoint only, MIT license, author `OG Moo-cow`, icon
+  `assets/happy-artillery/icon.png`, homepage `https://pyrehaven.xyz`, and source repository
+  `https://github.com/ff-tech-xyz/happy-artillery`.
+- `origin/main` packages only the `~26.2` runtime. README also claims historical/current publication
+  for 26.1.2 and 1.21.11; that is distribution history, not a requirement that 1.2.0 remain multi-target.
+- **Accepted runtime state:** ammo, heat, shot timing, environment mode, cry cooldowns, and display
+  handles are memory-only. A server/process restart resets them. No world/player NBT contract exists.
 
-- A valid fire input is refused while the Happy Ghast is submerged, while its shot cooldown is active,
-  when it lacks the configured ammo cost, or when it is already at its current overheat limit.
-- A normal accepted shot consumes the configured ammo cost, adds the heat amount for the current
-  environment, records the shot cooldown/restart delay, and launches one aimed large fireball from in
-  front of the Happy Ghast.
-- The fireball uses the Happy Ghast as its owner when possible, travels along the controlling rider's
-  view direction, plays the Ghast shoot sound, and uses the configured explosion power.
-- The released implementation loads 16 sampled chunks along the first 128 blocks of an accepted
-  projectile path. Whether the rebuild retains that eager loading or relies on normal projectile and
-  chunk behavior remains a rebuild decision because the public feature description promises only a
-  launched fireball, not a chunk-loading policy.
-- If Minecraft refuses to add the projectile, the released implementation substitutes a 48-block
-  ray, flame trail, and explosion. Retaining that fallback or treating projectile creation as a failed
-  shot remains a rebuild decision; it must not survive accidentally as a second mutation path.
+## Mounted controls and authorization
 
-## Ammo and shot timing
+### Accepted controls
 
-- Each Happy Ghast has its own ammo pool, keyed by the ghast UUID.
-- The default maximum is 200 ammo and a normal shot costs 1 ammo.
-- Ammo regenerates passively by 1 every 5 minutes until the configured maximum is reached.
-- The released implementation resets the delivery timestamp after each shot, so sustained firing can
-  postpone regeneration. README promises passive refill; exact delivery timing is an open correction.
-- New or previously unseen Happy Ghasts begin with a full ammo pool.
-- The default minimum interval between accepted shots is 0.25 seconds.
-- Cooling cannot begin until the default 0.5-second firing restart delay has elapsed after the latest
-  accepted shot.
-- Denied inputs do not consume ammo or restart the shot timer.
+- Hotbar slot 5 (inventory index 4) is **Fire Control**; slot 6 (index 5) is **Cry Control**.
+- Right-clicking Fire Control attempts fire. Right-clicking Cry Control attempts cry. Inputs may come
+  from either hand through item use; clicking the ridden ghast also reaches the same action path.
+- Control items are routing tokens, not ammunition. Firing does not consume the held Fire Charge or
+  decorated item; ammo is the Happy Ghast's separate state pool.
+- Released fixed identifiers are `minecraft:happy_ghast`, `minecraft:fire_charge`, and
+  `minecraft:ghast_tear`. Two additional fixed strings, `§cFire` and `§bCry`, are unused residue; the
+  visible control names come from the decoration path below.
+- Empty control slots receive one temporary Fire Charge or Ghast Tear. Occupied slots retain their
+  item and receive the corresponding control decoration.
 
-## Heat and environments
+### Released authorization conflict — open
 
-`ArtilleryState` owns one heat value and one current environment mode per Happy Ghast. Ability and
-display code read that owner; they do not calculate competing biome modes or cooling schedules.
+- Per-tick setup, display, and teardown recognize only the Happy Ghast's **first passenger** as driver.
+- The released interaction callbacks accept **any passenger** whose current vehicle is a Happy Ghast.
+  They do not check first-passenger status.
+- A marked item is accepted, but so is any ordinary `minecraft:fire_charge` or
+  `minecraft:ghast_tear`; therefore a non-driver passenger can invoke an ability without a managed
+  control item.
+- **Open:** choose first-passenger-only versus any-passenger authorization, and choose whether raw
+  Fire Charges/Ghast Tears remain compatibility inputs. Apply the same policy to setup, interaction,
+  display, and cleanup.
 
-| Mode | Selection | Default heat per shot | Default overheat limit | Default passive cooling |
+## Control-item marking, movement, and cleanup
+
+### Released marker catalog
+
+The released server-readable markers are three hidden/obfuscated lore substrings, in this catalog:
+`FireControl`, `CryControl`, `Temporary`. Detection and removal use substring matching, not exact
+line/namespace ownership. Other lore lines are retained unless they contain one of those substrings.
+
+- Fire decoration: custom name `§c🔥 Fire Control`, fire marker, and forced glint.
+- Cry decoration: custom name `§5👻 Cry Control`, cry marker, and forced glint.
+- Mod-created controls also receive the `Temporary` marker.
+
+### Accepted lifecycle
+
+- While an authorized controller rides, empty slots are populated and occupied slots are decorated.
+  Inventory movement must converge to one Fire Control in slot 5 and one Cry Control in slot 6.
+- A temporary control moved out of its assigned slot is deleted, not retained as a free item.
+- On dismount, death, loss/removal of the Happy Ghast, or control-slot movement, temporary controls are
+  deleted and surviving player-owned items lose only Happy Artillery-owned presentation.
+- Death cleanup includes Happy Artillery-marked item drops created by that player's death. Cleanup must
+  not mutate unrelated players', mobs', or pre-existing world items.
+
+### Released cleanup evidence and defects — open where noted
+
+- Driver setup runs every server tick. A separate once-per-second inventory scan removes control
+  markers outside indexes 4/5 and deletes temporary marked controls there.
+- Any mounted passenger briefly gets markers applied to occupied indexes 4/5, but the same tick's
+  driver-only path cleans a non-first passenger's controls. Empty slots are created only for the first
+  passenger.
+- Indexes 4/5 are treated as valid for either marker. The released code can leave cross-markers or both
+  markers on one item; its delayed 10 ms slot-sync queue is scheduled by a screen mixin but never
+  processed. “Exactly one correct marker per control” is accepted; the released mechanism is not.
+- Normal cleanup deletes a `Temporary` stack. For a non-temporary stack it removes fire/cry marker
+  lore, then unconditionally removes the entire custom-name and glint-override components. It does not
+  restore values that existed before riding.
+- Death is queued after respawn, waits at least 100 ms wall time, then scans **all item entities in all
+  loaded worlds** and cleans every marked stack without checking owner or death location. A second
+  whole-world drop/mob-hand cleanup method exists but is never registered.
+- **Open:** define collision-proof marker ownership and exact restoration of prior name/glint/lore;
+  define disconnect, death, drop, mob-hand, and world-item boundaries without global collateral cleanup.
+
+## Fire ability
+
+### Acceptance order and state transition
+
+A fire input is evaluated server-side in this released order:
+
+1. Happy Ghast is in water: apply the released water-cooling attempt and return failure.
+2. Current heat is already at/above the direct path's selected limit: fail.
+3. Per-ghast shot cooldown is active: fail.
+4. Per-ghast ammo is below configured cost: fail.
+5. Consume configured ammo, add configured heat, and record shot/cooling/ammo timing once.
+6. Produce either the predicted overheat result or one aimed normal shot.
+
+**Accepted:** ordinary denials consume no ammo and do not restart shot timing; cry state is untouched.
+The water denial may change heat. A state-accepted shot consumes its state transition exactly once.
+
+### Normal shot
+
+- Launch one `LargeFireball` two blocks forward in X/Z from the Happy Ghast and at its eye height,
+  aimed along the invoking rider's normalized view vector with released launch-vector scale `0.5`.
+- The Happy Ghast is the owner (the player is only a fallback if the mount is not living), explosion
+  power is configurable, and a hostile Ghast shoot sound plays at volume/pitch `1.0/1.0`.
+- Released code synchronously requests 16 chunk samples at distances 0 through 120 blocks along the
+  128-block forward path after a successful entity add. These are ordinary chunk requests, not durable
+  force-load tickets.
+- If entity add returns false, released code has already spent ammo/heat/timing and played the sound;
+  it then traces 48 blocks against block colliders (ignoring fluids), emits a flame trail, creates a
+  fire-making MOB-interaction explosion at the hit/end point, and plays the shoot sound a second time.
+- **Open:** retain or remove eager chunk loading; and choose fail/partial outcome versus the instant-ray
+  fallback when projectile add fails. Do not keep two world-mutation owners accidentally.
+
+## Ammo and timing
+
+- State is keyed by Happy Ghast UUID. An unseen ghast reads as full.
+- Defaults: maximum `200`, cost `1`, regeneration `1` per `5` minutes, shot cooldown `0.25` seconds,
+  and post-shot cooling restart delay `0.5` seconds.
+- Regeneration adds all complete elapsed intervals, caps at the configured maximum, and is advanced by
+  queries plus a global per-server-tick pass over ghasts already present in the ammo map.
+- Released `recordShot` resets the ammo-delivery timestamp. Sustained firing can indefinitely postpone
+  the next delivery, contradicting the public “regenerating passively” wording.
+- **Open:** decide whether firing postpones delivery or regeneration uses an independent cadence. Define
+  behavior for a runtime maximum reduced below current ammo and for zero/negative cost/interval values
+  together with config validation.
+
+## Heat and environment classification
+
+### Released finite mode catalog and configured defaults
+
+| Mode | Intended selection | Heat/shot | State/display limit | Configured cooling interval |
 |---|---|---:|---:|---:|
-| Normal | Other Overworld biomes | 1.0 | 60 | 1 heat per 3.0 seconds |
-| Hot | Threshold unresolved: released paths use 1.0 and 1.5 | 2.0 | 60 | 1 heat per 6.0 seconds |
-| Cold | Overworld biome temperature at most 0.0 | 0.5 | 60 | 1 heat per 1.5 seconds |
-| Nether | Nether dimension, regardless of biome temperature | 3.0 | 60 | None by default |
-| End | End dimension, regardless of biome temperature | 0.5 | 60 | 1 heat per 1.5 seconds |
+| `COLD` | Overworld temperature <=0.0 | 0.5 | `coldBiomeOverheatLimit` (60) | 1.5 s per -1 |
+| `BASE` | Other Overworld | 1.0 | `baseOverheatLimit` (60) | 3.0 s per -1 |
+| `HOT` | Hot Overworld; threshold conflict below | 2.0 | `hotBiomeOverheatLimit` (60) | 6.0 s per -1 |
+| `NETHER` | dimension id contains Nether | 3.0 | `netherOverheatLimit` (60) | none when `netherNoCooldown=true`; otherwise base interval |
+| `END` | dimension id contains End | 0.5 | **released state/display uses base limit** (60) | cold interval |
 
-- Dimension rules take priority over biome temperature in the released classification paths. The new
-  implementation must select one mode once and share it with display, shot acceptance, and cooling.
-- Intended heat does not drop below zero. Released passive cooling has competing elapsed-time and fixed
-  tick paths; the rebuild must retain the configured outcomes through one state owner.
-- When submerged, a Happy Ghast cannot fire. A fire attempt applies water cooling at 8 heat per elapsed
-  second by default. Released clamping can raise heat below the configured floor back to 5; continuous
-  cooling and non-increasing floor behavior remain open corrections.
-- Entering water does not spend ammo or start a shot cooldown.
+Dimension checks precede temperature in the display/state classifier. Heat is represented as a
+non-negative decimal. Accepted intent is that the selected mode consistently owns heat gain, limit,
+cooling, warnings, and labels.
+
+### Released classification/cooling contradictions — open
+
+- Driver display/state classifies HOT at temperature `>=1.0`; direct fire-limit prediction uses
+  `>=1.5`.
+- Direct fire-limit prediction maps Nether to the **hot** limit and End to the **cold** limit, while
+  state/display use Nether's own limit and End's **base** limit. `addFireballHeat` computes its own
+  mode limit, but the caller ignores its overheat result.
+- Only the driver display refreshes a ghast's mode. A non-driver/raw-item action may use stale or BASE
+  state while its direct limit uses the current world.
+- Elapsed-time cooling honors configured mode intervals, but a second loaded-entity scan subtracts one
+  heat whenever world game time is divisible by 60 after the restart delay. That second path ignores
+  mode and configuration, cools Nether despite `netherNoCooldown=true`, and can combine with the first
+  path. A third configurable cooling method exists but is never called.
+- **Open:** select HOT threshold; select End limit; use Nether's own limit; and replace competing paths
+  with one classification/cooling schedule. Public/configured outcomes (including no passive Nether
+  cooling by default) are the accepted intent, not the accidental fixed 60-tick subtraction.
+
+## Water cooling
+
+- Fire and cry use `Entity.isInWater()` as the released water test. Both are denied in water; only a
+  fire attempt invokes water cooling.
+- Default water rate is `8` heat per whole elapsed second and floor is `5`. The elapsed anchor is the
+  shared last-heat-update timestamp; sub-second attempts do nothing.
+- Released clamping uses `max(floor, current - amount)`, so a zero-heat ghast can be raised to 5 after
+  enough elapsed time. Entering water alone does not cool; repeated fire attempts drive cooling.
+- **Open:** decide attempt-driven versus continuous cooling, exact water predicate, and whether the
+  floor is only a lower bound for decreasing positive heat. Water denial never spends ammo or records
+  a shot.
 
 ## Overheat
 
-- The shot that reaches the current environment's overheat limit triggers the overheat result instead
-  of launching a normal aimed fireball.
-- Released overheat prediction uses hard-coded `currentHeat + 1`, then applies the configured heat
-  amount. Using the configured amount consistently is an open correction.
-- The default overheat result creates a power-4 explosion two blocks in front of the Happy Ghast and
-  creates fire when `overheatExplosionCreatesFire` is enabled.
-- The established spectacle also emits 48 outward large fireballs in a deterministic sphere pattern
-  and attempts a small ring of nearby fire placements on supported air blocks.
-- The triggering shot consumes its configured ammo and records its shot timing exactly once.
-- The rebuild must define and test the post-overheat heat value before enabling gameplay. The old code
-  leaves the ghast at or above its limit indefinitely; that is a known incomplete behavior, not an
-  accepted recovery rule.
+- **Accepted spectacle:** the threshold-triggering shot spends ammo/adds heat/records timing once, then
+  creates a configurable main explosion two blocks forward at mount eye height, 48 outward large
+  fireballs in deterministic golden-spiral order, a hostile Ghast shoot sound at `2.0/0.8`, and up to
+  15 random supported fire placements within radius 5 and roughly +/-1 Y.
+- Main explosion uses TNT interaction, null source, configurable power (default `4.0`), and configurable
+  fire creation (default `true`). Sphere fireballs use normal fireball power (default `2`) and the
+  Happy Ghast as owner; individual add failures are ignored.
+- Released prediction is `currentHeat + 1 >= directLimit`, regardless of configured heat per shot.
+  Actual heat addition uses the configured mode amount. A configured amount greater than 1 can cross
+  the state limit without triggering spectacle; the next input is then permanently denied.
+- Released overheat does not reset heat. At or above the direct limit all later fire inputs are denied,
+  so recovery depends on whatever passive/water cooling happens to run.
+- **Open:** use one configured threshold calculation; define post-overheat heat/recovery; and define
+  partial failure semantics for explosion, sphere projectiles, and fire placement before enabling it.
 
 ## Cry ability
 
-- Cry Control plays the Happy Ghast scream sound at pitch 0.8 and the configured volume, which defaults
-  to 3.0.
-- Cry is blocked while the Happy Ghast is submerged.
-- Cry has a 10-second default cooldown keyed by the controlling player's UUID.
-- Only a successful cry starts the cooldown. Cry does not consume fireball ammo or add heat.
+- A valid cry plays `GHAST_SCREAM` at the Happy Ghast position, hostile sound source, pitch `0.8`, and
+  configured volume (default `3.0`). It consumes no ammo and adds no heat.
+- Water denies cry. Cooldown is keyed by invoking player UUID, defaults to `10.0` seconds, and is
+  recorded immediately before world lookup/sound playback.
+- **Accepted:** ordinary denial does not start cooldown. **Released partial-failure evidence:** a
+  world-access or sound exception after `recordCry` can consume cooldown without producing sound.
 
-## Rider display
+## Rider presentation
 
-- The controlling rider receives one heat boss bar while controlling a Happy Ghast. Its value is the
-  current heat divided by the current environment's overheat limit.
-- The boss bar title shows `Heat: current/limit`. It is green normally, blue in cold conditions, yellow
-  in hot conditions or within 15 heat of overheat, and red within 5 heat of overheat.
-- The action bar shows current ammo and maximum ammo. When the ghast is not in its firing restart delay,
-  it also shows normal, fast, slow, or no cooling according to the same environment mode used by state.
-- The action bar warns within 15 heat of overheat and shows an urgent overheat warning within 5.
-- Warning particles increase near overheat. They are presentation only and never mutate heat or decide
-  whether an ability is accepted.
-- Released boss bars are removed when the rider is observed no longer driving. Complete disconnect,
-  death, entity-removal, and map-eviction behavior is not guaranteed and remains a rebuild decision.
+- The first passenger receives one per-player/per-ghast heat boss bar while recognized as driver.
+  Progress is `min(1, heat/limit)` and title is `Heat: current/limit`, with heat rounded to nearest 0.5
+  and a trailing `.0` omitted.
+- Color priority: red at <=5 heat remaining; yellow at <=15; otherwise yellow for HOT/NETHER, blue for
+  COLD, and green for BASE/END. Thus released End presentation is green, not cold-blue.
+- Every tick the action bar shows `Ammo: current/max`: green at >=100, gold at 50-99, red below 50.
+  After the restart delay it appends no/fast/slow/normal cooling for NETHER/COLD/HOT/other. Released
+  End says **Normal cooling** even though its state uses the cold interval.
+- It appends `OVERHEATING!` at <=5 remaining or `⚠ Warning` at <=15. At <=10 remaining it emits
+  FIREWORK particles, `(11 - remaining) * 2` per tick, at the mount's eye region.
+- Presentation reads state; it must not mutate combat policy. Released display currently updates the
+  ghast mode and therefore influences later combat.
+- Bars are removed when a connected player is observed not driving or the displayed vehicle is
+  null/removed. There is no explicit disconnect/server-stop/entity-removal eviction; static maps can
+  retain stale state. Exact lifecycle cleanup is open.
 
-## Configuration
+## Configuration contract
 
-`HappyArtilleryConfig` is the only owner of `config/happy-artillery.json`. A missing file creates a
-complete default file. Configuration is read during server startup; changes take effect after restart.
-The released loader is permissive: omitted fields keep their Java defaults, an empty JSON document or
-an I/O read failure uses defaults, and every startup rewrites the file with every known field. Malformed
-JSON can fail startup. Numeric ranges and relationships are not currently validated; stricter schema
-validation is a separate rebuild decision, not preserved behavior.
+`config/happy-artillery.json` has exactly these 24 released fields and defaults:
 
-| Field | Default | Contract |
+| Field | Default | Released consumer |
 |---|---:|---|
-| `fireballAmmoMax` | `200` | Per-ghast ammo capacity and initial ammo |
-| `fireballAmmoCost` | `1` | Ammo consumed by an accepted shot or overheat trigger |
-| `ammoDeliveryIntervalMin` | `5` | Minutes per point of passive ammo regeneration |
-| `shootCooldownSeconds` | `0.25` | Minimum interval between accepted shots |
-| `fireRestartDelaySeconds` | `0.5` | Delay after firing before passive heat cooling resumes |
-| `cryCooldownSeconds` | `10.0` | Successful cry cooldown per controlling player |
-| `baseOverheatLimit` | `60` | Normal-mode heat limit |
-| `baseHeatPerShot` | `1.0` | Normal-mode heat added per shot |
-| `baseCoolIntervalSeconds` | `3.0` | Seconds per heat removed in normal mode |
-| `hotBiomeOverheatLimit` | `60` | Hot-mode heat limit |
-| `hotBiomeHeatPerShot` | `2.0` | Hot-mode heat added per shot |
-| `hotBiomeCoolIntervalSeconds` | `6.0` | Seconds per heat removed in hot mode |
-| `coldBiomeOverheatLimit` | `60` | Cold/End heat limit |
-| `coldBiomeHeatPerShot` | `0.5` | Cold/End heat added per shot |
-| `coldBiomeCoolIntervalSeconds` | `1.5` | Seconds per heat removed in cold/End mode |
-| `netherOverheatLimit` | `60` | Nether heat limit |
-| `netherHeatPerShot` | `3.0` | Nether heat added per shot |
-| `netherNoCooldown` | `true` | Disables passive Nether cooling when true |
-| `waterCooldownRate` | `8` | Heat removed per elapsed second in water |
-| `waterCooldownLimit` | `5` | Lowest heat reachable through water cooling |
-| `fireballExplosionPower` | `2` | Normal and emitted overheat-fireball power |
-| `overheatExplosionPower` | `4.0` | Main overheat explosion power |
-| `overheatExplosionCreatesFire` | `true` | Whether the main overheat explosion creates fire |
-| `cryVolume` | `3.0` | Ghast scream volume for a successful cry |
+| `fireballAmmoMax` | `200` | initial/capped per-ghast ammo |
+| `fireballAmmoCost` | `1` | accepted fire/overheat cost |
+| `ammoDeliveryIntervalMin` | `5` | minutes per regenerated ammo |
+| `shootCooldownSeconds` | `0.25` | per-ghast fire interval |
+| `fireRestartDelaySeconds` | `0.5` | delay before passive cooling |
+| `cryCooldownSeconds` | `10.0` | per-player cry interval |
+| `baseOverheatLimit` | `60` | BASE and released END state/display limit |
+| `baseHeatPerShot` | `1.0` | BASE heat |
+| `baseCoolIntervalSeconds` | `3.0` | BASE; Nether when cooling enabled |
+| `hotBiomeOverheatLimit` | `60` | HOT and released direct Nether limit |
+| `hotBiomeHeatPerShot` | `2.0` | HOT heat |
+| `hotBiomeCoolIntervalSeconds` | `6.0` | HOT cooling |
+| `coldBiomeOverheatLimit` | `60` | COLD and released direct End limit |
+| `coldBiomeHeatPerShot` | `0.5` | COLD/END heat |
+| `coldBiomeCoolIntervalSeconds` | `1.5` | COLD/END cooling |
+| `netherOverheatLimit` | `60` | NETHER state/display limit |
+| `netherHeatPerShot` | `3.0` | NETHER heat |
+| `netherNoCooldown` | `true` | intended NETHER passive-cooling switch |
+| `waterCooldownRate` | `8` | heat per whole elapsed second |
+| `waterCooldownLimit` | `5` | released water clamp floor |
+| `fireballExplosionPower` | `2` | normal/fallback/sphere projectile power |
+| `overheatExplosionPower` | `4.0` | main overheat explosion power |
+| `overheatExplosionCreatesFire` | `true` | main overheat fire flag |
+| `cryVolume` | `3.0` | successful cry volume |
 
-## Failure and lifecycle contract
+Released load/save semantics:
 
-- Expected denials leave inventory ownership, ammo, heat, cooldowns, and the world unchanged except
-  that a submerged ghast may receive its accepted water-cooling update.
-- Each server callback has one named owner. The entrypoint wires it once; no mixin, tick handler, or
-  fallback registers a competing path for the same behavior.
-- The released implementation catches several tick/inventory exceptions and continues, and one global
-  tick path samples repeated error logging. The rebuild must decide where recovery is valid and where
-  startup or the current action should fail; silent catch-all handling is not automatically preserved.
-- The released runtime maps do not have a complete removal lifecycle and its passive work scans loaded
-  entities. Bounded state cleanup and narrower iteration are required architecture decisions before
-  implementation, not features already promised by the released mod.
-- The `/happytest` debug command is not part of the released product contract and is not retained in
-  the clean architecture.
+- Load once during mod initialization. Missing file, empty input/JSON `null`, or omitted fields use
+  Java defaults. Unknown fields are ignored and disappear on rewrite.
+- Every successful/defaulted load rewrites a pretty-printed file containing all known fields. A read
+  `IOException` logs a warning, uses defaults, then attempts that rewrite.
+- Malformed/type-invalid JSON is not caught by the I/O-only handler and can abort initialization.
+  A save `IOException` is logged and startup continues with in-memory settings.
+- No ranges, finiteness, signs, cross-field relationships, or runtime reload are validated. Gson's
+  released coercion/duplicate-key behavior has not been accepted as a 1.2.0 schema promise.
+- **Open:** validation and failure policy. Do not silently clamp, coerce, repair, or default malformed
+  configured values without an accepted decision.
 
-## Rebuild decisions still open
+## Lifecycle, failure, commands, and operational residue
 
-These implementation conflicts are deliberately not settled by the structural checkpoint:
+- Released callbacks: two item/entity interaction callbacks; two end-server-tick callbacks; one
+  after-respawn callback; and one inventory-click mixin. The rebuild must register one owner per
+  accepted behavior and remove competing/dead paths.
+- Gameplay maps are static/process-wide, UUID keyed, shared across dimensions, and never evicted.
+  Loaded-world entity and item scans can be global. Bounded iteration and cleanup are required design
+  decisions, but no persistence or eviction behavior is implicitly accepted.
+- Interaction `PASS` means unrelated input; expected ability denial returns `FAIL`; state-accepted
+  fire/cry returns `SUCCESS`. Released fire state is committed before world mutation and has no
+  rollback. Runtime exceptions can therefore leave partial state/world effects.
+- Tick/inventory/display paths catch broad exceptions and continue. The second global tick callback
+  catches `Throwable` and logs only a random ~0.1% sample. This is released diagnostic behavior, not
+  an accepted silent-failure policy.
+- Released `/happytest` is an unrestricted, player-only debug command. It can create/decorate controls
+  in indexes 4/5 regardless of riding state, reports details to the player, and logs inventory data.
+  It has no production feature or permission contract and must not ship in 1.2.0 unless explicitly
+  accepted. No other commands or permission nodes exist.
+- Released routine logging includes per-tick INFO setup messages for each driver. 1.1.2.2 removed only
+  one routine cleanup-slot inspection INFO line; actual cleanup messages remain. Per-tick debug/log
+  residue is not accepted presentation.
+- Unused released residue includes duplicate injected player inventory state with no persistence,
+  empty entity/state shells, unused imported callbacks, unprocessed delayed slot-sync state, unused
+  position state, and unregistered cleanup/cooling helpers. None is a feature or compatibility API.
 
-- Hot-biome selection is inconsistent: fire acceptance treats temperature `>= 1.5` as hot while the
-  display/state path uses `>= 1.0`. Implementation must select one before executable behavior lands.
-- Control setup is driver-only, while released interaction callbacks also permit other mounted
-  passengers and unmarked Fire Charges/Ghast Tears. Authorization and compatibility must be explicit.
-- Released cleanup can erase a pre-existing item name/glint and uses broad lore-substring markers.
-  Safe marker ownership and restoration need an accepted contract and regression tests.
-- Released overheat prediction uses hard-coded `+1` rather than the configured heat-per-shot value.
-- Released shots reset the ammo-delivery timestamp, which can postpone otherwise passive regeneration.
-- Released water cooling is triggered only by submerged fire attempts and can raise heat to its floor.
-- The post-overheat heat value and recovery path are undefined in the released code.
-- Projectile add failure currently becomes an instant-ray explosion, and successful shots eagerly load
-  a 128-block path. Neither behavior appears in the public description.
-- Config range/schema validation, runtime-state eviction, and broad inventory/world cleanup boundaries
-  need explicit tests before the new owners are implemented.
+## Open decisions that block implementation
+
+1. First passenger versus any passenger; marked-only versus raw-item compatibility.
+2. Exact marker ownership/restoration and inventory/drop/death/disconnect cleanup boundaries.
+3. HOT threshold, End limit/presentation, Nether limit, and a single environment/cooling owner.
+4. Ammo delivery cadence relative to firing.
+5. Attempt-driven versus continuous water cooling, water predicate, and non-increasing floor behavior.
+6. Configured overheat prediction and post-overheat recovery.
+7. Projectile-add failure, eager chunk requests, and partial world-mutation outcomes.
+8. Config validation/coercion/startup failure policy.
+9. Runtime state/boss-bar eviction and bounded loaded-world work.
+
+## Provenance and audit notes
+
+- Primary released baseline: `origin/main` at `8da306889e6b156f38a1061fc0f90ddbd0f5aedf`
+  (merged 1.1.2.2 implementation and metadata).
+- Release history checked: `v1.1.2` (tag object `d3101428f9565cd16e609c2ce22c161d486adc4b`,
+  commit `2545d27`) and `v1.1.2.2` (`4eae0d63bf2d160ed15845d6c9357d2b822c9acd`).
+  The only gameplay-source delta after v1.1.2 is removal of one routine cleanup log line.
+- Public evidence checked: released/current README, CHANGELOG, Fabric metadata, Gradle target/version,
+  and the full removed Java/mixin implementation via `git show`.
+- Mechanical catalog audit: 24/24 config fields/defaults, 5/5 ordered `BiomeType` values
+  (`COLD, BASE, HOT, NETHER, END`), 3/3 lore marker values, and 5/5 fixed identifiers/names were
+  extracted from released source and represented here. The catalog names/counts are completeness
+  evidence; their contradictory consumers remain explicitly documented above.
