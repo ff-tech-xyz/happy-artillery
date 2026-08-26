@@ -24,31 +24,36 @@ diff checks; scan for old owners, static maps, wall clocks, duplicate callbacks,
 effects, silent catches, secrets, and unexpected dependency/toolchain changes. Any changed final byte
 invalidates earlier evidence. Push only after the coordinator verifies the exact commit.
 
-JUnit is an accepted requirement in the supplied specification. The build-support slice must pin the
-smallest existing-compatible JUnit dependency and make `test` part of `check`; it may not change Loom,
-Minecraft, Fabric, mappings, Gradle, or Java versions.
+JUnit and Fabric's data-attachment API are accepted build requirements. The build-support slice must
+pin the smallest existing-compatible JUnit dependency, make `test` part of `check`, and add explicit
+compile support for the attachment API from the already-pinned Fabric API line before attachment source
+is written. It may not change Loom, Minecraft, Fabric, mappings, Gradle, or Java versions.
 
 ## Settled assumptions carried into implementation
 
-- The proposed tree has thirteen production Java files: eleven named non-mixin owners plus the missing
-  `Ammo` owner and the one `SlotGuardMixin`.
-- The nine test files are grouped by risk: attachment codecs share `PersistenceTest`; component and mixin
-  risks live in `ControlsTest`; feedback lives in `AbilitiesTest`; only pure/config/model boundaries keep
-  dedicated suites.
-- `GhastState` includes per-ghast cry and pending-fuse timing. `Ammo` owns optional ammo transitions.
+- The proposed tree has twelve production Java files: the eleven declared non-mixin owners plus the one
+  `SlotGuardMixin`.
+- The eight test files are grouped by risk: attachment codecs share `PersistenceTest`; component and
+  mixin risks live in `ControlsTest`; feedback lives in
+  `AbilitiesTest`; only coherent pure/config/model boundaries keep dedicated suites.
+- `GhastState` includes per-ghast cry and pending-fuse timing. `Abilities` solely owns fuse task
+  scheduling and load-time re-establishment.
 - All persistent timing uses saved Overworld `gameTime`: heat has a consumed-through anchor and firing
-  window end; ammo has a complete-interval anchor; cry and fuse use durable deadlines. Process-local
-  ticks and wall time are forbidden, and every advance consumes elapsed ticks exactly once.
+  window end, while cry and fuse use durable deadlines. Process-local ticks and wall time are forbidden,
+  and every advance consumes elapsed ticks exactly once.
 - Each active RiderState stash persists its original fire/cry slot indexes. Reloaded slots apply only to
   a later ride; restoration, locking, and active control lookup use the persisted indexes.
-- Passengers receive read-only HUD; only the pilot advances state or abilities.
+- Passengers receive read-only HUD; only the pilot advances state or abilities. `NOT_PILOT` remains a
+  silent authorization result, not an unreachable passenger-feedback promise.
 - `Components` defines, catalogs, and registers its types; `HappyArtillery` only invokes that owner while
   composing the graph.
-- Protection-visible explosions/fire placement, pre-drop restoration, and the hold-to-fire Java +
-  Bedrock gate are mandatory, not later polish.
+- Protection-visible explosions/fire placement, pre-drop restoration, Java + Bedrock hold behavior,
+  and HUD packet bounds are mandatory final-candidate gates, not later polish. Guarded slices prove
+  their seams automatically but do not claim integrated gameplay evidence.
 - The fail-loud requirement prevents a committed partial server from running. Attachment persistence is
-  first proven automatically by codec/attachment round-trip. A disposable, never-committed instrumented
-  spike may disable the guard for API/manual evidence, but the committed checkpoint must restore it.
+  first proven automatically by codec/attachment round-trip. A disposable, never-committed compile/API
+  spike may disable the guard only to resolve framework signatures, but the committed checkpoint must
+  restore it and cannot claim integrated gameplay evidence.
   Exact-head restart persistence remains the first blocking runtime check after final activation.
 
 ## Dependency-ordered slices
@@ -73,15 +78,19 @@ gameplay or callback behavior. Preserve deliberate startup failure and non-deplo
 sources jar inspection, and isolated `runServer` log proving the declared entrypoint fails with the exact
 deliberate exception. Commit `refactor(scaffold): align settled owner tree` and push. No human test.
 
-### Slice 2 — Config, presets, and JUnit build support
+### Slice 2 — Config and required build support
 
-Implement `Config` and `ConfigTest`; configure the accepted JUnit test task without changing the
-toolchain. Cover the complete nested schema/defaults, preset-before-explicit precedence, missing file/key
-rewrite, unknown-key removal, identifier/range/cross-field validation, strict startup failure, atomic
-call-time reads, distinct in-range fire/cry slot validation, and failed-reload last-known-good behavior.
+Before attachment implementation, add explicit compile support for Fabric's data-attachment API from
+the pinned Fabric API 26.2 line. Implement `Config` and `ConfigTest`; configure the accepted JUnit test
+task without changing the toolchain. Cover the complete nested schema/defaults, preset-before-explicit
+precedence, missing-file creation and missing-key rewrite, unknown-key removal after successful parsing,
+identifier/range/cross-field validation, loud startup failure for every malformed/invalid existing-file
+case, atomic call-time reads, distinct in-range fire/cry slots, and failed-reload retention of the exact
+previous valid value without rewriting the invalid file.
 
 **RED:** focused config assertions fail against the empty owner. **GREEN:** focused config tests, full
-tests, clean build, serialized complete-default comparison, and single config-I/O owner search. Commit
+tests, clean build, attachment-API compile-resolution proof, serialized complete-default comparison, and
+single config-I/O owner search. Commit
 `feat(config): define 1.2.0 settings` and push. Remains non-deployable.
 
 ### Slice 3 — One biome classifier
@@ -97,46 +106,39 @@ proving no other production file classifies dimension or temperature. Commit
 
 Implement immutable `GhastState` and `RiderState` records/codecs. Each state owner defines/registers its
 persistent attachment type, and the composition root invokes those registration entries without owning
-their definitions or registering gameplay. Include heat/heat-anchor/firing-window, ammo/regen-anchor,
+their definitions or registering gameplay. Include heat/heat-anchor/firing-window and
 cry-ready/fuse-deadline Overworld game ticks, byte-exact two-stack stash with original slot indexes,
 ridden id, input dedup tick, and serializable HUD cache.
 
-**RED:** grouped `PersistenceTest` fresh-state, codec, indexed ItemStack, attachment replacement, durable
-tick continuity, and encode/decode assertions fail first. **GREEN:** focused/full tests, clean build,
+**RED:** grouped `PersistenceTest` fresh-state, codec, indexed ItemStack, attachment replacement,
+durable-tick continuity, and encode/decode assertions fail first. **GREEN:** focused/full tests, clean build,
 serialization round-trips, immutable replacement proof, and search proving no static gameplay map,
 process-local persisted tick, or wall clock. If API names need proof, use a disposable
 instrumented run and restore the fail-loud final bytes. Commit `feat(state): persist ghast and rider state`
 and push. A real restart proof is still required at Slice 13 before any gameplay claim.
 
-### Slice 5 — Pure heat and optional ammo
+### Slice 5 — Pure heat integration
 
-Implement `Heat`, `Ammo`, and their tests without world/entity access. Take one tracer behavior at a
-time: each biome's sustained curve; exact-limit detonation; firing window; water-before-Nether ordering;
-non-double-counted per-tick advance; unload/restart continuity in saved game time; disabled ammo;
-independent complete-interval regeneration with retained remainder; caps; and spend.
+Implement `Heat` and `HeatTest` without world/entity access. Take one tracer behavior at a time: each
+biome's sustained curve; exact-limit detonation; firing window; water-before-Nether ordering; and
+non-double-counted per-tick, unload, and restart advances in saved game time.
 
 **RED/GREEN:** every pure transition assertion must be observed failing then passing. Run focused heat
-and ammo tests, full tests, clean build, and searches proving `Heat` owns the only limit comparison and
-`Ammo` owns every ammo calculation. Commit `feat(state): implement heat and optional ammo` and push.
+tests, full tests, clean build, and searches proving `Heat` owns the only limit comparison. Commit
+`feat(state): implement anchored heat` and push.
 Remains non-deployable.
 
-### Slice 6 — Resolve the hold-to-fire gate
+### Slice 6 — Prove the hold-input seam while guarded
 
-This is a spike and decision checkpoint, not feature implementation. In a disposable runtime/worktree
-build, confirm the exact 26.2 consumable component API and hold behavior. Test one Java client and one
-Bedrock client through Geyser in the same session; measure accepted shots over time and require a steady
-configured four per second without packet-rate dependence.
+Confirm the exact 26.2 consumable component API and implement an automated server-observed use-state seam
+while the artifact remains guarded. Tests must prove long-duration use, no animation/sound side effect,
+release cancellation, and tick/cooldown-based intent independent of packet frequency. A disposable API
+spike may resolve mapped signatures, but Java/Bedrock rate evidence is deliberately deferred until the
+complete graph produces runnable exact-candidate bytes in Slice 13.
 
-- If it passes, retain 0.25 seconds and the preferred per-shot defaults.
-- If it fails, reject packet heuristics, select click-to-fire at 0.5 seconds, double every per-shot heat
-  default, and update config/heat tests plus `FEATURES.md` in a reviewed GREEN checkpoint.
-
-Whichever result is selected, update `FEATURES.md` with the exact chosen contract, defaults, Java and
-Bedrock observations, and retained/fallback test expectations. Remove disposable instrumentation; run
-affected config/heat tests, full tests, clean build, fail-loud startup, and exact diff checks; obtain a
-fresh final-byte review; commit `docs(controls): settle hold-to-fire path` (including any required
-config/heat changes) and push it. Slice 7 cannot start until that exact decision checkpoint is remotely
-reachable. No hand-waved, Java-only, unreviewed, or merely local result passes this gate.
+Retain the preferred 0.25-second/default-heat contract provisionally. Remove disposable instrumentation;
+run affected controls/config/heat tests, full tests, clean build, fail-loud startup, and exact diff
+checks. Commit `feat(controls): establish hold input seam` and push. Packet-rate heuristics are forbidden.
 
 ### Slice 7 — Components, controls, and pre-drop restoration
 
@@ -147,38 +149,31 @@ exactly two mount/two restore writes; byte-exact indexed stash; active-ride relo
 indexes for lookup, locking, and restoration; next-ride adoption of new indexes; scoped creative cleanup;
 pre-drop death restoration; and every click/drop/swap cancellation route.
 
-**RED/GREEN:** automate owner logic and injection decisions first. Then run a disposable Java + Bedrock
-Geyser session for the complete abuse list: named/full inventories, death, logout, ghast removal, hard
-server stop, dimension change, all slot movements, two riders, creative duplication, plain-item denial,
-live slot reload during a ride followed by a new ride, and Bedrock ghost-item checks. The pre-drop API
-must be observed restoring before vanilla drops; a tick
-backstop alone fails. Restore fail-loud final bytes, run focused/full tests and clean build, commit
+**RED/GREEN:** automate owner logic, injection decisions, and pre-drop-before-drop ordering through
+framework seams. A tick backstop alone fails. Run focused/full tests and clean build, commit
 `feat(controls): swap and protect pilot controls`, and push.
 
 ### Slice 8 — Normal fire admission and projectile
 
 Implement only normal fire admission and its one projectile path in `Abilities`, one vertical behavior at
-a time. Group tests in `AbilitiesTest`: pilot/water/cooldown/ammo gates, sealed fired/rejected outcomes,
-advance-before-shot anchored heat, exactly-once heat/ammo/cooldown mutation, projectile geometry/speed,
+a time. Group tests in `AbilitiesTest`: pilot/water/cooldown gates, sealed fired/rejected outcomes,
+advance-before-shot anchored heat, exactly-once heat/cooldown mutation, projectile geometry/speed,
 entity-add failure, and absence of eager chunk loading or instant-ray/direct fallback.
 
-**RED/GREEN:** each automatable admission/projectile assertion fails then passes. Manually prove on a
-disposable Java + Bedrock session that the selected input contract produces one admitted shot at the
-configured cadence and the normal projectile explosion presents the rider as cause to a real claims
-integration. A protection veto may suppress block damage without creating another projectile/effect path.
-Run focused/full tests, clean build, mutation accounting, and alternate-fire-path searches. Commit
+**RED/GREEN:** each admission/projectile assertion and protection-adapter seam fails then passes. A veto
+must suppress block damage without creating another projectile/effect path. Run focused/full tests,
+clean build, mutation accounting, and alternate-fire-path searches. Commit
 `feat(abilities): admit and fire projectiles` and push. Remains non-deployable.
 
 ### Slice 9 — Cry and rejection feedback
 
 Implement per-ghast cry admission/effect and `Feedback`, with all feedback risks grouped in
-`AbilitiesTest`. Cover pilot/water/disabled/cooldown gates, saved-game-time `cryReadyTick`, accepted-sound
-commit only, no mechanical side effect, visible `IN_WATER`/`NO_AMMO`/`NOT_PILOT` mappings, and silent
-`ON_COOLDOWN`.
+`AbilitiesTest`. Cover pilot/water/disabled/cooldown gates, saved-game-time `cryReadyTick`,
+accepted-sound commit only, no mechanical side effect, visible `IN_WATER` mapping, and silent
+`ON_COOLDOWN`/`NOT_PILOT` authorization outcomes.
 
-**RED/GREEN:** each gate, deadline, accepted effect, and feedback mapping fails then passes. Manually
-confirm Java + Bedrock hear one ghast-position hostile scream and ordinary rejection feedback while
-cooldown polling remains silent. Run focused/full tests, clean build, sound/attachment mutation accounting,
+**RED/GREEN:** each gate, deadline, accepted effect, and feedback mapping fails then passes through
+automated seams. Run focused/full tests, clean build, sound/attachment mutation accounting,
 and searches for a second feedback or cry owner. Commit `feat(abilities): add cry and feedback` and push.
 Remains non-deployable.
 
@@ -186,14 +181,19 @@ Remains non-deployable.
 
 Implement only overheat crossing, durable pending fuse, and detonation effects in `Abilities`. Cover the
 single limit-comparison result, pending-shot lockout, saved-game-time `detonateAtTick` across unload and
-restart, exactly-once explosion/sphere/fire/removal, configured counts/geometry, and
-`killsGhast=false` reset.
+restart, exactly-once explosion/sphere/fire effects, configured counts/geometry, conditional removal when
+`killsGhast=true`, and retained-ghast heat/pending reset when `killsGhast=false`. `Abilities` must be the
+only scheduling owner: fuse acceptance submits the
+absolute deadline through the server task queue; a ghast-load entrypoint in the same owner re-establishes
+an overdue or future task from the attachment; and execution re-reads the current deadline before acting.
+Dismount leaves the task live. Unload may make a queued execution a no-op, with entity load as the one
+bounded wake-up. Do not add a player-tick fuse check, parallel poller, loaded-entity scan, or second queue.
 
-**RED/GREEN:** every automatable transition/adapter assertion fails then passes. Before GREEN, prove exact
-Minecraft 26.2 and real claims-plugin behavior for the overheat explosion and each fire placement: rider
-cause, independent veto, no direct block mutation, bypass, fallback, or silent recovery. Also hard-stop and
-restart a pending fuse and observe that stopped time does not count and the resumed deadline detonates once.
-Run focused/full tests, clean build, complete effect-mutation accounting, and alternate-effect-path searches.
+**RED/GREEN:** every transition, scheduling, reload wake-up, stale-task, and protection-adapter assertion
+fails then passes. Simulate dismount, unload before deadline, load before/after deadline, duplicate load
+callbacks, and restart reconstruction; each pending fuse must have one effective detonation and bounded
+queued work. Run focused/full tests, clean build, complete effect-mutation accounting, and
+alternate-effect/scheduler searches.
 Commit `feat(abilities): integrate protected overheat` and push. Remains non-deployable.
 
 ### Slice 11 — Read-only pilot and passenger HUD
@@ -203,9 +203,10 @@ priority, and bounded handle cleanup. Update pilots and passengers from one post
 passengers cannot advance or alter it.
 
 **RED:** tests fail for creation/removal counts, no remove-add pair, changed-value updates, colors,
-warning threshold, ammo-disabled text, passenger visibility, and teardown. Include a mutation guard proving
-HUD cannot change state or classify again. **GREEN:** focused/full tests, clean build, and a packet capture
-showing single-digit HUD updates per rider/second. Commit `feat(hud): show artillery status` and push.
+warning threshold, heat-status text, passenger visibility, and teardown. Include a mutation guard proving
+HUD cannot change state or classify again. **GREEN:** focused/full tests, clean build, and deterministic
+packet-send-count assertions showing the configured throttle cannot exceed single digits per
+rider/second. Real packet capture waits for Slice 13. Commit `feat(hud): show artillery status` and push.
 Remains non-deployable.
 
 ### Slice 12 — Wire the complete driver while guarded
@@ -213,8 +214,9 @@ Remains non-deployable.
 Implement the final `HappyArtillery` owner graph and integration tests behind the deliberate startup
 guard. The designed runtime order is: read saved Overworld game time once; reconcile all players; process
 each ridden ghast once through its pilot using one biome context; then render pilot/passenger HUD from the
-resulting snapshot. Invoke each callback, attachment, and component owner's registration entry exactly
-once; register the mixin path, death hook, and server-stop cleanup exactly once.
+result snapshot. Invoke each callback, attachment, and component owner's registration entry exactly
+once; register the mixin path, death hook, ghast-load callback, and server-stop cleanup exactly once.
+The load callback delegates pending-fuse wake-up to `Abilities`; the player driver never polls fuses.
 
 **RED:** integration tests fail on missing registrations/order. **GREEN:** focused/full tests, clean build,
 registration enumeration, durable clock-context proof, and a no-rider harness proving exactly one bounded
@@ -225,26 +227,45 @@ remain undeployable.
 
 ### Slice 13 — Activate and prove the complete candidate
 
-Prerequisites: Slices 1-12 are pushed GREEN, the hold path is durably reviewed/committed/pushed,
-protection and controls manual gates passed, and independent architecture/behavior reviews found no hidden
-second owner.
+Prerequisites: Slices 1-12 are pushed GREEN and independent architecture/behavior reviews find no hidden
+second owner. Integrated Java/Bedrock, claims, packet, restart, and gameplay evidence is intentionally
+not a prerequisite because guarded bytes were not runnable.
 
 **RED:** an integration assertion requires normal startup while the deliberate guard still fails.
 **GREEN:** remove only the guard/non-deployable naming, register the already-complete graph, and retain
 truthful 26.2-only metadata. Add the op-only `/ha reload`; do not add `/happytest`.
 
-On final bytes run every focused test, full JUnit suite, `./gradlew clean build`, exact-tree/residue and
-mutation accounting, runtime/sources jar inspection, embedded metadata validation, secret scan, and an
-isolated server startup. Commit `feat: activate Happy Artillery 1.2.0` and push the exact non-main head.
+On the runnable candidate bytes run every focused test, full JUnit suite, `./gradlew clean build`,
+exact-tree/residue and mutation accounting, runtime/sources jar inspection, embedded metadata validation,
+secret scan, and an isolated server startup. Obtain a fresh independent architecture/behavior review of
+those exact machine-green bytes. Resolve every blocker and rerun invalidated gates and review; then commit
+`feat: activate Happy Artillery 1.2.0`, push it to the existing non-`main` branch, and verify the local,
+tracking, and remote head identities. This reviewed, committed, and pushed head is the first activation
+candidate. No uncommitted activation candidate may be deployed.
 
-The first runtime gate is attachment persistence: set heat, ammo remainder, cry cooldown, pending fuse,
-and indexed stash state using controlled test support; unload/reload and hard-stop/restart; prove saved
+Build the runtime jar from that exact committed head, deploy it through `pyretest`, record the commit and
+source-tree identity, match built/deployed checksums, and verify startup logs before manual testing. The
+first integrated runtime gate is attachment persistence: set heat, cry cooldown, pending fuse, and indexed
+stash state using controlled test support; unload/reload and hard-stop/restart; prove saved
 Overworld-game-time continuity, no stopped-time advancement, one-time heat catch-up without double cooling,
-exact deadlines, and byte-exact original-slot restoration. Failure stops all later tests. Then deploy the
-exact committed jar through `pyretest`, match source/deployed checksums, verify startup logs, and run the
-full Java + Bedrock abuse list, normal fire, every biome/water curve, optional ammo, per-ghast cry, hold rate,
-instant/fused overheat, protection vetoes, HUD packet rate, cleanup, and bounded idle-work profiler tests.
-A startup pass alone is not gameplay acceptance.
+exact deadlines, and byte-exact original-slot restoration. Failure stops all later tests. On that same
+exact head, run the full Java + Bedrock abuse list, normal fire, every biome/water curve, per-ghast cry,
+instant/fused overheat including rider dismount and entity unload/reload, real claims-plugin vetoes, HUD
+packet capture, cleanup, and bounded idle-work profiler tests. In that session measure the preferred hold
+path at a steady configured four shots/second on both clients without packet-rate dependence.
+
+If the preferred hold path fails, add no heuristics. Select click-to-fire at `0.5` seconds; update
+`FEATURES.md`, config/heat/controls code and tests; and double every heat-per-shot default (`1.40`, `2.50`,
+`4.00`, `6.00`, `1.40`). If any gameplay test finds another defect, repair the applicable docs, code,
+and tests instead. In either case, rerun every affected focused test plus the full machine gate and fresh
+independent review, commit and push a replacement candidate, verify its exact remote head, then build,
+deploy, and repeat the required runtime tests on that new exact committed head. Never redeploy dirty or
+uncommitted candidate bytes.
+
+The final accepted activation candidate is the one exact reviewed, committed, and pushed head whose
+checksum-matched jar passed the complete applicable runtime gate. Record preferred-path success in the
+acceptance evidence without editing that head; fallback selection is already part of its replacement
+candidate contract. A startup pass alone is not gameplay acceptance.
 
 ### Slice 14 — Ship-ready documentation only
 
@@ -270,6 +291,6 @@ the single owner in the architecture tree.
 
 The worker does not edit routed state. After review/commit/push, the coordinator can record:
 
-- **Decision:** `Repaired the settled Happy Artillery 1.2.0 contract around four exact invariants. Persistent heat/ammo/cry/fuse timing uses saved Overworld gameTime; heat advances a consumed-through anchor so elapsed cooling is applied once. Active RiderState stashes persist their original slot indexes across reload. Components owns component definition/catalog/registration and HappyArtillery only invokes it. The proposed tree remains thirteen production Java files and now groups risks into nine test files.`
-- **Tested:** `Validated final ARCHITECTURE.md, FEATURES.md, and MIGRATION_PLAN.md with exact duplicate/path/owner checks, sequential Slice 0-14 checks, Markdown/fence/final-newline checks, and git diff --check. Only those three documentation files differ from 76b44ce; no untracked, source, resource, build, dependency, README, CHANGELOG, project-state, test-server, commit, push, release, main, Modrinth, or production mutation occurred.`
+- **Decision:** `Repaired the settled Happy Artillery 1.2.0 contract around its lifecycle and ownership invariants. Persistent timing uses saved Overworld gameTime; heat advances one consumed-through anchor. Abilities alone schedules fused detonation through the server task queue and re-establishes it on ghast load. Failed startup config is loud and failed reload preserves the prior valid value. The proposed tree has twelve production Java files and eight risk-grouped tests.`
+- **Tested:** `Validated final ARCHITECTURE.md, FEATURES.md, and MIGRATION_PLAN.md with exact duplicate/path/owner checks, sequential Slice 0-14 checks, Markdown/fence/final-newline checks, and git diff --check. Only those three documentation files differ from 0106d93; no untracked, source, resource, build, dependency, README, CHANGELOG, project-state, test-server, commit, push, release, main, Modrinth, or production mutation occurred.`
 - **History:** `Repaired the blocked settled-design checkpoint: split abilities into normal fire, cry/feedback, and overheat/protection GREEN checkpoints; made either hold-to-fire outcome a reviewed committed/pushed contract gate; corrected bounded online-player idle reconciliation; and preserved fail-loud/non-deployable identity through guarded Slice 12 until activation Slice 13.`

@@ -1,12 +1,7 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-Dependency direction is `Config` -> pure state/policy -> controls/abilities/HUD -> `HappyArtillery`.
-Minecraft effects stay at the outer call sites; pure transitions never call the world. The entrypoint
-invokes owner registration and drives owners but does not duplicate them.
-
-The proposed Java surface is thirteen production files and nine risk-grouped test files. Separate tests
-remain only for configuration, classification, pure heat/ammo models, persistence, controls, abilities,
-HUD, and complete wiring; component, mixin, and feedback risks stay with their owning behavior suites.
+The annotated tree below is the complete proposed source-controlled shape. It contains twelve
+production Java files and eight risk-grouped test files.
 
 ```text
 happy-artillery/
@@ -15,18 +10,16 @@ happy-artillery/
 │   │   ├── java/xyz/pyrehaven/happyartillery/
 │   │   │   ├── HappyArtillery.java
 │   │   │   │   # Composition root that invokes each owner's registration, op-only reload command,
-│   │   │   │   # durable Overworld-game-time tick context, and sole player tick driver; no gameplay policy.
+│   │   │   │   # durable Overworld-game-time context, sole player tick driver, and ghast-load callback;
+│   │   │   │   # no gameplay policy or second fuse poller.
 │   │   │   ├── Config.java
 │   │   │   │   # Sole config schema/codec, defaults, presets, validation, atomic live value, load,
 │   │   │   │   # rewrite, and reload owner.
 │   │   │   ├── BiomeClass.java
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
-│   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor, ammo regeneration
-│   │   │   │   # anchor, shot window, cry-ready, and pending-detonation Overworld game ticks.
-│   │   │   ├── Ammo.java
-│   │   │   │   # Pure optional-ammo authority: complete-interval regeneration from a durable game-time
-│   │   │   │   # anchor, availability, and spend transitions; inactive when disabled.
+│   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus shot, cry,
+│   │   │   │   # and pending-detonation Overworld-game-time deadlines.
 │   │   │   ├── Heat.java
 │   │   │   │   # Pure heat authority: anchored, non-double-counted water/passive cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
@@ -40,13 +33,13 @@ happy-artillery/
 │   │   │   │   # Sole pilot/input and control-item owner: swap/stash/restore, pre-drop restoration,
 │   │   │   │   # slot locking helpers, callback deduplication, and hold/click intent.
 │   │   │   ├── Abilities.java
-│   │   │   │   # Sole fire/cry/detonation gate and effect owner, including sealed outcomes, projectile,
-│   │   │   │   # protection-vetoed explosions/fire placement, sound, and ghast removal.
+│   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including server-queue
+│   │   │   │   # deadlines, load-time re-establishment, projectile, protected block effects, sound, and removal.
 │   │   │   ├── Hud.java
 │   │   │   │   # Sole boss/action-bar and warning-particle owner for pilots and read-only passengers;
 │   │   │   │   # owns and evicts bounded process-local display handles.
 │   │   │   ├── Feedback.java
-│   │   │   │   # Sole rejection-reason to action-bar/sound mapping; cooldown rejection stays silent.
+│   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
 │   │   │       └── SlotGuardMixin.java
 │   │   │           # Sole mixin; cancels control-slot clicks and control-item drops while the pilot rides.
@@ -63,8 +56,6 @@ happy-artillery/
 │           │   # Config defaults, presets, validation, round-trip, rewrite, and reload-failure contract.
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.
-│           ├── AmmoTest.java
-│           │   # Disabled mode, durable-anchor interval regeneration, restart continuity, caps, and spend tests.
 │           ├── HeatTest.java
 │           │   # Curves, anchored non-double cooling, firing window, water ordering, restart/unload gaps,
 │           │   # and exact detonation-edge tests.
@@ -75,8 +66,8 @@ happy-artillery/
 │           │   # Component registration/serialization, pilot admission, callbacks, indexed swap/restore,
 │           │   # live slot reload, death ordering, SlotGuardMixin decisions, and dedup tests.
 │           ├── AbilitiesTest.java
-│           │   # Fire/cry gates, sealed outcomes, feedback, effects, vetoes, durable fuse deadlines,
-│           │   # and exactly-once detonation tests.
+│           │   # Fire/cry gates, sealed outcomes, feedback, effects, veto adapters, server-queue fuse
+│           │   # scheduling/load wake-up, and exactly-once detonation tests.
 │           ├── HudTest.java
 │           │   # Pilot/passenger visibility, dirty checks, throttling, priority, particles, and teardown tests.
 │           └── HappyArtilleryIntegrationTest.java
@@ -99,7 +90,7 @@ happy-artillery/
 ├── .gitignore
 │   # Excludes generated Gradle, IDE, run, world, log, and jar output.
 ├── build.gradle
-│   # Loom/Java/JUnit build, resource processing, checks, sources jar, and publication definition.
+│   # Loom/Java/JUnit and Fabric attachment-API compile support, resources, checks, jars, and publication.
 ├── gradle.properties
 │   # Pinned Minecraft, Fabric, Loom, Java-facing, artifact, and Maven-coordinate values.
 ├── settings.gradle
