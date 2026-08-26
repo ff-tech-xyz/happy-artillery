@@ -26,14 +26,20 @@ deliberate startup failure and non-deployable identity, no source shell represen
   references an unlisted `Ammo.regen`, and separately names `SlotGuardMixin`. The complete smallest
   tree is therefore **thirteen production Java files**: the eleven named non-mixin files, `Ammo.java`,
   and the mixin. Hiding ammo inside an unrelated owner to preserve the claimed count is rejected.
-- `GhastState` adds `lastCryTick` because cry cooldown is per ghast, and a pending-detonation tick so a
-  nonzero configured fuse can survive unload/restart and still detonate exactly once. The abbreviated
+- Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
+  only with server ticks, survives restart without interpreting a new process-local counter, and provides
+  one comparable value to every loaded dimension. No duration advances while the server is stopped.
+- `GhastState` therefore stores heat plus its last-advanced game tick, firing-window end tick, ammo plus
+  its regeneration anchor, per-ghast cry-ready tick, and a pending-detonation deadline. The abbreviated
   four-field sample in the specification is not the complete record contract.
 - `Ammo` is the sole optional-ammo transition owner. `GhastState` stores its values; `Abilities` asks
   `Ammo` for availability/spend; the tick driver asks it for regeneration. Firing never changes the
   regeneration anchor.
 - `Hud` owns bounded process-local boss-bar handles. Serializable HUD dirty-check values live in the
   persistent `RiderState`; live packet objects do not become persistence data.
+- `Components` defines, catalogs, and registers both component types through one idempotence-checked
+  registration entry. `HappyArtillery` invokes that owner during composition; it does not register the
+  component types itself.
 - Passengers receive the same ghast heat/status HUD read-only. Only the controlling first passenger
   advances state or triggers abilities. The sample loop's `Hud.clear` for non-pilots is superseded by
   the settled passenger-HUD decision.
@@ -71,16 +77,28 @@ Presets:
 
 ## Persistent state and time
 
-- `GhastState` is an immutable persistent attachment containing heat, ammo, `lastShotTick`,
-  `lastRegenTick`, `lastCryTick`, and pending detonation timing. Updates replace the attachment value.
-- `RiderState` is an immutable persistent player attachment containing byte-exact ItemStack stashes for
-  configured control slots, ridden-ghast UUID, `lastHandledTick`, and serializable HUD dirty-cache data.
-- Cooling is derived from elapsed ticks since the last shot, not accumulated by a per-entity sweep.
-  Unloading in a cooling biome therefore catches up on return; Nether heat does not fall.
-- Optional ammo regeneration uses complete elapsed tick intervals, caps at maximum, and is independent
-  of firing. Reducing maximum below current ammo clamps on the next ammo transition. Enabled ammo
-  requires positive maximum, cost, and interval; disabled ammo does no work.
-- Cry cooldown is per ghast. Alternating riders cannot shorten it.
+- Every persisted deadline/anchor is expressed in saved Overworld `gameTime`, never
+  `server.getTickCount()` and never wall time. The driver reads that clock once per server tick and passes
+  the value through context. Restart resumes in the same tick domain; stopped time does not count.
+- `GhastState` is an immutable persistent attachment containing `heat`, `heatAnchorTick`,
+  `firingWindowEndTick`, `ammo`, `ammoRegenAnchorTick`, `cryReadyTick`, and optional
+  `detonateAtTick`. Updates replace the attachment value.
+- `RiderState` is an immutable persistent player attachment containing each byte-exact stashed ItemStack
+  paired with the slot index from which it was removed, ridden-ghast UUID, `lastHandledTick`, and
+  serializable HUD dirty-cache data.
+- `Heat.advance` applies cooling only over the not-yet-accounted interval and always moves
+  `heatAnchorTick` to `now`. Passive cooling uses
+  `max(0, now - max(heatAnchorTick, firingWindowEndTick))`; water cooling instead uses
+  `max(0, now - heatAnchorTick)` and therefore keeps its ordering priority. A shot first advances to
+  `now`, adds heat, and extends `firingWindowEndTick`. Repeated driver calls cannot subtract the same
+  elapsed interval twice. An unloaded ghast catches up once on return; Nether heat remains unchanged.
+- Optional ammo regeneration consumes complete intervals since `ammoRegenAnchorTick`, advances that
+  anchor by exactly the consumed interval count (retaining a partial interval), caps at maximum, and is
+  independent of firing. Reducing maximum below current ammo clamps on the next ammo transition. Enabled
+  ammo requires positive maximum, cost, and interval; disabled ammo does no work.
+- Cry admission compares `now` with `cryReadyTick`; accepted cry sets a new absolute game-time deadline.
+  A pending fuse similarly detonates once when `now >= detonateAtTick`. Alternating riders cannot shorten
+  cry cooldown, and restart cannot reset or lengthen either deadline.
 - Entity attachment removal owns ghast-state eviction. Rider stash survives disconnect/crash until
   reconciliation restores it; HUD handles are always process-local and explicitly removed.
 
@@ -94,10 +112,16 @@ Presets:
 - Controls are fresh Fire Charge/Ghast Tear stacks carrying registered persistent data components,
   display names, and glint. Raw items do nothing by default; `allowPlainItems` is the explicit opt-in.
 - On mount, the pilot's two complete ItemStacks are copied into persistent `RiderState`, then replaced
-  with controls: exactly two inventory writes. Existing items are never decorated or mutated.
+  with controls: exactly two inventory writes. Each stash entry records its original configured index.
+  Existing items are never decorated or mutated.
 - On dismount or loss of pilot status, the two stashed stacks are restored byte-for-byte, marked control
   items in that player's inventory are removed as a creative-duplication guard, and the stash clears:
-  exactly two restoration writes plus the scoped marker sweep.
+  exactly two restoration writes plus the scoped marker sweep. Restoration always uses the persisted
+  original indexes, never the current config.
+- A successful live reload may change `fireSlot`/`crySlot`, but an active stash keeps its original indexes
+  for restoration, lock decisions, and control lookup until that ride reconciles and clears. New indexes
+  apply only to the next stash. Validation still requires distinct hotbar indexes. This avoids a global
+  search for active stashes and makes disconnected/crash-recovery riders safe.
 - The pre-drop player-death hook restores the stash **before vanilla creates inventory drops**. Tick
   reconciliation is only a backstop. Death drops therefore contain the player's real items, never
   controls. Disconnect, ghast death/removal, dimension change, kick, and crash recovery converge through
@@ -115,7 +139,9 @@ shots/second on Java and Bedrock through Geyser in the same session.
 If that spike fails, click-rate heuristics are forbidden. The accepted fallback changes the default
 shot cooldown to `0.5` seconds and doubles every heat-per-shot default (`1.40`, `2.50`, `4.00`, `6.00`,
 `1.40`) so time to detonation remains unchanged. The chosen branch and resulting defaults must be
-recorded in this contract before controls, abilities, or HUD implementation continues.
+recorded in this contract, independently reviewed, committed, and pushed before controls, abilities, or
+HUD implementation continues. A successful preferred-path result must record its Java and Bedrock
+evidence just as durably as selection of the fallback.
 
 ## Biome and heat
 
@@ -177,9 +203,12 @@ Cry:
   optional ammo only when ammo is enabled. `NETHER · NO COOLING` in red has highest priority.
 - Boss color is red in the configured warning band, gold in HOT/NETHER, blue in COLD, and green in
   BASE/END. Warning particles begin at 85% and are sent only to riders in the ghast's region.
-- The sole tick driver iterates online players, reconciles each inventory, advances each ridden ghast
+- The sole tick driver iterates online players, performs one bounded rider/status reconciliation check
+  for each, advances each ridden ghast
   exactly once through its pilot, then updates HUD for pilot and passengers from the resulting snapshot.
-  Nobody riding costs one empty player loop. There is no loaded-world/entity sweep or cleanup pass.
+  With online non-riders it is not an empty loop: it checks attachment/ride status once per player and
+  touches inventory only if a stash requires restoration. There is no loaded-world/entity scan, routine
+  inventory scan, or cleanup pass.
 - Presentation never classifies again or mutates heat, ammo, cooldown, detonation, or inventory state.
 
 ## Released defects retained as regression evidence
@@ -201,6 +230,9 @@ Tests must prove the rewrite does not restore these released faults:
 Before release, run the complete controls abuse list on Java and Bedrock through Geyser: named/full
 inventory restoration; player and ghast death; logout; hard server kill; dimension change; every slot
 movement/drop route; two-rider pilot authorization plus passenger HUD; creative duplication; plain-item
-denial; and Bedrock mount/fire/dismount without ghost items. Verify protection vetoes with a real claims
-integration, persistent heat/stash across restart, single-digit HUD packet updates per rider/second, no
-measurable idle tick cost, and README/jar version agreement.
+denial; live reload to different fire/cry slots during an active ride; and Bedrock mount/fire/dismount
+without ghost items. The active ride must remain locked to and restore from its persisted original indexes;
+the next ride must use the new indexes. Verify protection vetoes with a real claims integration,
+persistent heat/stash across restart, paused cooldown/fuse while stopped, one-time unload catch-up with no
+repeated cooling, single-digit HUD packet updates per rider/second, bounded per-online-player idle work,
+and README/jar version agreement.
