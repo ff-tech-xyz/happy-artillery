@@ -1,380 +1,221 @@
 # Happy Artillery 1.2.0 Migration Plan
 
-## Goal and checkpoint rules
-
-Rebuild the accepted `FEATURES.md` contract into the proposed package/owner tree in
-`ARCHITECTURE.md`, one dependency-ordered GREEN slice at a time. The released implementation is
-read-only evidence, not code to copy back.
-
-The **immediate next checkpoint remains a non-deployable scaffold**. Its only purpose is to move the
-existing empty owner shells and empty test layout into the accepted package tree after this architecture
-change is accepted. It must still throw the deliberate startup exception, retain non-deployable Fabric
-metadata/archive naming, provide no gameplay callbacks, and never be deployed to `pyretest`.
-
-No gameplay slice may start until its open product decisions are accepted in `FEATURES.md`. This plan
-names gates and dependencies but does not choose their outcomes.
-
-## Fixed working discipline
-
-1. One writer owns the checkout. Start every slice from a clean, pushed non-`main` checkpoint and
-   verify `HEAD`, branch, staged, unstaged, and untracked state.
-2. Read `AGENTS.md`, `FEATURES.md`, `ARCHITECTURE.md`, and this plan before changing a slice.
-3. Keep the fail-loud entrypoint and non-deployable artifact identity through every internal slice.
-   No partially rebuilt behavior is registered or presented as playable.
-4. Use strict vertical TDD: add one behavior assertion, run the focused suite and observe the expected
-   RED caused by missing behavior, implement only enough to reach GREEN, then refactor while GREEN.
-   Do not add a pile of tests after production code.
-5. Released contradictions receive characterization evidence, not accidental preservation. For each
-   open conflict, record the released paths from `origin/main`; after Elijah decides, write the new
-   acceptance test and observe RED against the scaffold before implementation. If a test cannot run
-   against the old Minecraft owner, use the pinned released source/bytecode in a disposable detached
-   worktree as evidence and label it characterization-by-trace rather than claiming an executed RED.
-6. Use the dependency-free `HappyArtilleryRegressionSuite` and Gradle `JavaExec` task; do not add a
-   test library or other dependency without explicit approval. The suite accepts one risk-slice name,
-   so focused commands use `./gradlew regressionTest --args='<slice>'`; no arguments run all suites.
-7. Before every commit: run the focused suite, `./gradlew clean build`, the exact-tree/no-fallback
-   checks below, inspect tracked and untracked changes, and run `git diff --check` plus
-   `git diff --cached --check` after staging. Commit only that coherent GREEN slice. Do not push,
-   deploy, or update project state until the coordinator accepts the commit.
-8. Any edit after the final focused/build gate invalidates its evidence. Rerun the affected focused
-   suite and canonical build on the final bytes.
-
-## Open-decision gates
-
-Each gate is satisfied only when `FEATURES.md` is changed in a reviewable docs-only commit that states
-the selected behavior and the expected regression. Do not hide multiple policy choices in an
-implementation commit.
-
-| Gate | Required decision from `FEATURES.md` | Blocks |
-|---|---|---|
-| G1 Controller admission | first passenger vs any passenger; marked controls vs raw Fire Charge/Ghast Tear compatibility | `ControllerPolicy`, callback routing, setup/display/cleanup eligibility |
-| G2 Control ownership | collision-proof ownership/restoration and exact inventory/drop/death/disconnect/world-item boundaries | `ControlItems`, restoration records, death/drop cleanup |
-| G3 Environment | HOT threshold, End limit/presentation, Nether limit, and the single cooling schedule | `EnvironmentPolicy`, heat transitions, presentation |
-| G4 Ammo cadence | whether firing postpones delivery; reduced maxima; zero/negative cost/interval behavior with validation | ammo state and fire admission |
-| G5 Water cooling | attempt-driven vs continuous, water predicate, and non-increasing floor behavior | heat state, `FireAction`, lifecycle tick work |
-| G6 Overheat | configured threshold calculation, post-overheat heat/recovery, and partial-effect semantics | fire state transition and `OverheatEffect` |
-| G7 Projectile failure | eager chunk requests and projectile-add fail/partial vs instant-ray behavior | `ProjectileFire` and final fire result |
-| G8 Config policy | validation, coercion, malformed/invalid/read/write startup outcomes | `HappyArtilleryConfig` and every settings consumer |
-| G9 Eviction/work bounds | runtime state/display eviction and bounded loaded-world work | `ArtilleryState`, `RiderPresentation`, `ArtilleryLifecycle` |
+## Checkpoint contract
 
-Suggested atomic decision commit subjects, used only after the corresponding answer exists:
+Build the settled `FEATURES.md` contract into the proposed `ARCHITECTURE.md` tree in the order below.
+Released source is defect evidence, not code to copy. Every slice is delegated to one fresh writer,
+independently reviewed by the coordinator, verified on its final bytes, committed as one coherent GREEN
+checkpoint, and pushed to the existing non-`main` branch before the next slice starts.
 
-- `docs(contract): resolve controller admission policy`
-- `docs(contract): resolve control item ownership policy`
-- `docs(contract): resolve environment and cooling policy`
-- `docs(contract): resolve ammo cadence policy`
-- `docs(contract): resolve water cooling policy`
-- `docs(contract): resolve overheat recovery policy`
-- `docs(contract): resolve projectile failure policy`
-- `docs(contract): resolve configuration failure policy`
-- `docs(contract): resolve lifecycle eviction bounds`
+The entrypoint must keep throwing the deliberate startup exception and the artifact/Fabric metadata
+must remain visibly non-deployable through Slice 10. Partial gameplay is never registered or deployed.
+Only Slice 11 may remove that guard after every owner is GREEN.
 
-## Dependency-ordered rebuild slices
+For every automatable behavior, use one vertical RED -> GREEN cycle at a time:
 
-### Slice 0 — Accept architecture and migration documents
+1. add one behavior assertion;
+2. run the focused JUnit test and observe the expected behavior failure, not a compile/setup error;
+3. add the minimum production behavior;
+4. rerun focused and full tests, then refactor only while GREEN.
 
-**Files:** modify `ARCHITECTURE.md`; create `MIGRATION_PLAN.md` only.
+Before each commit: inspect status and complete diff; compare source/resource/test paths with
+`ARCHITECTURE.md`; run focused tests, full tests, `./gradlew clean build`, `git diff --check`, and staged
+diff checks; scan for old owners, static maps, wall clocks, duplicate callbacks, global scans, fallback
+effects, silent catches, secrets, and unexpected dependency/toolchain changes. Any changed final byte
+invalidates earlier evidence. Push only after the coordinator verifies the exact commit.
 
-**Boundary:** validate links/tree paths and whitespace; no source, resource, build, feature, or README
-change; no build is required for docs-only bytes. Coordinator commit after review:
-`docs(architecture): define 1.2.0 rebuild owners`.
+JUnit is an accepted requirement in the supplied specification. The build-support slice must pin the
+smallest existing-compatible JUnit dependency and make `test` part of `check`; it may not change Loom,
+Minecraft, Fabric, mappings, Gradle, or Java versions.
 
-**Gate to continue:** the architecture commit is accepted and reachable remotely. The source-layout
-hook requires this earlier checkpoint before Slice 1 moves files.
+## Settled assumptions carried into implementation
 
-### Slice 1 — Align the non-deployable scaffold to the proposed packages
+- The proposed tree has thirteen production Java files: eleven named non-mixin owners plus the missing
+  `Ammo` owner and the one `SlotGuardMixin`.
+- `GhastState` includes per-ghast cry and pending-fuse timing. `Ammo` owns optional ammo transitions.
+- Passengers receive read-only HUD; only the pilot advances state or abilities.
+- Protection-visible explosions/fire placement, pre-drop restoration, and the hold-to-fire Java +
+  Bedrock gate are mandatory, not later polish.
+- The fail-loud requirement prevents a committed partial server from running. Attachment persistence is
+  first proven automatically by codec/attachment round-trip. A disposable, never-committed instrumented
+  spike may disable the guard for API/manual evidence, but the committed checkpoint must restore it.
+  Exact-head restart persistence remains the first blocking runtime check after final activation.
 
-**Files:** move/create only the empty production and test shells listed by `ARCHITECTURE.md`; update
-package declarations and the scaffold entrypoint reference in `fabric.mod.json` if needed. Do not add
-logic. Do not change `FEATURES.md`, release coordinates, dependencies, or playable metadata.
+## Dependency-ordered slices
 
-**Verification:** compile all shells with `./gradlew clean build`; mechanically compare all tracked
-production/test paths with the architecture tree; inspect runtime and sources jars; run isolated
-`./gradlew runServer` far enough to prove Fabric invokes the declared entrypoint and the deliberate
-`IllegalStateException` is the observed failure. A Gradle zero exit without that log evidence is not
-success. Confirm the artifact and embedded Fabric name/description still say non-deployable.
+### Slice 0 — Accept the settled documents
 
-**Commit boundary:** one GREEN structural commit,
-`refactor(scaffold): align rebuild owner packages`. No `pyretest` and no human gameplay handoff.
-This is the immediate next checkpoint.
+**Files:** `ARCHITECTURE.md`, `FEATURES.md`, `MIGRATION_PLAN.md` only.
 
-### Slice 2 — Establish the executable config contract and regression harness
+Validate the tree, unique paths/owners, links, Markdown structure, and whitespace. No source, resource,
+build, README, CHANGELOG, test-server, dependency, project-state, commit, or push mutation belongs to the
+worker task. Coordinator checkpoint: `docs(architecture): settle 1.2.0 rebuild design`.
 
-**Prerequisite:** G8.
+### Slice 1 — Realign the fail-loud scaffold
 
-**RED:** implement `HappyArtilleryRegressionSuite` dispatch and config assertions first; wire a
-`regressionTest` `JavaExec` into `check`, remove the temporary no-discovered-tests exception when the
-executable suite owns verification, then run `./gradlew regressionTest --args='config'`. Require an
-expected failure against the empty config shell.
+**Prerequisite:** Slice 0 is committed and remotely reachable so the architecture gate precedes moves.
 
-**GREEN:** implement only `config/HappyArtilleryConfig.java`: all 24 fields/defaults, one immutable
-settings view, path/load/rewrite behavior, and the accepted G8 validation/failure policy. No other
-owner reads JSON or Fabric's config directory.
+Move the empty production/test shells to the proposed paths; add empty owners/resources only where the
+tree requires them; remove superseded shells. Update package declarations and mixin metadata, but no
+gameplay or callback behavior. Preserve deliberate startup failure and non-deployable names.
 
-**Verification/commit:** focused config suite, all regression suites, `./gradlew clean build`, config
-catalog count/default comparison, and diff checks. Commit
-`feat(config): implement the 1.2.0 configuration contract`. Keep the artifact non-deployable.
+**GREEN evidence:** compilation, exact bidirectional architecture/filesystem comparison, runtime and
+sources jar inspection, and isolated `runServer` log proving the declared entrypoint fails with the exact
+deliberate exception. Commit `refactor(scaffold): align settled owner tree` and push. No human test.
 
-### Slice 3 — Implement one environment classifier/profile
+### Slice 2 — Config, presets, and JUnit build support
 
-**Prerequisites:** G3 and Slice 2.
+Implement `Config` and `ConfigTest`; configure the accepted JUnit test task without changing the
+toolchain. Cover the complete nested schema/defaults, preset-before-explicit precedence, missing file/key
+rewrite, unknown-key removal, identifier/range/cross-field validation, strict startup failure, atomic
+call-time reads, and failed-reload last-known-good behavior.
 
-**RED:** `./gradlew regressionTest --args='environment'` must fail on five-mode classification,
-dimension precedence, selected threshold edges, and profile consistency.
+**RED:** focused config assertions fail against the empty owner. **GREEN:** focused config tests, full
+tests, clean build, serialized complete-default comparison, and single config-I/O owner search. Commit
+`feat(config): define 1.2.0 settings` and push. Remains non-deployable.
 
-**GREEN:** implement only `state/EnvironmentPolicy.java`. It returns one finite profile consumed by
-state, fire, and presentation; no caller rechecks dimension ids or biome temperature.
+### Slice 3 — One biome classifier
 
-**Verification/commit:** focused environment suite, full regression suite, clean build, classification
-owner search, diff checks. Commit `feat(state): add environment heat profiles`. Non-deployable.
+Implement `BiomeClass` only. Test vanilla dimension-key identity, custom ids containing `nether`/`end`,
+unknown-dimension temperature policy, exact 0.3/1.0 edges, all five profiles, and config reload reads.
 
-### Slice 4 — Implement ammo, shot timing, and cry cooldown state
+**RED:** classifier tests fail against the shell. **GREEN:** focused/full tests, clean build, and search
+proving no other production file classifies dimension or temperature. Commit
+`feat(state): classify artillery biomes` and push. Remains non-deployable.
 
-**Prerequisites:** G4, G8, and Slice 2.
+### Slice 4 — Persistent ghast and rider attachments
 
-**RED:** `./gradlew regressionTest --args='state-timing'` must fail for unseen-full ammo, complete
-elapsed intervals, caps, selected firing/cadence behavior, shot/restart timestamps, denial-safe
-queries, and player-keyed cry cooldowns. Inject a controllable clock into the concrete owner; do not
-create a clock interface or wrapper file for one caller.
+Implement immutable `GhastState` and `RiderState` records/codecs and register both persistent attachment
+types from the composition root without registering gameplay. Include heat/ammo/shot/regen/cry/fuse
+ticks, byte-exact two-stack stash, ridden id, input dedup tick, and serializable HUD cache.
 
-**GREEN:** add only these records/transitions to `state/ArtilleryState.java`. No world access, effects,
-or callback registration. Queries may advance elapsed state only where the accepted contract says so.
+**RED:** fresh-state, codec, ItemStack, attachment replacement, and encode/decode assertions fail first.
+**GREEN:** focused/full tests, clean build, serialization round-trips, immutable replacement proof, and
+search proving no static gameplay map or wall clock. If API names need proof, use a disposable
+instrumented run and restore the fail-loud final bytes. Commit `feat(state): persist ghast and rider state`
+and push. A real restart proof is still required at Slice 11 before any gameplay claim.
 
-**Verification/commit:** focused state suite, full suite, clean build, map/state owner search, diff
-checks. Commit `feat(state): implement ammo and cooldown timing`. Non-deployable.
+### Slice 5 — Pure heat and optional ammo
 
-### Slice 5 — Implement heat, cooling, restoration records, and eviction APIs
+Implement `Heat`, `Ammo`, and their tests without world/entity access. Take one tracer behavior at a
+time: each biome's sustained curve; exact-limit detonation; firing window; water-before-Nether ordering;
+unload gaps; disabled ammo; independent complete-interval regeneration; caps; and spend.
 
-**Prerequisites:** G2's restoration shape, G3, G5, G6's recovery transition, G9, and Slices 3–4.
+**RED/GREEN:** every pure transition assertion must be observed failing then passing. Run focused heat
+and ammo tests, full tests, clean build, and searches proving `Heat` owns the only limit comparison and
+`Ammo` owns every ammo calculation. Commit `feat(state): implement heat and optional ammo` and push.
+Remains non-deployable.
 
-**RED:** `./gradlew regressionTest --args='state-heat'` must fail for configured heat amounts/limits,
-restart delay, the one passive schedule, selected water behavior, threshold/recovery transition,
-control-decoration snapshots, restart-reset behavior, and explicit scoped eviction.
+### Slice 6 — Resolve the hold-to-fire gate
 
-**GREEN:** extend only `ArtilleryState`; callers receive snapshots/results rather than direct maps.
-`EnvironmentPolicy` remains the classification owner. Do not add another timer, mode cache, or state
-map in fire, inventory, lifecycle, or presentation.
+This is a spike and decision checkpoint, not feature implementation. In a disposable runtime/worktree
+build, confirm the exact 26.2 consumable component API and hold behavior. Test one Java client and one
+Bedrock client through Geyser in the same session; measure accepted shots over time and require a steady
+configured four per second without packet-rate dependence.
 
-**Verification/commit:** focused heat/state suite, full suite, clean build, state/config/classification
-owner searches, diff checks. Commit `feat(state): implement heat and lifecycle records`. Non-deployable.
+- If it passes, retain 0.25 seconds and the preferred per-shot defaults.
+- If it fails, reject packet heuristics, select click-to-fire at 0.5 seconds, double every per-shot heat
+  default, and update config/heat tests plus `FEATURES.md` in a reviewed GREEN checkpoint.
 
-### Slice 6 — Implement shared controller admission and callback routing
+Remove disposable instrumentation and verify the pushed branch still fails loudly. Record the chosen
+path before Slice 7. No hand-waved or Java-only result passes this gate.
 
-**Prerequisites:** G1 and Slices 2–5.
+### Slice 7 — Components, controls, and pre-drop restoration
 
-**RED:** `./gradlew regressionTest --args='controls'` must fail for both hands/callbacks, Happy Ghast
-classification, selected controller/token matrix, ridden-entity matching, and PASS/FAIL/SUCCESS
-routing. Tests use recording fire/cry actions only at the callback boundary; they do not duplicate
-ability policy.
+Implement `Components`, `Controls`, `SlotGuardMixin`, mixin metadata, and tests. Cover component
+persistence, pilot-only admission, both callbacks/hands, one-input-per-player-tick deduplication,
+hold/click intent, exactly two mount/two restore writes, byte-exact stash, scoped creative cleanup,
+pre-drop death restoration, and every click/drop/swap cancellation route.
 
-**GREEN:** implement `controls/ControllerPolicy.java` and `controls/HappyGhastControls.java`.
-ControllerPolicy is called by input, inventory, presentation, and lifecycle; callback routing invokes
-fire/cry actions but contains no fire/cry mechanics.
+**RED/GREEN:** automate owner logic and injection decisions first. Then run a disposable Java + Bedrock
+Geyser session for the complete abuse list: named/full inventories, death, logout, ghast removal, hard
+server stop, dimension change, all slot movements, two riders, creative duplication, plain-item denial,
+and Bedrock ghost-item checks. The pre-drop API must be observed restoring before vanilla drops; a tick
+backstop alone fails. Restore fail-loud final bytes, run focused/full tests and clean build, commit
+`feat(controls): swap and protect pilot controls`, and push.
 
-**Verification/commit:** focused controls suite, full suite, clean build, admission duplication search,
-diff checks. Commit `feat(controls): route authorized mounted inputs`. The composition root still does
-not register gameplay.
+### Slice 8 — Abilities and feedback
 
-### Slice 7 — Implement control-item mutation and cleanup
+Implement `Abilities` and `Feedback`. Vertical tests cover pilot/water/cooldown/ammo gates, sealed
+results, exactly-once state transitions, normal projectile geometry/speed, no chunk loading/fallback,
+per-ghast cry, silent cooldown feedback, visible other rejection, instant and fused overheat, sphere/fire
+counts, ghast removal, and `killsGhast=false` recovery.
 
-**Prerequisites:** G1, G2, G9, and Slices 5–6.
+Before GREEN, prove the exact 26.2 protection-visible path with a real claims/protection integration:
+normal projectile explosions, overheat explosion, and each fire placement must use the rider as cause
+and permit veto. A veto skips that mutation; no direct bypass or fallback is allowed.
 
-**RED:** `./gradlew regressionTest --args='control-items'` must fail for empty/occupied slots, exact
-one-control convergence, moved temporary deletion, owner-safe decoration restoration, dismount/death/
-drop scope, unrelated lore/items/entities, and both positive and negative collateral cases.
+Run focused/full tests, clean build, mutation-owner accounting, and searches for alternate effect paths.
+Commit `feat(abilities): implement artillery actions` and push. Remains non-deployable.
 
-**GREEN:** implement only `inventory/ControlItems.java`, using `ControllerPolicy` and restoration
-records in `ArtilleryState`. All inventory/item entity mutations route through this owner. Do not add a
-mixin, delayed queue, global world scan, raw substring cleanup, or second marker helper.
+### Slice 9 — Read-only pilot and passenger HUD
 
-**Verification/commit:** focused inventory suite, full suite, clean build, mutation/no-mixin/residue
-searches, diff checks. Commit `feat(inventory): manage mounted control items`. Non-deployable.
+Implement `Hud` with boss bars, four-tick action-bar throttling, dirty checks, warning particles, Nether
+priority, and bounded handle cleanup. Update pilots and passengers from one post-transition snapshot;
+passengers cannot advance or alter it.
 
-### Slice 8 — Implement cry as the first complete action path
+**RED:** tests fail for creation/removal counts, no remove-add pair, changed-value updates, colors,
+warning threshold, ammo-disabled text, passenger visibility, and teardown. Include a mutation guard proving
+HUD cannot change state or classify again. **GREEN:** focused/full tests, clean build, and a packet capture
+showing single-digit HUD updates per rider/second. Commit `feat(hud): show artillery status` and push.
+Remains non-deployable.
 
-**Prerequisites:** Slices 4 and 6. G1 controls which riders can reach it; G5 supplies the shared water
-predicate if the accepted decision changes the released test.
+### Slice 10 — Wire the complete driver while guarded
 
-**RED:** `./gradlew regressionTest --args='cry'` must fail for water/cooldown denials, no ammo/heat
-mutation, exactly-once cooldown commitment, sound position/source/volume/pitch, and the documented
-post-commit world-failure boundary.
+Implement the final `HappyArtillery` owner graph and integration tests behind the deliberate startup
+guard. The designed runtime order is: reconcile all players; process each ridden ghast once through its
+pilot using one biome context; then render pilot/passenger HUD from the resulting snapshot. Register each
+callback, attachment, component, mixin path, death hook, and server-stop cleanup exactly once.
 
-**GREEN:** implement only `cry/CryAction.java`; it owns the one scream effect and calls state once.
-No retry, swallowed exception, alternate sound path, or controller check is added.
+**RED:** integration tests fail on missing registrations/order. **GREEN:** focused/full tests, clean build,
+registration enumeration, no-rider empty-loop proof, no world/entity sweep, and profiler harness showing
+no measurable gameplay tick work with nobody riding. Commit `feat(integration): wire guarded artillery`
+and push. The artifact must still fail loudly and remain undeployable.
 
-**Verification/commit:** focused cry suite, full suite, clean build, sound/state mutation searches,
-diff checks. Commit `feat(cry): implement mounted ghast cry`. It remains unavailable at runtime until
-final activation, so no `pyretest` handoff yet.
+### Slice 11 — Activate and prove the complete candidate
 
-### Slice 9 — Implement fire admission and exactly-once state transition
+Prerequisites: Slices 1-10 are pushed GREEN, the hold path is recorded, protection and controls manual
+gates passed, and independent architecture/behavior reviews found no hidden second owner.
 
-**Prerequisites:** G4, G5, G6 and Slices 3–6.
+**RED:** an integration assertion requires normal startup while the deliberate guard still fails.
+**GREEN:** remove only the guard/non-deployable naming, register the already-complete graph, and retain
+truthful 26.2-only metadata. Add the op-only `/ha reload`; do not add `/happytest`.
 
-**RED:** `./gradlew regressionTest --args='fire-action'` must fail for the exact accepted order:
-water, at-limit, shot cooldown, ammo, one committed transition, then normal/overheat selection. Assert
-ordinary denials do not consume/restart and water may only apply the selected water transition.
+On final bytes run every focused test, full JUnit suite, `./gradlew clean build`, exact-tree/residue and
+mutation accounting, runtime/sources jar inspection, embedded metadata validation, secret scan, and an
+isolated server startup. Commit `feat: activate Happy Artillery 1.2.0` and push the exact non-main head.
 
-**GREEN:** implement only `fire/FireAction.java`. It receives one `EnvironmentPolicy` profile and one
-`ArtilleryState` transition result; it does not spawn, explode, play sound, classify, or recheck
-controller admission.
+The first runtime gate is attachment persistence: set heat and stash state using controlled test support,
+restart/unload/reload, and prove exact restoration. Failure stops all later tests. Then deploy the exact
+committed jar through `pyretest`, match source/deployed checksums, verify startup logs, and run the full
+Java + Bedrock abuse list, normal fire, every biome/water curve, optional ammo, per-ghast cry, hold rate,
+instant/fused overheat, protection vetoes, HUD packet rate, cleanup, and idle profiler tests. A startup
+pass alone is not gameplay acceptance.
 
-**Verification/commit:** focused fire-action suite, full suite, clean build, state/classification/world
-mutation searches, diff checks. Commit `feat(fire): implement fire admission transition`.
-Non-deployable.
+### Slice 12 — Ship-ready documentation only
 
-### Slice 10 — Implement the normal projectile effect
+After gameplay acceptance, update README and CHANGELOG to say Minecraft 26.2 only, describe the chosen
+hold path, controls, presets, `/ha reload`, Geyser support, and observed behavior. Verify README claims
+against the exact jar and tests. This slice opens no release, Modrinth, production, or `main` action;
+those remain separate Elijah-gated release work.
 
-**Prerequisite:** G7 and Slice 9.
+## Ownership and deletion audit
 
-**RED:** `./gradlew regressionTest --args='projectile'` must fail for exact launch origin, normalized
-rider view and 0.5 scale, owner, power, one sound, entity-add result, selected chunk request behavior,
-and selected failed-add outcome. Exercise the production method through narrow recording world calls,
-not a duplicate geometry helper.
+Before activation, parse `ARCHITECTURE.md` and compare declared paths both directions with tracked and
+untracked production/resource/test/build-support paths. Every path and owner must appear once.
 
-**GREEN:** implement only `fire/ProjectileFire.java`. It is the only normal-shot world-mutation owner;
-remove any fallback branch not selected by G7 rather than retaining it dormant.
+Production/resources must contain no released `happy.artillery` package, lore markers, static UUID maps,
+`System.currentTimeMillis`, inventory/world/entity sweep, delayed sync queue, injected player extension,
+old accessor/mixin, `/happytest`, eager chunk load, instant-ray fallback, duplicate classifier, duplicate
+callback effect, broad/sampled catch, routine per-tick logging, or silent placeholder. Enumerate every
+inventory write, discard, projectile spawn, explosion, fire placement, sound, particle, boss/action-bar
+send, attachment mutation, callback registration, and player/world/entity iteration; each must resolve to
+the single owner in the architecture tree.
 
-**Verification/commit:** focused projectile suite, full suite, clean build, projectile/explosion/chunk
-mutation accounting, diff checks. Commit `feat(fire): launch normal artillery projectiles`.
-Non-deployable.
+## Proposed project-state handoff
 
-### Slice 11 — Implement the overheat effect
+The worker does not edit routed state. After review/commit/push, the coordinator can record:
 
-**Prerequisite:** G6 and Slice 9.
-
-**RED:** `./gradlew regressionTest --args='overheat'` must fail for the configured main explosion,
-exact 48-entry golden-spiral order, sphere projectile owner/power, sound 2.0/0.8, at-most-15 supported
-fire placements within bounds, deterministic seeded testing, and selected partial failures.
-
-**GREEN:** implement only `fire/OverheatEffect.java`. Keep one ordered mutation path; do not surround
-individual failures with a second compensating explosion/projectile/fire path.
-
-**Verification/commit:** focused overheat suite, full suite, clean build, mutation count/owner search,
-diff checks. Commit `feat(fire): implement overheat spectacle`. Non-deployable.
-
-### Slice 12 — Implement read-only rider presentation
-
-**Prerequisites:** G1, G3, G9 and Slices 3, 5–7.
-
-**RED:** `./gradlew regressionTest --args='presentation'` must fail for bar key/lifetime, heat rounding
-and progress, color thresholds/modes, ammo colors, cooling labels, warnings, particle count/location,
-and cleanup. Include a test proving a display refresh cannot change mode, heat, ammo, or timing.
-
-**GREEN:** implement only `presentation/RiderPresentation.java`. It consumes state snapshots and the
-already-selected environment profile. Its world mutations are limited to its named output effects.
-
-**Verification/commit:** focused presentation suite, full suite, clean build, prove no state mutator or
-environment classification call originates here, diff checks. Commit
-`feat(presentation): show artillery rider status`. Non-deployable.
-
-### Slice 13 — Integrate bounded lifecycle orchestration
-
-**Prerequisites:** G2, G5, G9 and Slices 3–12.
-
-**RED:** `./gradlew regressionTest --args='lifecycle'` must fail for one callback registration each,
-bounded tick candidates/work, ordering, and dismount/death/drop/disconnect/entity-loss/server-stop
-cleanup. Assert no all-world item/entity scan and no stale gameplay/display record after teardown.
-
-**GREEN:** implement only `lifecycle/ArtilleryLifecycle.java`. It invokes existing owners; it does not
-reimplement controller policy, item cleanup, cooling, regeneration, display, or state eviction.
-
-**Verification/commit:** focused lifecycle suite, full suite, clean build, callback and loaded-world
-iteration accounting, diff checks. Commit `feat(lifecycle): coordinate bounded artillery cleanup`.
-The root still fails loudly, so no runtime deployment yet.
-
-### Slice 14 — Activate the complete candidate and restore truthful metadata
-
-**Prerequisites:** all nine gates and Slices 1–13 GREEN.
-
-**RED/integration proof:** add/enable an integration assertion that the composition root constructs and
-registers each owner exactly once, then observe failure while `HappyArtillery` still throws. Do not
-weaken the deliberate guard before the complete owner graph is ready.
-
-**GREEN:** make `HappyArtillery.java` wiring-only and remove its scaffold exception; register controls
-and lifecycle once; restore truthful playable Fabric name/description and normal archive naming;
-remove the scaffold-only no-test setting if any remains. Do not add `/happytest`, mixins, access
-wideners, compatibility wrappers, or release actions.
-
-**Machine gate before commit:** run every focused suite, `./gradlew clean build`, exact-tree and residue
-checks, inspect runtime and sources jars, validate embedded `fabric.mod.json`, and run an isolated
-Fabric server startup to prove the mod initializes normally. Obtain fresh independent architecture,
-behavior-contract, and final-byte reviews. Commit one integration checkpoint:
-`feat: activate Happy Artillery 1.2.0 gameplay`.
-
-**Runtime gate after commit:** push only the accepted non-main commit through the coordinator's normal
-flow, then use `pyretest switch mod:happy-artillery` (or `pyretest deploy` if already active). Verify
-logs identify `happy-artillery` 1.2.0 and compare the deployed jar checksum with the exact committed
-build. A startup-only pass is not gameplay acceptance.
-
-## No-fallback, deletion, and ownership checks
-
-Run these after each relevant slice and all of them before activation. Scope negative-test strings
-carefully; tests may name forbidden behavior to prove rejection, but production must not contain it.
-
-1. **Exact tree:** parse the fenced `ARCHITECTURE.md` paths and compare them in both directions with
-   the filesystem plus tracked/untracked production, resource, test, documentation, and required
-   build-support files. Missing declared paths and undeclared indexed paths must both be empty.
-2. **Old owner residue:** production/resources must contain none of the released package or symbols:
-   `happy.artillery`, `CooldownTracker`, `ModItems`, `EntityClickHandler`, `ControlSlotTagSyncer`,
-   `CustomDataComponents`, `ExtendedInventory`, injected player extensions, `/happytest`, or delayed
-   tag-sync state.
-3. **No injection residue:** no mixin/access-widener file, Fabric metadata key, injected interface,
-   accessor, or root-level duplicate mixin JSON may exist unless a later accepted architecture commit
-   first proves it necessary.
-4. **Single owners:** config-directory/JSON I/O appears only in `HappyArtilleryConfig`; dimension and
-   temperature classification only in `EnvironmentPolicy`; gameplay maps/records only in
-   `ArtilleryState`; controller/Happy-Ghast/token classification only in `ControllerPolicy`.
-5. **Mutation accounting:** enumerate every direct `addFreshEntity`, `explode`, `setBlock`,
-   `playSound`, particle send, inventory `setItem`, item/entity discard, boss-bar mutation, and action-
-   bar send. Each must live only in the effect owner named in `ARCHITECTURE.md`; simple success or
-   failure branches do not bypass that owner.
-6. **Callbacks/work:** enumerate every Fabric callback registration and every loaded-player/world/
-   entity/item iteration. Registrations originate only in the wiring/lifecycle/control boundary, and
-   work matches G9's accepted bounds. No duplicate tick scheduler or global collateral scan remains.
-7. **Failure quality:** search production for `catch (Throwable`, sampled/suppressed logging, empty or
-   broad catches, `fallback`/`compat` branches, silent `null` recovery, placeholder/TODO behavior, and
-   state rollback after world mutation. Remove unselected paths; do not rename them to evade searches.
-8. **Artifact:** runtime and sources jars contain only proposed classes/resources, no old package,
-   mixin/access-widener, debug command, duplicate metadata, generated runtime config, or scaffold name
-   after activation. Before activation they must retain the deliberate non-deployable identity.
-
-## Final pyretest and human feature tests
-
-Run these only after Slice 14's exact commit is deployed and startup/checksum verification passes.
-Record the exact commit, source jar SHA-256, deployed jar SHA-256, profile, server log line, tester, and
-observed result for every point.
-
-1. **Control authorization and cleanup:** test every accepted passenger/raw-item case from G1; verify
-   slot 5/6 setup, occupied-item restoration, moved temporary deletion, dismount, disconnect, death,
-   drop, and entity-loss cleanup without touching an unrelated player or nearby pre-existing item.
-2. **Cry:** verify both hands and ridden-entity click route to one cry; water/cooldown denial returns no
-   sound and starts no new cooldown; success uses accepted volume and ten-second default timing.
-3. **Normal fire:** verify denial order externally where observable, no ammo spend on denials, exact
-   ammo/cooldown timing, rider aim, ghast ownership behavior, explosion power, and G7's selected chunk/
-   add-failure outcome.
-4. **Environment/ammo/water:** test threshold-edge biomes plus Nether and End; compare heat gain, limit,
-   cooling label/rate, passive ammo cadence, restart delay, selected water behavior, and no competing
-   fixed 60-tick cooling.
-5. **Overheat:** trigger with configured heat amounts (including a non-1 amount), verify exactly one
-   threshold shot spend, main explosion, sphere/fire/sound spectacle, selected recovery, and continued
-   behavior after the recovery path.
-6. **Presentation/lifecycle:** verify heat rounding/colors, ammo bands, warnings and particles; prove
-   presentation does not change combat classification; disconnect/reconnect, ghast removal, dimension
-   change, and server restart leave no stale bar and reset memory-only state as contracted.
-7. **Config startup:** in an isolated profile/copy, verify missing/default creation and each accepted G8
-   malformed/invalid/read/write outcome. Restore the normal test config before continuing.
-
-A failed human point returns to a focused RED test and the owning slice; do not stack a guard or
-fallback in a later owner. After repair, rebuild, commit, redeploy that exact head, recheck the checksum,
-and rerun the affected human point plus any dependent points. No release PR, GitHub release, Modrinth
-publish, production deploy, or `main` mutation is part of this plan.
-
-## Proposed project-state evidence for the coordinator
-
-Do not write project state from an unaccepted worker checkout. After the architecture commit is
-reviewed and pushed, the coordinator can record:
-
-- **Decision/history:** `Accepted ARCHITECTURE.md as the complete proposed 1.2.0 owner/package tree and MIGRATION_PLAN.md as the dependency-ordered rebuild plan. The next checkpoint is package-aligned, fail-loud, non-deployable scaffold only; gameplay remains blocked by FEATURES.md gates G1-G9.`
-- **Tested:** `Validated the final documentation bytes with a clean path/link/tree uniqueness check and git diff --check; only ARCHITECTURE.md and MIGRATION_PLAN.md changed. No source/resource/build/config/FEATURES/README, branch, commit, push, pyretest, release, production, or project-state mutation was performed by the worker.`
-- **Current state after coordinator commit:** exact non-main branch, commit SHA/subject, remote containment,
-  clean status, and the fact that Slice 1—not gameplay—is next.
+- **Decision:** `Accepted the settled Happy Artillery 1.2.0 contract and proposed tree. The complete tree has thirteen production Java files: the eleven named non-mixin owners, explicit Ammo, and SlotGuardMixin. GhastState includes per-ghast cry and fuse timing; passengers receive read-only HUD; protection vetoes, pre-drop restoration, and the Java+Bedrock hold-to-fire gate are mandatory.`
+- **Tested:** `Validated ARCHITECTURE.md, FEATURES.md, and MIGRATION_PLAN.md with duplicate/path/owner checks and git diff --check. Only those three documentation files changed; no source, resource, build, dependency, README, CHANGELOG, project-state, test-server, commit, push, release, main, Modrinth, or production mutation occurred.`
+- **History:** `Replaced obsolete G1-G9/open-decision planning with the supplied settled 1.2.0 design and dependency-ordered delegated GREEN slices. The branch remains deliberately fail-loud and non-deployable; Slice 1 architecture alignment is next after this docs checkpoint is accepted and pushed.`
