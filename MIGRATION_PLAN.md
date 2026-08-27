@@ -31,8 +31,9 @@ is written. It may not change Loom, Minecraft, Fabric, mappings, Gradle, or Java
 
 ## Settled assumptions carried into implementation
 
-- The proposed tree has twelve production Java files: the eleven declared non-mixin owners plus the one
-  `SlotGuardMixin`.
+- The proposed tree has thirteen production Java files: the eleven declared non-mixin owners plus
+  `DeathDropMixin` and `SlotGuardMixin`. Minecraft 26.2 has no usable Fabric pre-drop event, so the
+  death mixin wraps `ServerPlayer.die`'s committed `dropAllDeathLoot` invocation before vanilla drop work.
 - The eight test files are grouped by risk: attachment codecs share `PersistenceTest`; component and
   mixin risks live in `ControlsTest`; feedback lives in
   `AbilitiesTest`; only coherent pure/config/model boundaries keep dedicated suites.
@@ -142,7 +143,8 @@ checks. Commit `feat(controls): establish hold input seam` and push. Packet-rate
 
 ### Slice 7 — Components, controls, and pre-drop restoration
 
-Implement `Components`, `Controls`, `SlotGuardMixin`, mixin metadata, and grouped `ControlsTest`. Cover
+Implement `Components`, `Controls`, `DeathDropMixin`, `SlotGuardMixin`, mixin metadata, and grouped
+`ControlsTest`. Cover
 component identity, persistence, and exactly-once registration through the Components-owned boundary;
 pilot-only admission; both callbacks/hands; one-input-per-player-tick deduplication; hold/click intent;
 exactly two mount/two restore writes; byte-exact indexed stash; active-ride reload retaining original
@@ -291,6 +293,6 @@ the single owner in the architecture tree.
 
 The worker does not edit routed state. After review/commit/push, the coordinator can record:
 
-- **Decision:** `Repaired the settled Happy Artillery 1.2.0 contract around its lifecycle and ownership invariants. Persistent timing uses saved Overworld gameTime; heat advances one consumed-through anchor. Abilities alone schedules fused detonation through the server task queue and re-establishes it on ghast load. Failed startup config is loud and failed reload preserves the prior valid value. The proposed tree has twelve production Java files and eight risk-grouped tests.`
+- **Decision:** `Repaired the settled Happy Artillery 1.2.0 contract around its lifecycle and ownership invariants. Persistent timing uses saved Overworld gameTime; heat advances one consumed-through anchor. Abilities alone schedules fused detonation through the server task queue and re-establishes it on ghast load. Failed startup config is loud and failed reload preserves the prior valid value. The proposed tree has thirteen production Java files and eight risk-grouped tests.`
 - **Tested:** `Validated final ARCHITECTURE.md, FEATURES.md, and MIGRATION_PLAN.md with exact duplicate/path/owner checks, sequential Slice 0-14 checks, Markdown/fence/final-newline checks, and git diff --check. Only those three documentation files differ from 0106d93; no untracked, source, resource, build, dependency, README, CHANGELOG, project-state, test-server, commit, push, release, main, Modrinth, or production mutation occurred.`
 - **History:** `Repaired the blocked settled-design checkpoint: split abilities into normal fire, cry/feedback, and overheat/protection GREEN checkpoints; made either hold-to-fire outcome a reviewed committed/pushed contract gate; corrected bounded online-player idle reconciliation; and preserved fail-loud/non-deployable identity through guarded Slice 12 until activation Slice 13.`

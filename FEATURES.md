@@ -22,8 +22,10 @@ deliberate startup failure and non-deployable identity, no source shell represen
 
 ## Architecture decisions and explicit assumptions
 
-- The complete smallest tree is **twelve production Java files**: the eleven accepted non-mixin owners
-  and `SlotGuardMixin`.
+- The complete smallest tree is **thirteen production Java files**: the eleven accepted non-mixin owners
+  plus `DeathDropMixin` and `SlotGuardMixin`. Minecraft 26.2 has no usable committed pre-drop Fabric
+  event, so the death mixin wraps only the vanilla death-drop invocation and delegates restoration to
+  `Controls`.
 - Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
   only with server ticks, survives restart without interpreting a new process-local counter, and provides
   one comparable value to every loaded dimension. No duration advances while the server is stopped.
