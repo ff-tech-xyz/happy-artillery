@@ -19,6 +19,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.Items;
@@ -37,8 +38,11 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -49,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -308,6 +313,51 @@ final class ControlsTest {
         assertTrue(calls.contains(new MethodReference(
                 "net/minecraft/world/entity/animal/happyghast/HappyGhast", "getUUID",
                 "()Ljava/util/UUID;")));
+    }
+
+    @Test
+    void productionSlotAdapterBindsExactStatePilotInventorySlotAndSelectionApis() throws Exception {
+        List<MethodReference> calls = methodReferences(Controls.ServerPlayerContainerDecisionAccess.class);
+        String controlAccess = "xyz/pyrehaven/happyartillery/Controls$ServerPlayerControlAccess";
+
+        assertEquals(boolean.class, Controls.class.getDeclaredMethod(
+                "shouldCancelSelectedSlotDrop", ServerPlayer.class).getReturnType());
+        assertEquals(boolean.class, Controls.class.getDeclaredMethod(
+                "shouldCancelContainerMutation",
+                net.minecraft.world.inventory.AbstractContainerMenu.class,
+                int.class, int.class, ContainerInput.class, ServerPlayer.class,
+                Controls.QuickCraftSnapshot.class).getReturnType());
+        assertTrue(calls.contains(new MethodReference(
+                "net/fabricmc/fabric/api/attachment/v1/AttachmentTarget", "getAttached",
+                "(Lnet/fabricmc/fabric/api/attachment/v1/AttachmentType;)Ljava/lang/Object;")));
+        assertTrue(calls.contains(new MethodReference(controlAccess, "riddenHappyGhast",
+                "(Lnet/minecraft/server/level/ServerPlayer;)Ljava/util/Optional;")));
+        assertTrue(calls.contains(new MethodReference(controlAccess, "isControllingFirstPassenger",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)Z")));
+        assertTrue(calls.contains(new MethodReference(controlAccess, "ghastId",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)Ljava/util/UUID;")));
+        assertFalse(calls.stream().anyMatch(call -> call.owner().equals(
+                "net/minecraft/server/level/ServerPlayer") && call.name().equals("getVehicle")));
+        assertFalse(calls.stream().anyMatch(call -> call.owner().equals(
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast")
+                && List.of("getFirstPassenger", "getControllingPassenger", "getUUID").contains(call.name())));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/server/level/ServerPlayer", "getInventory",
+                "()Lnet/minecraft/world/entity/player/Inventory;")));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/world/entity/player/Inventory", "getSelectedSlot", "()I")));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/world/inventory/Slot", "getContainerSlot", "()I")));
+        ClassNode adapter = classNode(
+                "xyz.pyrehaven.happyartillery.Controls$ServerPlayerContainerDecisionAccess");
+        assertTrue(adapter.methods.stream().flatMap(method -> Stream.iterate(
+                        method.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext))
+                .filter(FieldInsnNode.class::isInstance).map(FieldInsnNode.class::cast)
+                .anyMatch(field -> field.owner.equals("net/minecraft/world/inventory/Slot")
+                        && field.name.equals("container")
+                        && field.desc.equals("Lnet/minecraft/world/Container;")));
     }
 
     @Test
@@ -603,7 +653,90 @@ final class ControlsTest {
     }
 
     @Test
-    void mixinMetadataRequiresBothDeclaredPlumbingClasses() throws Exception {
+    void playerDropMixinCancelsTheExactDirectDropBoundaryThroughControlsOnly() throws Exception {
+        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.PlayerDropMixin");
+        AnnotationNode target = annotation(mixin.invisibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/Mixin;");
+        assertEquals(List.of(Type.getType(ServerPlayer.class)), annotationValue(target, "value"));
+
+        MethodNode handler = injectedHandler(mixin);
+        AnnotationNode inject = annotation(handler.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/Inject;");
+        assertEquals(List.of("drop(Z)V"), annotationValue(inject, "method"));
+        assertEquals(true, annotationValue(inject, "cancellable"));
+        assertEquals(1, annotationValue(inject, "require"));
+        assertEquals("HEAD", annotationValue(
+                (AnnotationNode) ((List<?>) annotationValue(inject, "at")).getFirst(), "value"));
+        assertEquals("(ZLorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V", handler.desc);
+        assertMixinDelegatesOnlyToControls(handler, "shouldCancelSelectedSlotDrop",
+                "(Lnet/minecraft/server/level/ServerPlayer;)Z");
+    }
+
+    @Test
+    void slotGuardMixinCancelsTheExactContainerBoundaryThroughControlsOnly() throws Exception {
+        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.SlotGuardMixin");
+        AnnotationNode target = annotation(mixin.invisibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/Mixin;");
+        assertEquals(List.of(Type.getType(net.minecraft.world.inventory.AbstractContainerMenu.class)),
+                annotationValue(target, "value"));
+        for (String name : List.of("quickcraftStatus", "quickcraftType", "quickcraftSlots")) {
+            FieldNode shadow = mixin.fields.stream().filter(field -> field.name.equals(name))
+                    .findFirst().orElseThrow();
+            assertNotNull(annotation(shadow.visibleAnnotations,
+                    "Lorg/spongepowered/asm/mixin/Shadow;"));
+            assertEquals(name.equals("quickcraftSlots") ? "Ljava/util/Set;" : "I", shadow.desc);
+            if (name.equals("quickcraftSlots")) {
+                assertNotNull(annotation(shadow.visibleAnnotations,
+                        "Lorg/spongepowered/asm/mixin/Final;"));
+            }
+        }
+
+        MethodNode handler = injectedHandler(mixin);
+        AnnotationNode inject = annotation(handler.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/Inject;");
+        assertEquals(List.of("clicked(IILnet/minecraft/world/inventory/ContainerInput;"
+                        + "Lnet/minecraft/world/entity/player/Player;)V"), annotationValue(inject, "method"));
+        assertEquals(true, annotationValue(inject, "cancellable"));
+        assertEquals(1, annotationValue(inject, "require"));
+        assertEquals("HEAD", annotationValue(
+                (AnnotationNode) ((List<?>) annotationValue(inject, "at")).getFirst(), "value"));
+        assertEquals("(IILnet/minecraft/world/inventory/ContainerInput;"
+                        + "Lnet/minecraft/world/entity/player/Player;"
+                        + "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V", handler.desc);
+        assertMixinDelegatesOnlyToControls(handler, "shouldCancelContainerMutation",
+                "(Lnet/minecraft/world/inventory/AbstractContainerMenu;II"
+                        + "Lnet/minecraft/world/inventory/ContainerInput;"
+                        + "Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lxyz/pyrehaven/happyartillery/Controls$QuickCraftSnapshot;)Z");
+        assertEquals(1, Stream.iterate(handler.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(TypeInsnNode.class::isInstance).map(TypeInsnNode.class::cast)
+                .filter(instruction -> instruction.getOpcode() == org.objectweb.asm.Opcodes.INSTANCEOF
+                        && instruction.desc.equals("net/minecraft/server/level/ServerPlayer"))
+                .count());
+    }
+
+    @Test
+    void allMixinClassesContainNoStateConfigInventoryOrPilotPolicyCalls() throws Exception {
+        for (String name : List.of("DeathDropMixin", "PlayerDropMixin", "SlotGuardMixin")) {
+            ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin." + name);
+            List<MethodInsnNode> calls = mixin.methods.stream().flatMap(method -> Stream.iterate(
+                            method.instructions.getFirst(), java.util.Objects::nonNull,
+                            org.objectweb.asm.tree.AbstractInsnNode::getNext))
+                    .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast).toList();
+            assertEquals(0, calls.stream().filter(call -> List.of(
+                            "xyz/pyrehaven/happyartillery/RiderState",
+                            "xyz/pyrehaven/happyartillery/Config",
+                            "net/fabricmc/fabric/api/attachment/v1/AttachmentTarget",
+                            "net/minecraft/world/entity/player/Inventory",
+                            "net/minecraft/world/inventory/Slot",
+                            "net/minecraft/world/entity/animal/happyghast/HappyGhast")
+                    .contains(call.owner)).count(), name);
+        }
+    }
+
+    @Test
+    void mixinMetadataRequiresAllDeclaredPlumbingClasses() throws Exception {
         try (InputStream input = ControlsTest.class.getResourceAsStream(
                 "/happy-artillery.mixins.json")) {
             assertNotNull(input);
@@ -612,10 +745,361 @@ final class ControlsTest {
                     .getAsJsonObject();
             assertTrue(metadata.get("required").getAsBoolean());
             assertEquals(1, metadata.getAsJsonObject("injectors").get("defaultRequire").getAsInt());
-            assertEquals(List.of("DeathDropMixin", "SlotGuardMixin"),
+            assertEquals(List.of("DeathDropMixin", "PlayerDropMixin", "SlotGuardMixin"),
                     metadata.getAsJsonArray("mixins").asList().stream()
                             .map(com.google.gson.JsonElement::getAsString).toList());
         }
+    }
+
+    @Test
+    void pickupCancelsOnlyWhenTheClickedMenuSlotIsAPersistedLockedPlayerSlot() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(5, Controls.cryControl());
+
+        assertFalse(fixture.decide(0, 0, ContainerInput.PICKUP));
+        assertTrue(fixture.decide(1, 0, ContainerInput.PICKUP));
+        assertTrue(fixture.decide(2, 1, ContainerInput.PICKUP));
+        assertFalse(fixture.decide(1, 2, ContainerInput.PICKUP));
+        assertFalse(fixture.decide(-999, 0, ContainerInput.PICKUP));
+        assertFalse(fixture.decide(99, 0, ContainerInput.PICKUP));
+    }
+
+    @Test
+    void quickMoveCancelsLockedClickedSlotButNotChestOrInvalidRoutes() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+
+        assertFalse(fixture.decide(0, 0, ContainerInput.QUICK_MOVE));
+        assertTrue(fixture.decide(1, 0, ContainerInput.QUICK_MOVE));
+        assertTrue(fixture.decide(1, 1, ContainerInput.QUICK_MOVE));
+        assertFalse(fixture.decide(1, 2, ContainerInput.QUICK_MOVE));
+        assertFalse(fixture.decide(-999, 0, ContainerInput.QUICK_MOVE));
+    }
+
+    @Test
+    void swapCancelsWhenEitherTheClickedPlayerSlotOrHotbarButtonIndexIsLocked() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(27, new ItemStack(Items.DIAMOND));
+        fixture.addPlayerSlot(5, Controls.cryControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+
+        assertTrue(fixture.decide(0, 4, ContainerInput.SWAP));
+        assertTrue(fixture.decide(1, 0, ContainerInput.SWAP));
+        assertTrue(fixture.decide(2, 8, ContainerInput.SWAP));
+        assertFalse(fixture.decide(0, 0, ContainerInput.SWAP));
+        assertFalse(fixture.decide(0, 40, ContainerInput.SWAP));
+        assertFalse(fixture.decide(0, 9, ContainerInput.SWAP));
+        assertFalse(fixture.decide(-999, 4, ContainerInput.SWAP));
+    }
+
+    @Test
+    void quickCraftCancelsOnlyValidAddStageForLockedPlayerSlots() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        fixture.carried = new ItemStack(Items.DIAMOND, 3);
+        fixture.quickcraftStatus = 1;
+        fixture.quickcraftType = 0;
+
+        assertFalse(fixture.decide(1, 0, ContainerInput.QUICK_CRAFT));
+        assertTrue(fixture.decide(1, 1, ContainerInput.QUICK_CRAFT));
+        assertTrue(fixture.decide(1, 9, ContainerInput.QUICK_CRAFT));
+        fixture.quickcraftType = 2;
+        assertFalse(fixture.decide(1, 9, ContainerInput.QUICK_CRAFT));
+        fixture.infiniteMaterials = true;
+        assertTrue(fixture.decide(1, 9, ContainerInput.QUICK_CRAFT));
+        assertFalse(fixture.decide(1, 2, ContainerInput.QUICK_CRAFT));
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        assertTrue(fixture.decide(1, 13, ContainerInput.QUICK_CRAFT));
+        assertFalse(fixture.decide(-999, 1, ContainerInput.QUICK_CRAFT));
+    }
+
+    @Test
+    void quickCraftContinuationPreservesEveryVanillaResetOrAdmissionFailure() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addPlayerSlot(4, ItemStack.EMPTY, true, true, 64);
+        fixture.carried = new ItemStack(Items.DIAMOND, 2);
+
+        fixture.quickcraftStatus = 0;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.quickcraftStatus = 1;
+        fixture.carried = ItemStack.EMPTY;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.carried = new ItemStack(Items.DIAMOND, 2);
+        fixture.canQuickReplace = false;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.canQuickReplace = true;
+        fixture.slots.get(0).mayPlace = false;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.slots.get(0).mayPlace = true;
+        fixture.canDragTo = false;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.canDragTo = true;
+        fixture.addChestSlot(0, ItemStack.EMPTY);
+        fixture.quickcraftSelectedCount = 2;
+        assertFalse(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+        fixture.quickcraftSelectedCount = 1;
+        assertTrue(fixture.decide(0, 1, ContainerInput.QUICK_CRAFT));
+    }
+
+    @Test
+    void cloneCancelsOnlyCreativeDuplicationFromAnOccupiedLockedSlot() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(5, ItemStack.EMPTY);
+
+        assertFalse(fixture.decide(1, 7, ContainerInput.CLONE));
+        fixture.infiniteMaterials = true;
+        assertTrue(fixture.decide(1, 7, ContainerInput.CLONE));
+        assertFalse(fixture.decide(0, 7, ContainerInput.CLONE));
+        assertFalse(fixture.decide(2, 7, ContainerInput.CLONE));
+        fixture.carried = new ItemStack(Items.STICK);
+        assertFalse(fixture.decide(1, 7, ContainerInput.CLONE));
+        assertFalse(fixture.decide(-999, 7, ContainerInput.CLONE));
+    }
+
+    @Test
+    void throwCancelsOnlyAnActualDropFromAnOccupiedLockedSlot() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addChestSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(5, ItemStack.EMPTY);
+
+        assertTrue(fixture.decide(1, 0, ContainerInput.THROW));
+        assertTrue(fixture.decide(1, 1, ContainerInput.THROW));
+        assertTrue(fixture.decide(1, 99, ContainerInput.THROW));
+        assertFalse(fixture.decide(0, 0, ContainerInput.THROW));
+        assertFalse(fixture.decide(2, 0, ContainerInput.THROW));
+        fixture.carried = new ItemStack(Items.STICK);
+        assertFalse(fixture.decide(1, 0, ContainerInput.THROW));
+        fixture.carried = ItemStack.EMPTY;
+        fixture.canDropItems = false;
+        assertFalse(fixture.decide(1, 0, ContainerInput.THROW));
+    }
+
+    @Test
+    void pickupAllCancelsWhenVanillaCanScanEitherLockedSlotFromElsewhere() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.carried = Controls.fireControl();
+        fixture.carried.setCount(1);
+        fixture.addChestSlot(0, ItemStack.EMPTY);
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        fixture.addPlayerSlot(5, Controls.cryControl());
+
+        assertTrue(fixture.decide(0, 0, ContainerInput.PICKUP_ALL));
+        assertTrue(fixture.decide(0, 1, ContainerInput.PICKUP_ALL));
+        assertTrue(fixture.decide(0, 2, ContainerInput.PICKUP_ALL));
+    }
+
+    @Test
+    void pickupAllUsesVanillasTwoPassDirectionCapacityAndPartialRemoval() {
+        SlotDecisionFixture reverse = SlotDecisionFixture.activePilot();
+        reverse.carried = Controls.fireControl();
+        reverse.carried.setCount(60);
+        reverse.addPlayerSlot(4, Controls.fireControl());
+        reverse.slots.get(0).stack.setCount(5);
+        reverse.addChestSlot(0, Controls.fireControl());
+        reverse.slots.get(1).stack.setCount(4);
+        reverse.addChestSlot(1, ItemStack.EMPTY);
+        assertFalse(reverse.decide(2, 2, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture twoPass = SlotDecisionFixture.activePilot();
+        twoPass.carried = Controls.fireControl();
+        twoPass.carried.setCount(1);
+        twoPass.addChestSlot(0, ItemStack.EMPTY);
+        twoPass.addPlayerSlot(4, Controls.fireControl());
+        twoPass.slots.get(1).stack.setCount(64);
+        assertTrue(twoPass.decide(0, 0, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture partialVeto = SlotDecisionFixture.activePilot();
+        partialVeto.carried = Controls.fireControl();
+        partialVeto.carried.setCount(63);
+        partialVeto.addChestSlot(0, ItemStack.EMPTY);
+        partialVeto.addPlayerSlot(4, Controls.fireControl(), true, true, 64);
+        partialVeto.slots.get(1).stack.setCount(5);
+        partialVeto.slots.get(1).allowModification = false;
+        assertFalse(partialVeto.decide(0, 0, ContainerInput.PICKUP_ALL));
+        partialVeto.slots.get(1).allowModification = true;
+        partialVeto.slots.get(1).removableAmount = 1;
+        assertTrue(partialVeto.decide(0, 0, ContainerInput.PICKUP_ALL));
+    }
+
+    @Test
+    void pickupSwapThrowAndQuickMoveSkipLockedSlotsVanillaCannotMutate() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addPlayerSlot(4, Controls.fireControl(), false, false, 0);
+        assertFalse(fixture.decide(0, 0, ContainerInput.PICKUP));
+        assertFalse(fixture.decide(0, 0, ContainerInput.QUICK_MOVE));
+        assertFalse(fixture.decide(0, 0, ContainerInput.THROW));
+
+        fixture.slots.get(0).mayPickup = true;
+        fixture.quickMoveDestination = false;
+        assertFalse(fixture.decide(0, 0, ContainerInput.QUICK_MOVE));
+        fixture.quickMoveDestination = true;
+        assertTrue(fixture.decide(0, 0, ContainerInput.QUICK_MOVE));
+
+        SlotDecisionFixture emptyLocked = SlotDecisionFixture.activePilot();
+        emptyLocked.addPlayerSlot(4, ItemStack.EMPTY, true, false, 0);
+        emptyLocked.carried = new ItemStack(Items.DIAMOND);
+        assertFalse(emptyLocked.decide(0, 0, ContainerInput.PICKUP));
+        emptyLocked.slots.get(0).mayPlace = true;
+        emptyLocked.slots.get(0).maxStackSize = 1;
+        assertTrue(emptyLocked.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture offhand = SlotDecisionFixture.activePilot();
+        offhand.addPlayerSlot(4, Controls.fireControl());
+        offhand.inventoryStacks[40] = new ItemStack(Items.STICK);
+        assertTrue(offhand.decide(0, 40, ContainerInput.SWAP));
+    }
+
+    @Test
+    void directDropDecisionProtectsOnlyThePersistedSelectedSlotForTheActivePilot() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+
+        fixture.selectedSlot = 4;
+        assertTrue(fixture.decideSelectedDrop());
+        fixture.selectedSlot = 5;
+        assertTrue(fixture.decideSelectedDrop());
+        fixture.selectedSlot = 3;
+        assertFalse(fixture.decideSelectedDrop());
+    }
+
+    @Test
+    void slotDecisionsRejectInactivePilotsUnrelatedSlotsAndMalformedRoutes() {
+        SlotDecisionFixture absent = SlotDecisionFixture.activePilot();
+        absent.state = Optional.empty();
+        absent.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(absent.decide(0, 0, ContainerInput.PICKUP));
+        assertFalse(absent.decideSelectedDrop());
+
+        SlotDecisionFixture cleared = SlotDecisionFixture.activePilot();
+        cleared.state = Optional.of(RiderState.fresh());
+        cleared.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(cleared.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture unridden = SlotDecisionFixture.activePilot();
+        unridden.rider.vehicle = null;
+        unridden.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(unridden.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture passenger = SlotDecisionFixture.activePilot();
+        passenger.ghast.firstPassenger = new TestRider();
+        passenger.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(passenger.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture nonPilot = SlotDecisionFixture.activePilot();
+        nonPilot.ghast.controller = new TestRider();
+        nonPilot.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(nonPilot.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture wrongGhast = SlotDecisionFixture.activePilot();
+        wrongGhast.state = Optional.of(activeState(UUID.randomUUID(), 1L));
+        wrongGhast.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(wrongGhast.decide(0, 0, ContainerInput.PICKUP));
+
+        SlotDecisionFixture routes = SlotDecisionFixture.activePilot();
+        routes.addChestSlot(4, Controls.fireControl());
+        routes.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(routes.decide(0, 0, ContainerInput.PICKUP));
+        assertFalse(routes.decide(-999, 0, ContainerInput.PICKUP));
+        assertFalse(routes.decide(99, 0, ContainerInput.PICKUP));
+        assertFalse(routes.decide(1, 2, ContainerInput.PICKUP));
+        assertFalse(routes.decide(1, 2, ContainerInput.QUICK_MOVE));
+        assertFalse(routes.decide(0, 9, ContainerInput.SWAP));
+        assertFalse(routes.decide(0, 40, ContainerInput.SWAP));
+        assertTrue(routes.decide(1, 40, ContainerInput.SWAP));
+        assertFalse(routes.decide(1, 0, ContainerInput.QUICK_CRAFT));
+        assertFalse(routes.decide(1, 2, ContainerInput.QUICK_CRAFT));
+        assertFalse(routes.decide(1, 13, ContainerInput.QUICK_CRAFT));
+    }
+
+    @Test
+    void malformedPersistedSlotStateFailsBeforeAnyMenuSlotIsRead() {
+        ItemStack original = new ItemStack(Items.DIAMOND);
+        UUID id = UUID.fromString("f56660f6-d255-475b-b43f-f2dcb3d2a640");
+        List<RiderState> malformed = List.of(
+                new RiderState(Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.empty(), Optional.of(id), 1L, Optional.empty()),
+                new RiderState(Optional.empty(),
+                        Optional.of(new RiderState.StashedStack(5, original)),
+                        Optional.of(id), 1L, Optional.empty()),
+                new RiderState(Optional.empty(), Optional.empty(), Optional.of(id), 1L, Optional.empty()),
+                new RiderState(Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.of(new RiderState.StashedStack(5, original)),
+                        Optional.empty(), 1L, Optional.empty()),
+                new RiderState(Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.of(id), 1L, Optional.empty()));
+
+        for (RiderState state : malformed) {
+            SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+            fixture.state = Optional.of(state);
+            fixture.addPlayerSlot(4, Controls.fireControl());
+
+            assertThrows(IllegalStateException.class,
+                    () -> fixture.decide(0, 0, ContainerInput.PICKUP));
+            assertEquals(0, fixture.slotReads);
+            assertThrows(IllegalStateException.class, fixture::decideSelectedDrop);
+            assertEquals(0, fixture.slotReads);
+        }
+    }
+
+    @Test
+    void lockConfigDisablesContainerAndDirectDropDecisions(@TempDir Path directory) throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.addPlayerSlot(4, Controls.fireControl());
+        try {
+            Files.writeString(file, "{\"controls\":{\"lockControlSlots\":false}}");
+            Config.reload(file);
+
+            assertFalse(fixture.decide(0, 0, ContainerInput.PICKUP));
+            assertFalse(fixture.decideSelectedDrop());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void pickupAllRejectsEveryVanillaNoScanOrNoCandidateCase() {
+        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
+        fixture.carried = Controls.fireControl();
+        fixture.addChestSlot(0, ItemStack.EMPTY);
+        fixture.addPlayerSlot(4, Controls.cryControl());
+        assertFalse(fixture.decide(0, 0, ContainerInput.PICKUP_ALL));
+        assertFalse(fixture.decide(0, 2, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture clickedOccupied = SlotDecisionFixture.activePilot();
+        clickedOccupied.carried = Controls.fireControl();
+        clickedOccupied.addChestSlot(0, new ItemStack(Items.STICK));
+        clickedOccupied.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(clickedOccupied.decide(0, 0, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture full = SlotDecisionFixture.activePilot();
+        full.carried = Controls.fireControl();
+        full.carried.setCount(full.carried.getMaxStackSize());
+        full.addChestSlot(0, ItemStack.EMPTY);
+        full.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(full.decide(0, 0, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture vetoed = SlotDecisionFixture.activePilot();
+        vetoed.carried = Controls.fireControl();
+        vetoed.canTakeForPickupAll = false;
+        vetoed.addChestSlot(0, ItemStack.EMPTY);
+        vetoed.addPlayerSlot(4, Controls.fireControl());
+        assertFalse(vetoed.decide(0, 0, ContainerInput.PICKUP_ALL));
+
+        SlotDecisionFixture immovable = SlotDecisionFixture.activePilot();
+        immovable.carried = Controls.fireControl();
+        immovable.addChestSlot(0, ItemStack.EMPTY);
+        immovable.addPlayerSlot(4, Controls.fireControl(), false);
+        assertFalse(immovable.decide(0, 0, ContainerInput.PICKUP_ALL));
     }
 
     @Test
@@ -991,6 +1475,34 @@ final class ControlsTest {
         return annotations.stream().filter(value -> value.desc.equals(descriptor)).findFirst().orElse(null);
     }
 
+    private static MethodNode injectedHandler(ClassNode mixin) {
+        return mixin.methods.stream()
+                .filter(method -> annotation(method.visibleAnnotations,
+                        "Lorg/spongepowered/asm/mixin/injection/Inject;") != null)
+                .findFirst().orElseThrow();
+    }
+
+    private static void assertMixinDelegatesOnlyToControls(
+            MethodNode handler, String controlsMethod, String controlsDescriptor) {
+        List<MethodInsnNode> calls = Stream.iterate(
+                        handler.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast).toList();
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+                "xyz/pyrehaven/happyartillery/Controls")
+                && call.name.equals(controlsMethod)
+                && call.desc.equals(controlsDescriptor)).count());
+        assertEquals(0, calls.stream().filter(call -> call.owner.startsWith(
+                "xyz/pyrehaven/happyartillery/")
+                && !call.owner.equals("xyz/pyrehaven/happyartillery/Controls")
+                && !call.owner.equals(
+                        "xyz/pyrehaven/happyartillery/Controls$QuickCraftSnapshot")).count());
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+                "org/spongepowered/asm/mixin/injection/callback/CallbackInfo")
+                && call.name.equals("cancel") && call.desc.equals("()V")).count());
+    }
+
     private static Object annotationValue(AnnotationNode annotation, String name) {
         assertNotNull(annotation);
         for (int index = 0; index < annotation.values.size(); index += 2) {
@@ -1163,6 +1675,146 @@ final class ControlsTest {
             }
             events.add("replace-state");
             attachedState = Optional.of(state);
+        }
+    }
+
+    private static final class SlotDecisionFixture
+            implements Controls.ContainerDecisionAccess<
+                    SlotDecisionFixture, TestGhast, SlotDecisionFixture, TestMenuSlot, Object> {
+        private final Object inventory = new Object();
+        private final Object chest = new Object();
+        private final List<TestMenuSlot> slots = new ArrayList<>();
+        private final TestRider rider = new TestRider();
+        private final TestGhast ghast;
+        private Optional<RiderState> state;
+        private ItemStack carried = ItemStack.EMPTY;
+        private boolean infiniteMaterials;
+        private boolean canDropItems = true;
+        private int selectedSlot = 4;
+        private boolean canTakeForPickupAll = true;
+        private boolean canQuickReplace = true;
+        private boolean canDragTo = true;
+        private boolean quickMoveDestination = true;
+        private int quickcraftStatus;
+        private int quickcraftType;
+        private int quickcraftSelectedCount;
+        private final ItemStack[] inventoryStacks = new ItemStack[41];
+        private int slotReads;
+
+        private SlotDecisionFixture(UUID ghastId, Optional<RiderState> state) {
+            ghast = new TestGhast(ghastId);
+            this.state = state;
+            Arrays.fill(inventoryStacks, ItemStack.EMPTY);
+        }
+
+        static SlotDecisionFixture activePilot() {
+            UUID id = UUID.fromString("fc50d08b-e6a0-441b-8e5f-15c5cdbec56d");
+            SlotDecisionFixture fixture = new SlotDecisionFixture(id, Optional.of(activeState(id, 1L)));
+            fixture.rider.vehicle = fixture.ghast;
+            fixture.ghast.firstPassenger = fixture.rider;
+            fixture.ghast.controller = fixture.rider;
+            return fixture;
+        }
+
+        private void addPlayerSlot(int inventoryIndex, ItemStack stack) {
+            addPlayerSlot(inventoryIndex, stack, true);
+        }
+
+        private void addPlayerSlot(int inventoryIndex, ItemStack stack, boolean mayPickup) {
+            addPlayerSlot(inventoryIndex, stack, mayPickup, true, stack.getMaxStackSize());
+        }
+
+        private void addPlayerSlot(
+                int inventoryIndex, ItemStack stack, boolean mayPickup, boolean mayPlace, int maxStackSize) {
+            slots.add(new TestMenuSlot(
+                    inventory, inventoryIndex, stack.copy(), mayPickup, mayPlace, maxStackSize));
+            inventoryStacks[inventoryIndex] = stack.copy();
+        }
+
+        private void addChestSlot(int containerIndex, ItemStack stack) {
+            slots.add(new TestMenuSlot(
+                    chest, containerIndex, stack.copy(), true, true, stack.getMaxStackSize()));
+        }
+
+        private boolean decide(int slotId, int button, ContainerInput input) {
+            Set<TestMenuSlot> selected = quickcraftSelectedCount == 0
+                    ? Set.of()
+                    : Set.copyOf(slots.subList(0, Math.min(quickcraftSelectedCount, slots.size())));
+            return Controls.shouldCancelContainerMutation(
+                    this, this, slotId, button, input,
+                    new Controls.QuickCraftSnapshot(quickcraftStatus, quickcraftType, selected), this);
+        }
+
+        private boolean decideSelectedDrop() {
+            return Controls.shouldCancelSelectedSlotDrop(this, this);
+        }
+
+        @Override public Optional<RiderState> state(SlotDecisionFixture player) { return state; }
+        @Override public Optional<TestGhast> riddenHappyGhast(SlotDecisionFixture player) {
+            return rider.vehicle == ghast ? Optional.of(ghast) : Optional.empty();
+        }
+        @Override public boolean isControllingFirstPassenger(SlotDecisionFixture player, TestGhast target) {
+            return target.firstPassenger == rider && target.controller == rider;
+        }
+        @Override public UUID ghastId(TestGhast target) { return target.id; }
+        @Override public Object playerInventory(SlotDecisionFixture player) { return inventory; }
+        @Override public int selectedSlot(SlotDecisionFixture player) { return selectedSlot; }
+        @Override public int slotCount(SlotDecisionFixture menu) { return slots.size(); }
+        @Override public TestMenuSlot slot(SlotDecisionFixture menu, int slotId) {
+            slotReads++;
+            return slots.get(slotId);
+        }
+        @Override public Object slotContainer(TestMenuSlot slot) { return slot.container; }
+        @Override public int containerSlot(TestMenuSlot slot) { return slot.containerSlot; }
+        @Override public ItemStack carried(SlotDecisionFixture menu) { return carried.copy(); }
+        @Override public boolean hasItem(TestMenuSlot slot) { return !slot.stack.isEmpty(); }
+        @Override public ItemStack item(TestMenuSlot slot) { return slot.stack.copy(); }
+        @Override public boolean mayPickup(TestMenuSlot slot, SlotDecisionFixture player) { return slot.mayPickup; }
+        @Override public boolean mayPlace(TestMenuSlot slot, ItemStack stack) { return slot.mayPlace; }
+        @Override public boolean allowModification(TestMenuSlot slot, SlotDecisionFixture player) {
+            return slot.allowModification;
+        }
+        @Override public int maxStackSize(TestMenuSlot slot, ItemStack stack) { return slot.maxStackSize; }
+        @Override public int removableAmount(TestMenuSlot slot, int requested) {
+            return Math.min(requested, slot.removableAmount);
+        }
+        @Override public boolean canItemQuickReplace(
+                TestMenuSlot slot, ItemStack stack, boolean allowOverflow) { return canQuickReplace; }
+        @Override public boolean canDragTo(SlotDecisionFixture menu, TestMenuSlot slot) { return canDragTo; }
+        @Override public boolean canQuickMove(
+                SlotDecisionFixture menu, SlotDecisionFixture player, int slotId, TestMenuSlot slot) {
+            return quickMoveDestination;
+        }
+        @Override public ItemStack inventoryItem(SlotDecisionFixture player, int slot) {
+            return inventoryStacks[slot].copy();
+        }
+        @Override public boolean canTakeForPickupAll(
+                SlotDecisionFixture menu, ItemStack carriedStack, TestMenuSlot slot) {
+            return canTakeForPickupAll;
+        }
+        @Override public boolean hasInfiniteMaterials(SlotDecisionFixture player) { return infiniteMaterials; }
+        @Override public boolean canDropItems(SlotDecisionFixture player) { return canDropItems; }
+    }
+
+    private static final class TestMenuSlot {
+        private final Object container;
+        private final int containerSlot;
+        private final ItemStack stack;
+        private boolean mayPickup;
+        private boolean mayPlace;
+        private int maxStackSize;
+        private boolean allowModification = true;
+        private int removableAmount = Integer.MAX_VALUE;
+
+        private TestMenuSlot(
+                Object container, int containerSlot, ItemStack stack,
+                boolean mayPickup, boolean mayPlace, int maxStackSize) {
+            this.container = container;
+            this.containerSlot = containerSlot;
+            this.stack = stack;
+            this.mayPickup = mayPickup;
+            this.mayPlace = mayPlace;
+            this.maxStackSize = maxStackSize;
         }
     }
 
