@@ -33,6 +33,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.AnnotationNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -547,6 +553,72 @@ final class ControlsTest {
     }
 
     @Test
+    void deathDropMixinWrapsTheExactCommittedDropInvocationAndDelegatesOnce() throws Exception {
+        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.DeathDropMixin");
+        AnnotationNode target = annotation(mixin.invisibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/Mixin;");
+        assertEquals(List.of(Type.getType(ServerPlayer.class)), annotationValue(target, "value"));
+
+        MethodNode wrapper = mixin.methods.stream()
+                .filter(method -> annotation(method.visibleAnnotations,
+                        "Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;") != null)
+                .findFirst().orElseThrow();
+        AnnotationNode wrap = annotation(wrapper.visibleAnnotations,
+                "Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;");
+        assertEquals(List.of("die(Lnet/minecraft/world/damagesource/DamageSource;)V"),
+                annotationValue(wrap, "method"));
+        assertEquals(1, annotationValue(wrap, "require"));
+        AnnotationNode at = (AnnotationNode) ((List<?>) annotationValue(wrap, "at")).getFirst();
+        assertEquals("INVOKE", annotationValue(at, "value"));
+        assertEquals("Lnet/minecraft/server/level/ServerPlayer;dropAllDeathLoot("
+                        + "Lnet/minecraft/server/level/ServerLevel;"
+                        + "Lnet/minecraft/world/damagesource/DamageSource;)V",
+                annotationValue(at, "target"));
+
+        List<MethodInsnNode> calls = Stream.iterate(
+                        wrapper.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast).toList();
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+                "xyz/pyrehaven/happyartillery/Controls")
+                && call.name.equals("beforeDeathDrops")
+                && call.desc.equals("(Lnet/minecraft/server/level/ServerPlayer;Ljava/lang/Runnable;)V"))
+                .count());
+        assertEquals(0, calls.stream().filter(call -> call.owner.equals(
+                "xyz/pyrehaven/happyartillery/RiderState")).count());
+        MethodNode originalCall = mixin.methods.stream()
+                .filter(method -> method.name.startsWith(
+                        "lambda$happyArtillery$restoreBeforeDeathDrops"))
+                .findFirst().orElseThrow();
+        List<MethodInsnNode> originalCalls = Stream.iterate(
+                        originalCall.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast).toList();
+        assertEquals(1, originalCalls.stream().filter(call -> call.owner.equals(
+                "com/llamalad7/mixinextras/injector/wrapoperation/Operation")
+                && call.name.equals("call")
+                && call.desc.equals("([Ljava/lang/Object;)Ljava/lang/Object;")).count());
+    }
+
+    @Test
+    void mixinMetadataRequiresBothDeclaredPlumbingClasses() throws Exception {
+        try (InputStream input = ControlsTest.class.getResourceAsStream(
+                "/happy-artillery.mixins.json")) {
+            assertNotNull(input);
+            com.google.gson.JsonObject metadata = com.google.gson.JsonParser.parseReader(
+                    new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            assertTrue(metadata.get("required").getAsBoolean());
+            assertEquals(1, metadata.getAsJsonObject("injectors").get("defaultRequire").getAsInt());
+            assertEquals(List.of("DeathDropMixin", "SlotGuardMixin"),
+                    metadata.getAsJsonArray("mixins").asList().stream()
+                            .map(com.google.gson.JsonElement::getAsString).toList());
+        }
+    }
+
+    @Test
     void activeReloadKeepsPersistedSlotsAndNextMountAdoptsNewLiveSlots(@TempDir Path directory)
             throws Exception {
         Config originalConfig = Config.current();
@@ -900,6 +972,33 @@ final class ControlsTest {
                         Components.FIRE_CONTROL, Components.CRY_CONTROL),
                 Arguments.of("cry", Controls.cryControl(),
                         Components.CRY_CONTROL, Components.FIRE_CONTROL));
+    }
+
+    private static ClassNode classNode(String className) throws IOException {
+        String resource = "/" + className.replace('.', '/') + ".class";
+        try (InputStream input = ControlsTest.class.getResourceAsStream(resource)) {
+            assertNotNull(input, "missing compiled class " + className);
+            ClassNode node = new ClassNode();
+            new ClassReader(input).accept(node, 0);
+            return node;
+        }
+    }
+
+    private static AnnotationNode annotation(List<AnnotationNode> annotations, String descriptor) {
+        if (annotations == null) {
+            return null;
+        }
+        return annotations.stream().filter(value -> value.desc.equals(descriptor)).findFirst().orElse(null);
+    }
+
+    private static Object annotationValue(AnnotationNode annotation, String name) {
+        assertNotNull(annotation);
+        for (int index = 0; index < annotation.values.size(); index += 2) {
+            if (annotation.values.get(index).equals(name)) {
+                return annotation.values.get(index + 1);
+            }
+        }
+        throw new AssertionError("Missing annotation value " + name);
     }
 
     private static List<MethodReference> methodReferences(Class<?> type) throws IOException {

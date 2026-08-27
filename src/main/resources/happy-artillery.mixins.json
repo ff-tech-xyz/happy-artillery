@@ -3,6 +3,7 @@
   "package": "xyz.pyrehaven.happyartillery.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "DeathDropMixin",
     "SlotGuardMixin"
   ],
   "injectors": {
