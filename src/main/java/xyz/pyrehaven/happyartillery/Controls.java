@@ -1,8 +1,13 @@
 package xyz.pyrehaven.happyartillery;
 
 import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -23,8 +28,27 @@ public final class Controls {
     private Controls() {
     }
 
-    static ItemStack holdControl(ItemStack template) {
-        ItemStack control = Objects.requireNonNull(template, "template").copy();
+    static ItemStack fireControl() {
+        Config.Controls settings = Config.current().controls();
+        return control(settings.fireItem(), "Fire Control", Components.FIRE_CONTROL);
+    }
+
+    static ItemStack cryControl() {
+        Config.Controls settings = Config.current().controls();
+        return control(settings.cryItem(), "Cry Control", Components.CRY_CONTROL);
+    }
+
+    private static ItemStack control(
+            String itemId,
+            String name,
+            DataComponentType<Unit> marker) {
+        ItemStack control = new ItemStack(BuiltInRegistries.ITEM
+                .getOptional(Identifier.parse(itemId))
+                .orElseThrow(() -> new IllegalStateException(
+                        "Validated control item is no longer registered: " + itemId)));
+        control.set(marker, Unit.INSTANCE);
+        control.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        control.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
         control.set(DataComponents.CONSUMABLE, HOLD_USE);
         return control;
     }
@@ -59,7 +83,7 @@ public final class Controls {
     }
 
     private static boolean isHoldControl(ItemStack stack) {
-        return HOLD_USE.equals(stack.get(DataComponents.CONSUMABLE));
+        return stack.has(Components.FIRE_CONTROL) && !stack.has(Components.CRY_CONTROL);
     }
 
     enum FireIntent {

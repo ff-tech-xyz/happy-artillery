@@ -10,6 +10,8 @@ import com.google.gson.JsonPrimitive;
 import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -211,8 +213,8 @@ public record Config(
         if (controls.fireSlot() == controls.crySlot()) {
             throw new IllegalArgumentException("Control slots must be distinct");
         }
-        requireIdentifier("controls.fireItem", controls.fireItem());
-        requireIdentifier("controls.cryItem", controls.cryItem());
+        requireRegisteredItem("controls.fireItem", controls.fireItem());
+        requireRegisteredItem("controls.cryItem", controls.cryItem());
 
         requirePositive("fire.shotCooldownSeconds", fire.shotCooldownSeconds());
         requireNonNegative("fire.explosionPower", fire.explosionPower());
@@ -261,6 +263,13 @@ public record Config(
     private static void requireIdentifier(String name, String value) {
         if (value == null || !IDENTIFIER.matcher(value).matches()) {
             throw new IllegalArgumentException(name + " is not a valid identifier");
+        }
+    }
+
+    private static void requireRegisteredItem(String name, String value) {
+        requireIdentifier(name, value);
+        if (BuiltInRegistries.ITEM.getOptional(Identifier.parse(value)).isEmpty()) {
+            throw new IllegalArgumentException(name + " is not a registered item: " + value);
         }
     }
 

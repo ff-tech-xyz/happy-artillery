@@ -1,11 +1,19 @@
 package xyz.pyrehaven.happyartillery;
 
+import com.mojang.serialization.JsonOps;
+import io.netty.buffer.Unpooled;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.util.Unit;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
@@ -13,13 +21,23 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.component.Consumable;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 final class ControlsTest {
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
@@ -40,8 +59,157 @@ final class ControlsTest {
     }
 
     @Test
+    void happyArtilleryRegistersComponentsBeforeTheDeliberateGuard() {
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> new HappyArtillery().onInitialize());
+
+        assertEquals("Happy Artillery structural groundwork is not a playable build",
+                failure.getMessage());
+        assertSame(Components.FIRE_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                Identifier.fromNamespaceAndPath("happy-artillery", "fire_control")));
+        assertSame(Components.CRY_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                Identifier.fromNamespaceAndPath("happy-artillery", "cry_control")));
+    }
+
+    @Test
+    void componentsRegisterExactFireAndCryMarkerIdentities() {
+        Components.register();
+        DataComponentType<?> fire = Components.FIRE_CONTROL;
+        DataComponentType<?> cry = Components.CRY_CONTROL;
+
+        assertSame(fire, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                Identifier.fromNamespaceAndPath("happy-artillery", "fire_control")));
+        assertSame(cry, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                Identifier.fromNamespaceAndPath("happy-artillery", "cry_control")));
+        assertNotSame(fire, cry);
+    }
+
+    @Test
+    void componentCatalogIsExactlyTwoImmutablePersistentSynchronizedUnitMarkers() {
+        Components.register();
+
+        assertEquals(List.of(Components.FIRE_CONTROL, Components.CRY_CONTROL), Components.catalog());
+        assertThrows(UnsupportedOperationException.class,
+                () -> Components.catalog().add(Components.FIRE_CONTROL));
+        for (DataComponentType<Unit> marker : Components.catalog()) {
+            assertFalse(marker.isTransient());
+            assertSame(Unit.INSTANCE, marker.codecOrThrow()
+                    .parse(JsonOps.INSTANCE, marker.codecOrThrow()
+                            .encodeStart(JsonOps.INSTANCE, Unit.INSTANCE)
+                            .getOrThrow())
+                    .getOrThrow());
+
+            RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(
+                    Unpooled.buffer(),
+                    RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY));
+            try {
+                marker.streamCodec().encode(buffer, Unit.INSTANCE);
+                assertSame(Unit.INSTANCE, marker.streamCodec().decode(buffer));
+            } finally {
+                buffer.release();
+            }
+        }
+    }
+
+    @Test
+    @Order(1)
+    void componentRegistrationRetriesPartialStateAndRejectsDifferentIdentity() {
+        Identifier fireId = Identifier.fromNamespaceAndPath("happy-artillery", "fire_control");
+        Identifier cryId = Identifier.fromNamespaceAndPath("happy-artillery", "cry_control");
+        Registry.register(BuiltInRegistries.DATA_COMPONENT_TYPE, fireId, Components.FIRE_CONTROL);
+
+        Components.register();
+        Components.register();
+
+        assertSame(Components.FIRE_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                fireId));
+        assertSame(Components.CRY_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
+                cryId));
+        DataComponentType<Unit> different = DataComponentType.<Unit>builder()
+                .persistent(Unit.CODEC)
+                .networkSynchronized(Unit.STREAM_CODEC)
+                .build();
+        assertThrows(IllegalStateException.class, () -> Components.register(fireId, different));
+    }
+
+    @ParameterizedTest(name = "{0} survives persistence and network round trips")
+    @MethodSource("controlStacks")
+    void markerIdentitySurvivesItemPersistenceAndNetworkRoundTrips(
+            String name,
+            ItemStack original,
+            DataComponentType<Unit> marker,
+            DataComponentType<Unit> opposite) {
+        Components.register();
+        ItemStack persisted = ItemStack.CODEC.parse(
+                        JsonOps.INSTANCE,
+                        ItemStack.CODEC.encodeStart(JsonOps.INSTANCE, original).getOrThrow())
+                .getOrThrow();
+
+        assertSame(Unit.INSTANCE, persisted.get(marker));
+        assertFalse(persisted.has(opposite));
+        assertTrue(ItemStack.matches(original, persisted));
+
+        RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(
+                Unpooled.buffer(),
+                RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY));
+        try {
+            ItemStack.STREAM_CODEC.encode(buffer, original);
+            ItemStack synchronizedStack = ItemStack.STREAM_CODEC.decode(buffer);
+
+            assertSame(Unit.INSTANCE, synchronizedStack.get(marker));
+            assertFalse(synchronizedStack.has(opposite));
+            assertTrue(ItemStack.matches(original, synchronizedStack));
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
+    void factoriesCreateFreshNamedGlintingFireAndCryControls() {
+        Components.register();
+
+        ItemStack firstFire = Controls.fireControl();
+        ItemStack secondFire = Controls.fireControl();
+        ItemStack cry = Controls.cryControl();
+
+        assertNotSame(firstFire, secondFire);
+        assertTrue(firstFire.is(Items.FIRE_CHARGE));
+        assertTrue(cry.is(Items.GHAST_TEAR));
+        assertSame(Unit.INSTANCE, firstFire.get(Components.FIRE_CONTROL));
+        assertFalse(firstFire.has(Components.CRY_CONTROL));
+        assertSame(Unit.INSTANCE, cry.get(Components.CRY_CONTROL));
+        assertFalse(cry.has(Components.FIRE_CONTROL));
+        assertEquals("Fire Control", firstFire.getHoverName().getString());
+        assertEquals("Cry Control", cry.getHoverName().getString());
+        assertTrue(firstFire.hasFoil());
+        assertTrue(cry.hasFoil());
+        assertEquals(firstFire.get(DataComponents.CONSUMABLE), cry.get(DataComponents.CONSUMABLE));
+        assertNotNull(firstFire.get(DataComponents.CONSUMABLE));
+    }
+
+    @Test
+    void factoriesReadEveryValidConfigChangeAtCallTime(@TempDir Path directory) throws Exception {
+        Components.register();
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        try {
+            Files.writeString(file, """
+                    {"controls":{"fireItem":"minecraft:snowball","cryItem":"minecraft:feather"}}
+                    """);
+            Config.reload(file);
+
+            assertTrue(Controls.fireControl().is(Items.SNOWBALL));
+            assertTrue(Controls.cryControl().is(Items.FEATHER));
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
     void holdControlUsesTheExactLongSilentAnimationFreeConsumableApi() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
 
         Consumable consumable = control.get(DataComponents.CONSUMABLE);
 
@@ -55,9 +223,8 @@ final class ControlsTest {
     }
 
     @Test
-    void holdControlAndObservedUseDefensivelyOwnTheirStacks() {
-        ItemStack template = new ItemStack(Items.FIRE_CHARGE, 2);
-        ItemStack control = Controls.holdControl(template);
+    void factoriesAndObservedUseDefensivelyOwnTheirStacks() {
+        ItemStack control = Controls.fireControl();
         RecordingObservation source = new RecordingObservation(true, InteractionHand.MAIN_HAND, control);
 
         Controls.ObservedUse observed = Controls.observeUse(source, source);
@@ -65,15 +232,13 @@ final class ControlsTest {
         ItemStack firstRead = observed.stack();
         firstRead.setCount(9);
 
-        assertEquals(2, template.getCount());
-        assertNotSame(template, control);
-        assertEquals(2, observed.stack().getCount());
+        assertEquals(1, observed.stack().getCount());
         assertNotSame(firstRead, observed.stack());
     }
 
     @Test
     void holdModeContinuouslyUsesMainAndOffhandServerState() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
 
         Controls.ObservedUse main = observe(true, InteractionHand.MAIN_HAND, control);
         Controls.ObservedUse off = observe(true, InteractionHand.OFF_HAND, control);
@@ -88,7 +253,7 @@ final class ControlsTest {
 
     @Test
     void releasingServerUseStateCancelsHoldIntent() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
 
         Controls.ObservedUse released = observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
 
@@ -98,10 +263,47 @@ final class ControlsTest {
 
     @Test
     void observedUseRejectsUsingStateWithoutAnObservedHand() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
 
         assertThrows(NullPointerException.class,
                 () -> new Controls.ObservedUse(true, null, control));
+    }
+
+    @Test
+    void fireIntentRequiresTheFireMarkerNotPlainForgedOrCryIdentity() {
+        Components.register();
+        ItemStack fire = Controls.fireControl();
+        ItemStack cry = Controls.cryControl();
+        ItemStack plain = new ItemStack(Items.FIRE_CHARGE);
+        ItemStack forgedConsumable = plain.copy();
+        forgedConsumable.set(DataComponents.CONSUMABLE, fire.get(DataComponents.CONSUMABLE));
+        ItemStack oppositeMarker = forgedConsumable.copy();
+        oppositeMarker.set(Components.CRY_CONTROL, Unit.INSTANCE);
+
+        assertEquals(Controls.FireIntent.HELD,
+                Controls.fireIntent(true, Controls.ObservedClick.none(),
+                        observe(true, InteractionHand.MAIN_HAND, fire)));
+        for (ItemStack rejected : List.of(plain, forgedConsumable, oppositeMarker, cry)) {
+            assertEquals(Controls.FireIntent.NONE,
+                    Controls.fireIntent(true, Controls.ObservedClick.none(),
+                            observe(true, InteractionHand.MAIN_HAND, rejected)));
+            assertEquals(Controls.FireIntent.NONE,
+                    Controls.fireIntent(false, Controls.ObservedClick.of(rejected),
+                            observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY)));
+        }
+    }
+
+    @Test
+    void bothMarkersRejectHoldAndClick() {
+        ItemStack both = Controls.fireControl();
+        both.set(Components.CRY_CONTROL, Unit.INSTANCE);
+
+        assertEquals(Controls.FireIntent.NONE,
+                Controls.fireIntent(true, Controls.ObservedClick.none(),
+                        observe(true, InteractionHand.MAIN_HAND, both)));
+        assertEquals(Controls.FireIntent.NONE,
+                Controls.fireIntent(false, Controls.ObservedClick.of(both),
+                        observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY)));
     }
 
     @Test
@@ -119,7 +321,7 @@ final class ControlsTest {
 
     @Test
     void clickModeUsesExactlyTheObservedClickWithoutHoldOrRateInference() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
         Controls.ObservedUse released = observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
 
         Controls.ObservedClick click = Controls.ObservedClick.of(control);
@@ -148,7 +350,7 @@ final class ControlsTest {
 
     @Test
     void observationReadsEveryBoundaryValueIntoOneImmutableSnapshot() {
-        ItemStack control = Controls.holdControl(new ItemStack(Items.FIRE_CHARGE));
+        ItemStack control = Controls.fireControl();
         RecordingObservation source = new RecordingObservation(true, InteractionHand.OFF_HAND, control);
 
         Controls.ObservedUse observed = Controls.observeUse(source, source);
@@ -165,6 +367,14 @@ final class ControlsTest {
             boolean using, InteractionHand hand, ItemStack stack) {
         RecordingObservation source = new RecordingObservation(using, hand, stack);
         return Controls.observeUse(source, source);
+    }
+
+    private static Stream<Arguments> controlStacks() {
+        return Stream.of(
+                Arguments.of("fire", Controls.fireControl(),
+                        Components.FIRE_CONTROL, Components.CRY_CONTROL),
+                Arguments.of("cry", Controls.cryControl(),
+                        Components.CRY_CONTROL, Components.FIRE_CONTROL));
     }
 
     private static List<MethodReference> methodReferences(Class<?> type) throws IOException {

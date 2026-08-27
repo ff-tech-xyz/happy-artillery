@@ -4,6 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,6 +15,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -26,6 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ConfigTest {
+    @BeforeAll
+    static void bootstrapMinecraftRegistries() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
     @Test
     void configSchemaIsImmutable() {
         assertTrue(Config.class.isRecord(), "Config must be an immutable record");
@@ -240,6 +250,39 @@ final class ConfigTest {
         assertEquals(100, Config.reload(file).hud().warningFromPercent());
     }
 
+    @ParameterizedTest(name = "startup rejects unregistered controls.{0}")
+    @MethodSource("unregisteredControlItems")
+    void startupRejectsUnregisteredControlItemWithoutMutation(
+            String key, String itemId, @TempDir Path directory) throws Exception {
+        Path baselineFile = directory.resolve("baseline.json");
+        Files.writeString(baselineFile, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(baselineFile);
+        Path invalidFile = directory.resolve("invalid.json");
+        byte[] invalid = controlItemDocument(key, itemId).getBytes(StandardCharsets.UTF_8);
+        Files.write(invalidFile, invalid);
+
+        assertThrows(IllegalArgumentException.class, () -> Config.load(invalidFile));
+
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(invalidFile));
+    }
+
+    @ParameterizedTest(name = "reload rejects unregistered controls.{0}")
+    @MethodSource("unregisteredControlItems")
+    void reloadRejectsUnregisteredControlItemWithoutMutation(
+            String key, String itemId, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(file);
+        byte[] invalid = controlItemDocument(key, itemId).getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        assertThrows(IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("invalidExistingFiles")
     void invalidExistingFileFailsLoudlyWithoutRewrite(
@@ -297,6 +340,16 @@ final class ConfigTest {
                 Arguments.of("unquoted keys", "{controls:{\"fireSlot\":2}}"),
                 Arguments.of("trailing comment after the document", "{} /* trailing */"),
                 Arguments.of("trailing token after the document", "{} true"));
+    }
+
+    private static Stream<Arguments> unregisteredControlItems() {
+        return Stream.of(
+                Arguments.of("fireItem", "happy-artillery:unregistered_fire_item"),
+                Arguments.of("cryItem", "happy-artillery:unregistered_cry_item"));
+    }
+
+    private static String controlItemDocument(String key, String itemId) {
+        return "{\"controls\":{\"" + key + "\":\"" + itemId + "\"}}";
     }
 
     private static Stream<Arguments> duplicateKeyDocuments() {

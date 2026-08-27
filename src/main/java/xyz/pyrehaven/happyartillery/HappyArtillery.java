@@ -8,6 +8,7 @@ import net.fabricmc.api.ModInitializer;
 public final class HappyArtillery implements ModInitializer {
     @Override
     public void onInitialize() {
+        Components.register();
         GhastState.register();
         RiderState.register();
         throw new IllegalStateException(
