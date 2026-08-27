@@ -1,5 +1,6 @@
 package xyz.pyrehaven.happyartillery;
 
+import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
@@ -124,6 +125,35 @@ public final class Controls {
                 Optional.empty(),
                 state.lastHandledTick(),
                 state.hudCache());
+    }
+
+    public static void beforeDeathDrops(ServerPlayer player, Runnable createDrops) {
+        beforeDeathDrops(player, ServerPlayerDeathDropAccess.INSTANCE, createDrops);
+    }
+
+    static <T> void beforeDeathDrops(
+            T player,
+            DeathDropAccess<T> access,
+            Runnable createDrops) {
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(access, "access");
+        Objects.requireNonNull(createDrops, "createDrops");
+        Optional<RiderState> attached = access.state(player);
+        if (attached.isPresent()) {
+            RiderState state = attached.get();
+            boolean fireStashed = state.fireStash().isPresent();
+            boolean cryStashed = state.cryStash().isPresent();
+            if (fireStashed != cryStashed) {
+                throw new IllegalStateException("Rider inventory stash must be complete or empty");
+            }
+            if (!fireStashed && state.riddenGhastId().isPresent()) {
+                throw new IllegalStateException("Ridden ghast id cannot exist without a stash");
+            }
+            if (fireStashed) {
+                access.replaceState(player, restore(player, state, access));
+            }
+        }
+        createDrops.run();
     }
 
     static RiderState reconcile(
@@ -499,6 +529,42 @@ public final class Controls {
         ItemStack read(T inventory, int slot);
 
         void write(T inventory, int slot, ItemStack stack);
+    }
+
+    interface DeathDropAccess<T> extends InventoryAccess<T> {
+        Optional<RiderState> state(T player);
+
+        void replaceState(T player, RiderState state);
+    }
+
+    enum ServerPlayerDeathDropAccess implements DeathDropAccess<ServerPlayer> {
+        INSTANCE;
+
+        @Override
+        public int size(ServerPlayer player) {
+            return ServerPlayerInventoryAccess.INSTANCE.size(player);
+        }
+
+        @Override
+        public ItemStack read(ServerPlayer player, int slot) {
+            return ServerPlayerInventoryAccess.INSTANCE.read(player, slot);
+        }
+
+        @Override
+        public void write(ServerPlayer player, int slot, ItemStack stack) {
+            ServerPlayerInventoryAccess.INSTANCE.write(player, slot, stack);
+        }
+
+        @Override
+        public Optional<RiderState> state(ServerPlayer player) {
+            AttachmentTarget target = (AttachmentTarget) (Object) player;
+            return Optional.ofNullable(target.getAttached(RiderState.register()));
+        }
+
+        @Override
+        public void replaceState(ServerPlayer player, RiderState state) {
+            RiderState.replace((AttachmentTarget) (Object) player, state);
+        }
     }
 
     enum ServerPlayerInventoryAccess implements InventoryAccess<ServerPlayer> {

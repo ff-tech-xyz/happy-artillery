@@ -410,6 +410,143 @@ final class ControlsTest {
     }
 
     @Test
+    void deathBoundaryRestoresAndReplacesStateBeforeDropSnapshot() {
+        RecordingInventory inventory = new RecordingInventory(9);
+        ItemStack fireOriginal = new ItemStack(Items.DIAMOND_SWORD);
+        fireOriginal.setDamageValue(19);
+        ItemStack cryOriginal = new ItemStack(Items.WRITABLE_BOOK, 6);
+        cryOriginal.set(DataComponents.REPAIR_COST, 12);
+        inventory.seed(4, Controls.fireControl());
+        inventory.seed(5, Controls.cryControl());
+        RiderState active = new RiderState(
+                Optional.of(new RiderState.StashedStack(4, fireOriginal)),
+                Optional.of(new RiderState.StashedStack(5, cryOriginal)),
+                Optional.of(UUID.fromString("aa1ea980-aa19-43f0-9476-933373fb19f5")),
+                101L,
+                Optional.of(new RiderState.HudCache(0.4, "yellow", "HOT", 99L)));
+        inventory.attach(active);
+
+        Controls.beforeDeathDrops(inventory, inventory, inventory::snapshotDrops);
+
+        assertTrue(ItemStack.matches(fireOriginal, inventory.drops().get(4)));
+        assertTrue(ItemStack.matches(cryOriginal, inventory.drops().get(5)));
+        assertEquals(Optional.empty(), inventory.attachedState().orElseThrow().fireStash());
+        assertEquals(Optional.empty(), inventory.attachedState().orElseThrow().cryStash());
+        assertEquals(Optional.empty(), inventory.attachedState().orElseThrow().riddenGhastId());
+        assertEquals(101L, inventory.attachedState().orElseThrow().lastHandledTick());
+        assertEquals(active.hudCache(), inventory.attachedState().orElseThrow().hudCache());
+        assertTrue(inventory.events().indexOf("replace-state")
+                < inventory.events().indexOf("drop-snapshot"));
+        assertEquals(2, inventory.events().stream().filter(event -> event.startsWith("write:")).count());
+        assertEquals(1, inventory.events().stream().filter("replace-state"::equals).count());
+        assertEquals(1, inventory.events().stream().filter("drop-snapshot"::equals).count());
+    }
+
+    @Test
+    void deathBoundaryRejectsEveryMalformedPartialStateBeforeDropCreation() {
+        ItemStack original = new ItemStack(Items.DIAMOND);
+        UUID ghastId = UUID.fromString("35200c02-d841-48ad-af95-22cf27aa9469");
+        List<RiderState> malformed = List.of(
+                new RiderState(
+                        Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.empty(), Optional.of(ghastId), 1L, Optional.empty()),
+                new RiderState(
+                        Optional.empty(),
+                        Optional.of(new RiderState.StashedStack(5, original)),
+                        Optional.of(ghastId), 1L, Optional.empty()),
+                new RiderState(
+                        Optional.empty(), Optional.empty(), Optional.of(ghastId),
+                        1L, Optional.empty()),
+                new RiderState(
+                        Optional.of(new RiderState.StashedStack(4, original)),
+                        Optional.of(new RiderState.StashedStack(5, original)),
+                        Optional.empty(), 1L, Optional.empty()));
+
+        for (RiderState state : malformed) {
+            RecordingInventory inventory = new RecordingInventory(9);
+            inventory.attach(state);
+
+            assertThrows(IllegalStateException.class,
+                    () -> Controls.beforeDeathDrops(inventory, inventory, inventory::snapshotDrops));
+            assertTrue(inventory.events().isEmpty());
+        }
+    }
+
+    @Test
+    void deathBoundaryLeavesAbsentAndClearedStateUnchanged() {
+        RecordingInventory absent = new RecordingInventory(9);
+        absent.seed(2, new ItemStack(Items.EMERALD, 3));
+
+        Controls.beforeDeathDrops(absent, absent, absent::snapshotDrops);
+
+        assertEquals(Optional.empty(), absent.attachedState());
+        assertEquals(List.of("drop-snapshot"), absent.events());
+        assertEquals(3, absent.drops().get(2).getCount());
+
+        RecordingInventory cleared = new RecordingInventory(9);
+        RiderState state = RiderState.fresh();
+        cleared.attach(state);
+
+        Controls.beforeDeathDrops(cleared, cleared, cleared::snapshotDrops);
+
+        assertSame(state, cleared.attachedState().orElseThrow());
+        assertEquals(List.of("drop-snapshot"), cleared.events());
+    }
+
+    @Test
+    void deathBoundaryPropagatesRestoreReplaceAndDropFailures() {
+        RiderState active = activeState(
+                UUID.fromString("eb6cedc6-7ca3-482d-9838-a33d650038af"), 12L);
+
+        RecordingInventory restoreFailure = new RecordingInventory(9);
+        restoreFailure.attach(active);
+        restoreFailure.failOnWrite(1);
+        IllegalStateException restore = assertThrows(IllegalStateException.class,
+                () -> Controls.beforeDeathDrops(
+                        restoreFailure, restoreFailure, restoreFailure::snapshotDrops));
+        assertEquals("fixture write failure 1", restore.getMessage());
+        assertFalse(restoreFailure.events().contains("replace-state"));
+        assertFalse(restoreFailure.events().contains("drop-snapshot"));
+
+        RecordingInventory replaceFailure = new RecordingInventory(9);
+        replaceFailure.attach(active);
+        replaceFailure.failOnReplace();
+        IllegalStateException replace = assertThrows(IllegalStateException.class,
+                () -> Controls.beforeDeathDrops(
+                        replaceFailure, replaceFailure, replaceFailure::snapshotDrops));
+        assertEquals("fixture replace failure", replace.getMessage());
+        assertFalse(replaceFailure.events().contains("drop-snapshot"));
+
+        RecordingInventory dropFailure = new RecordingInventory(9);
+        dropFailure.attach(active);
+        IllegalStateException drop = assertThrows(IllegalStateException.class,
+                () -> Controls.beforeDeathDrops(dropFailure, dropFailure, () -> {
+                    throw new IllegalStateException("fixture drop failure");
+                }));
+        assertEquals("fixture drop failure", drop.getMessage());
+        assertEquals(Optional.empty(), dropFailure.attachedState().orElseThrow().fireStash());
+        assertEquals(1, dropFailure.events().stream().filter("replace-state"::equals).count());
+    }
+
+    @Test
+    void productionDeathBoundaryBindsExactAttachmentOwnerAndExistingInventoryAdapter() throws Exception {
+        List<MethodReference> calls = methodReferences(Controls.ServerPlayerDeathDropAccess.class);
+
+        assertEquals(void.class, Controls.class.getDeclaredMethod(
+                "beforeDeathDrops", ServerPlayer.class, Runnable.class).getReturnType());
+        assertTrue(calls.contains(new MethodReference(
+                "net/fabricmc/fabric/api/attachment/v1/AttachmentTarget", "getAttached",
+                "(Lnet/fabricmc/fabric/api/attachment/v1/AttachmentType;)Ljava/lang/Object;")));
+        assertTrue(calls.contains(new MethodReference(
+                "xyz/pyrehaven/happyartillery/RiderState", "replace",
+                "(Lnet/fabricmc/fabric/api/attachment/v1/AttachmentTarget;"
+                        + "Lxyz/pyrehaven/happyartillery/RiderState;)"
+                        + "Lxyz/pyrehaven/happyartillery/RiderState;")));
+        assertTrue(calls.stream().filter(call -> call.owner().equals(
+                "xyz/pyrehaven/happyartillery/Controls$ServerPlayerInventoryAccess")).count() >= 3);
+    }
+
+    @Test
     void activeReloadKeepsPersistedSlotsAndNextMountAdoptsNewLiveSlots(@TempDir Path directory)
             throws Exception {
         Config originalConfig = Config.current();
@@ -839,11 +976,14 @@ final class ControlsTest {
     }
 
     private static final class RecordingInventory
-            implements Controls.InventoryAccess<RecordingInventory> {
+            implements Controls.DeathDropAccess<RecordingInventory> {
         private final ItemStack[] stacks;
         private final List<String> events = new ArrayList<>();
+        private List<ItemStack> drops = List.of();
+        private Optional<RiderState> attachedState = Optional.empty();
         private int failOnWrite;
         private int writes;
+        private boolean failOnReplace;
 
         private RecordingInventory(int size) {
             stacks = new ItemStack[size];
@@ -866,8 +1006,29 @@ final class ControlsTest {
             events.clear();
         }
 
+        private void attach(RiderState state) {
+            attachedState = Optional.of(state);
+        }
+
+        private Optional<RiderState> attachedState() {
+            return attachedState;
+        }
+
+        private void snapshotDrops() {
+            events.add("drop-snapshot");
+            drops = Arrays.stream(stacks).map(ItemStack::copy).toList();
+        }
+
+        private List<ItemStack> drops() {
+            return drops;
+        }
+
         private void failOnWrite(int writeNumber) {
             failOnWrite = writeNumber;
+        }
+
+        private void failOnReplace() {
+            failOnReplace = true;
         }
 
         @Override
@@ -889,6 +1050,20 @@ final class ControlsTest {
                 throw new IllegalStateException("fixture write failure " + writes);
             }
             stacks[slot] = stack.copy();
+        }
+
+        @Override
+        public Optional<RiderState> state(RecordingInventory inventory) {
+            return attachedState;
+        }
+
+        @Override
+        public void replaceState(RecordingInventory inventory, RiderState state) {
+            if (failOnReplace) {
+                throw new IllegalStateException("fixture replace failure");
+            }
+            events.add("replace-state");
+            attachedState = Optional.of(state);
         }
     }
 
