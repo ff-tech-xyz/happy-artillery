@@ -147,6 +147,25 @@ final class PersistenceTest {
     }
 
     @Test
+    void riderStateRoundTripPreservesAnEmptyIndexedStack() {
+        RiderState state = new RiderState(
+                Optional.of(new RiderState.StashedStack(4, ItemStack.EMPTY)),
+                Optional.of(new RiderState.StashedStack(5, new ItemStack(Items.WRITABLE_BOOK, 3))),
+                Optional.of(UUID.fromString("35941e7c-7aef-47fc-a77b-0cca071790ea")),
+                123L,
+                Optional.empty());
+
+        Tag encoded = RiderState.CODEC.encodeStart(registryOps, state).getOrThrow();
+        RiderState decoded = RiderState.CODEC.parse(registryOps, encoded).getOrThrow();
+
+        assertTrue(decoded.fireStash().orElseThrow().stack().isEmpty());
+        assertEquals(4, decoded.fireStash().orElseThrow().slotIndex());
+        assertEquals(3, decoded.cryStash().orElseThrow().stack().getCount());
+        assertArrayEquals(serialized(encoded), serialized(
+                RiderState.CODEC.encodeStart(registryOps, decoded).getOrThrow()));
+    }
+
+    @Test
     void stashedStacksAreImmutableValuesWithMatchingEqualsAndHashCode() {
         ItemStack source = new ItemStack(Items.WRITABLE_BOOK, 7);
         source.set(DataComponents.CUSTOM_NAME, Component.literal("Original"));

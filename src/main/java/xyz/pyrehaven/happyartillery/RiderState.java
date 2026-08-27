@@ -71,7 +71,7 @@ public record RiderState(
     public record StashedStack(int slotIndex, ItemStack stack) {
         public static final Codec<StashedStack> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.INT.fieldOf("slot_index").forGetter(StashedStack::slotIndex),
-                ItemStack.CODEC.fieldOf("stack").forGetter(StashedStack::stack)
+                ItemStack.OPTIONAL_CODEC.fieldOf("stack").forGetter(StashedStack::stack)
         ).apply(instance, StashedStack::new));
 
         public StashedStack {

@@ -11,6 +11,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.util.Unit;
@@ -20,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.component.Consumable;
+import net.minecraft.world.item.component.CustomData;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -36,7 +38,10 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -349,6 +354,24 @@ final class ControlsTest {
     }
 
     @Test
+    void productionInventoryAdapterBindsExactServerPlayerInventoryApisAndCopies() throws IOException {
+        List<MethodReference> calls = methodReferences(Controls.ServerPlayerInventoryAccess.class);
+        String player = "net/minecraft/server/level/ServerPlayer";
+        String inventory = "net/minecraft/world/entity/player/Inventory";
+        String stack = "net/minecraft/world/item/ItemStack";
+
+        assertTrue(calls.contains(new MethodReference(
+                player, "getInventory", "()Lnet/minecraft/world/entity/player/Inventory;")));
+        assertTrue(calls.contains(new MethodReference(inventory, "getContainerSize", "()I")));
+        assertTrue(calls.contains(new MethodReference(
+                inventory, "getItem", "(I)Lnet/minecraft/world/item/ItemStack;")));
+        assertTrue(calls.contains(new MethodReference(
+                inventory, "setItem", "(ILnet/minecraft/world/item/ItemStack;)V")));
+        assertTrue(calls.contains(new MethodReference(
+                stack, "copy", "()Lnet/minecraft/world/item/ItemStack;")));
+    }
+
+    @Test
     void observationReadsEveryBoundaryValueIntoOneImmutableSnapshot() {
         ItemStack control = Controls.fireControl();
         RecordingObservation source = new RecordingObservation(true, InteractionHand.OFF_HAND, control);
@@ -361,6 +384,216 @@ final class ControlsTest {
         assertTrue(observed.using());
         assertEquals(InteractionHand.OFF_HAND, observed.hand());
         assertTrue(ItemStack.matches(control, observed.stack()));
+    }
+
+    @Test
+    void mountSnapshotsConfiguredSlotsThenInstallsExactlyTwoFreshControls() {
+        RecordingInventory inventory = new RecordingInventory(9);
+        ItemStack fireOriginal = new ItemStack(Items.DIAMOND_SWORD);
+        fireOriginal.setDamageValue(17);
+        fireOriginal.set(DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("original fire"));
+        ItemStack cryOriginal = new ItemStack(Items.WRITABLE_BOOK, 7);
+        cryOriginal.set(DataComponents.REPAIR_COST, 3);
+        inventory.seed(4, fireOriginal);
+        inventory.seed(5, cryOriginal);
+        RiderState.HudCache hud = new RiderState.HudCache(0.75, "red", "HOT", 81L);
+        RiderState before = new RiderState(
+                Optional.empty(), Optional.empty(), Optional.empty(), 82L, Optional.of(hud));
+        UUID ghastId = UUID.fromString("33635d64-9bac-4a65-b2c7-614f1f982ebe");
+
+        RiderState mounted = Controls.mount(inventory, before, ghastId, inventory);
+
+        assertEquals(List.of("read:4", "read:5", "write:4", "write:5"), inventory.events());
+        assertTrue(ItemStack.matches(fireOriginal, mounted.fireStash().orElseThrow().stack()));
+        assertTrue(ItemStack.matches(cryOriginal, mounted.cryStash().orElseThrow().stack()));
+        assertEquals(4, mounted.fireStash().orElseThrow().slotIndex());
+        assertEquals(5, mounted.cryStash().orElseThrow().slotIndex());
+        assertEquals(ghastId, mounted.riddenGhastId().orElseThrow());
+        assertEquals(82L, mounted.lastHandledTick());
+        assertEquals(Optional.of(hud), mounted.hudCache());
+        assertTrue(inventory.peek(4).has(Components.FIRE_CONTROL));
+        assertTrue(inventory.peek(5).has(Components.CRY_CONTROL));
+        assertNotSame(mounted.fireStash().orElseThrow().stack(), fireOriginal);
+    }
+
+    @Test
+    void restoreWritesBothOriginalStacksBeforeSweepingOnlyMarkedDuplicates() {
+        RecordingInventory inventory = new RecordingInventory(9);
+        ItemStack fireOriginal = new ItemStack(Items.DIAMOND_SWORD);
+        fireOriginal.setDamageValue(21);
+        fireOriginal.set(DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("byte exact fire"));
+        ItemStack cryOriginal = new ItemStack(Items.WRITABLE_BOOK, 6);
+        cryOriginal.set(DataComponents.REPAIR_COST, 11);
+        ItemStack duplicatedFire = Controls.fireControl();
+        duplicatedFire.setCount(9);
+        ItemStack duplicatedCry = Controls.cryControl();
+        ItemStack bothMarkers = Controls.fireControl();
+        bothMarkers.set(Components.CRY_CONTROL, Unit.INSTANCE);
+        inventory.seed(0, duplicatedFire);
+        inventory.seed(1, new ItemStack(Items.FIRE_CHARGE, 4));
+        inventory.seed(2, new ItemStack(Items.GHAST_TEAR, 3));
+        inventory.seed(3, new ItemStack(Items.DIAMOND));
+        inventory.seed(4, Controls.fireControl());
+        inventory.seed(5, Controls.cryControl());
+        inventory.seed(8, duplicatedCry);
+        inventory.seed(7, bothMarkers);
+        RiderState.HudCache hud = new RiderState.HudCache(0.5, "yellow", "READY", 99L);
+        RiderState active = new RiderState(
+                Optional.of(new RiderState.StashedStack(4, fireOriginal)),
+                Optional.of(new RiderState.StashedStack(5, cryOriginal)),
+                Optional.of(UUID.fromString("45a0b4d8-08b1-4812-b5e9-d82c2f339666")),
+                100L,
+                Optional.of(hud));
+
+        RiderState restored = Controls.restore(inventory, active, inventory);
+
+        assertEquals(List.of(
+                "write:4", "write:5",
+                "read:0", "write:0", "read:1", "read:2", "read:3",
+                "read:6", "read:7", "write:7", "read:8", "write:8"), inventory.events());
+        assertTrue(ItemStack.matches(fireOriginal, inventory.peek(4)));
+        assertTrue(ItemStack.matches(cryOriginal, inventory.peek(5)));
+        assertTrue(inventory.peek(0).isEmpty());
+        assertTrue(inventory.peek(7).isEmpty());
+        assertTrue(inventory.peek(8).isEmpty());
+        assertEquals(4, inventory.peek(1).getCount());
+        assertTrue(inventory.peek(1).is(Items.FIRE_CHARGE));
+        assertEquals(3, inventory.peek(2).getCount());
+        assertTrue(inventory.peek(2).is(Items.GHAST_TEAR));
+        assertTrue(inventory.peek(3).is(Items.DIAMOND));
+        assertEquals(Optional.empty(), restored.fireStash());
+        assertEquals(Optional.empty(), restored.cryStash());
+        assertEquals(Optional.empty(), restored.riddenGhastId());
+        assertEquals(100L, restored.lastHandledTick());
+        assertEquals(Optional.of(hud), restored.hudCache());
+    }
+
+    @Test
+    void activeReloadKeepsPersistedSlotsAndNextMountAdoptsNewLiveSlots(@TempDir Path directory)
+            throws Exception {
+        Config originalConfig = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        RecordingInventory inventory = new RecordingInventory(9);
+        inventory.seed(4, new ItemStack(Items.DIAMOND));
+        inventory.seed(5, new ItemStack(Items.EMERALD));
+        UUID firstGhast = UUID.fromString("aefec777-5101-4ef3-a5bf-86dbe2ee6749");
+        RiderState active = Controls.mount(inventory, RiderState.fresh(), firstGhast, inventory);
+        inventory.clearEvents();
+        try {
+            Files.writeString(file, """
+                    {"controls":{"fireSlot":1,"crySlot":2}}
+                    """);
+            Config.reload(file);
+
+            assertTrue(Controls.isLockedSlot(active, 4));
+            assertTrue(Controls.isLockedSlot(active, 5));
+            assertFalse(Controls.isLockedSlot(active, 1));
+            assertFalse(Controls.isLockedSlot(active, 2));
+            assertTrue(Controls.fireControl(inventory, active, inventory).orElseThrow()
+                    .has(Components.FIRE_CONTROL));
+            assertTrue(Controls.cryControl(inventory, active, inventory).orElseThrow()
+                    .has(Components.CRY_CONTROL));
+            assertEquals(List.of("read:4", "read:5"), inventory.events());
+            inventory.clearEvents();
+
+            RiderState unchanged = Controls.reconcile(
+                    inventory, active, Optional.of(firstGhast), inventory);
+
+            assertSame(active, unchanged);
+            assertTrue(inventory.events().isEmpty());
+
+            RiderState cleared = Controls.reconcile(
+                    inventory, active, Optional.empty(), inventory);
+            assertEquals(List.of("write:4", "write:5"), inventory.events().subList(0, 2));
+            assertTrue(ItemStack.matches(new ItemStack(Items.DIAMOND), inventory.peek(4)));
+            assertTrue(ItemStack.matches(new ItemStack(Items.EMERALD), inventory.peek(5)));
+            inventory.clearEvents();
+            inventory.seed(1, new ItemStack(Items.APPLE, 2));
+            inventory.seed(2, ItemStack.EMPTY);
+            UUID nextGhast = UUID.fromString("96d3970d-ef18-4a98-9602-4b2194a74590");
+
+            RiderState remounted = Controls.reconcile(
+                    inventory, cleared, Optional.of(nextGhast), inventory);
+
+            assertEquals(List.of("read:1", "read:2", "write:1", "write:2"), inventory.events());
+            assertEquals(1, remounted.fireStash().orElseThrow().slotIndex());
+            assertEquals(2, remounted.cryStash().orElseThrow().slotIndex());
+            assertEquals(2, remounted.fireStash().orElseThrow().stack().getCount());
+            assertTrue(remounted.fireStash().orElseThrow().stack().is(Items.APPLE));
+            assertTrue(remounted.cryStash().orElseThrow().stack().isEmpty());
+            assertEquals(nextGhast, remounted.riddenGhastId().orElseThrow());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(originalConfig));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void emptyAndComponentRichStacksRoundTripThroughDefensiveInventoryBoundaries() {
+        RecordingInventory inventory = new RecordingInventory(9);
+        ItemStack rich = new ItemStack(Items.WRITABLE_BOOK, 8);
+        rich.set(DataComponents.REPAIR_COST, 13);
+        rich.set(DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("all data"));
+        CompoundTag customTag = new CompoundTag();
+        customTag.putString("owner", "PyreHaven");
+        customTag.putInt("sequence", 42);
+        rich.set(DataComponents.CUSTOM_DATA, CustomData.of(customTag));
+        inventory.seed(4, ItemStack.EMPTY);
+        inventory.seed(5, rich);
+        RiderState mounted = Controls.mount(
+                inventory,
+                RiderState.fresh(),
+                UUID.fromString("43768ac7-7398-44a7-9a6d-3733fc6377d5"),
+                inventory);
+
+        ItemStack exposedStash = mounted.cryStash().orElseThrow().stack();
+        exposedStash.setCount(1);
+        ItemStack exposedInventory = inventory.peek(5);
+        exposedInventory.setCount(2);
+        inventory.clearEvents();
+        RiderState cleared = Controls.restore(inventory, mounted, inventory);
+
+        assertTrue(inventory.peek(4).isEmpty());
+        assertTrue(ItemStack.matches(rich, inventory.peek(5)));
+        assertEquals(8, inventory.peek(5).getCount());
+        assertEquals(13, inventory.peek(5).get(DataComponents.REPAIR_COST));
+        assertEquals("all data", inventory.peek(5).getCustomName().getString());
+        assertEquals(customTag, inventory.peek(5).get(DataComponents.CUSTOM_DATA).copyTag());
+        assertEquals(Optional.empty(), cleared.fireStash());
+        rich.setCount(3);
+        assertEquals(8, inventory.peek(5).getCount());
+    }
+
+    @Test
+    void inventoryFailuresPropagateWithoutRollbackOrShadowState() {
+        RecordingInventory inventory = new RecordingInventory(9);
+        ItemStack fireOriginal = new ItemStack(Items.DIAMOND);
+        ItemStack cryOriginal = new ItemStack(Items.EMERALD);
+        inventory.seed(4, fireOriginal);
+        inventory.seed(5, cryOriginal);
+        inventory.failOnWrite(2);
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> Controls.mount(
+                inventory,
+                RiderState.fresh(),
+                UUID.fromString("d365d8a7-923a-4b09-be66-23c8f0c34f10"),
+                inventory));
+
+        assertEquals("fixture write failure 2", failure.getMessage());
+        assertEquals(List.of("read:4", "read:5", "write:4", "write:5"), inventory.events());
+        assertTrue(inventory.peek(4).has(Components.FIRE_CONTROL));
+        assertTrue(ItemStack.matches(cryOriginal, inventory.peek(5)));
+
+        RecordingInventory untouched = new RecordingInventory(9);
+        RiderState partial = new RiderState(
+                Optional.of(new RiderState.StashedStack(4, fireOriginal)),
+                Optional.empty(),
+                Optional.of(UUID.randomUUID()),
+                7L,
+                Optional.empty());
+        assertThrows(IllegalStateException.class,
+                () -> Controls.reconcile(untouched, partial, Optional.empty(), untouched));
+        assertTrue(untouched.events().isEmpty());
     }
 
     private static Controls.ObservedUse observe(
@@ -447,6 +680,60 @@ final class ControlsTest {
         public ItemStack getUseItem(RecordingObservation source) {
             stackReads++;
             return stack;
+        }
+    }
+
+    private static final class RecordingInventory
+            implements Controls.InventoryAccess<RecordingInventory> {
+        private final ItemStack[] stacks;
+        private final List<String> events = new ArrayList<>();
+        private int failOnWrite;
+        private int writes;
+
+        private RecordingInventory(int size) {
+            stacks = new ItemStack[size];
+            Arrays.fill(stacks, ItemStack.EMPTY);
+        }
+
+        private void seed(int slot, ItemStack stack) {
+            stacks[slot] = stack.copy();
+        }
+
+        private ItemStack peek(int slot) {
+            return stacks[slot].copy();
+        }
+
+        private List<String> events() {
+            return List.copyOf(events);
+        }
+
+        private void clearEvents() {
+            events.clear();
+        }
+
+        private void failOnWrite(int writeNumber) {
+            failOnWrite = writeNumber;
+        }
+
+        @Override
+        public int size(RecordingInventory inventory) {
+            return stacks.length;
+        }
+
+        @Override
+        public ItemStack read(RecordingInventory inventory, int slot) {
+            events.add("read:" + slot);
+            return stacks[slot].copy();
+        }
+
+        @Override
+        public void write(RecordingInventory inventory, int slot, ItemStack stack) {
+            events.add("write:" + slot);
+            writes++;
+            if (writes == failOnWrite) {
+                throw new IllegalStateException("fixture write failure " + writes);
+            }
+            stacks[slot] = stack.copy();
         }
     }
 }
