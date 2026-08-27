@@ -1,6 +1,6 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-The annotated tree below is the complete proposed source-controlled shape. It contains thirteen
+The annotated tree below is the complete proposed source-controlled shape. It contains fourteen
 production Java files and eight risk-grouped test files.
 
 ```text
@@ -44,13 +44,17 @@ happy-artillery/
 │   │   │       ├── DeathDropMixin.java
 │   │   │       │   # Wraps ServerPlayer's committed-death loot invocation so Controls restores the
 │   │   │       │   # persistent stash before vanilla snapshots or emits inventory drops.
+│   │   │       ├── PlayerDropMixin.java
+│   │   │       │   # Intercepts ServerPlayer's direct Q/drop path and delegates the selected-slot
+│   │   │       │   # protection decision to Controls.
 │   │   │       └── SlotGuardMixin.java
-│   │   │           # Cancels control-slot clicks and control-item drops while the pilot rides.
+│   │   │           # Intercepts AbstractContainerMenu mutation routes and delegates locked player-slot
+│   │   │           # decisions to Controls.
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.
 │   │       ├── happy-artillery.mixins.json
-│   │       │   # Declares DeathDropMixin and SlotGuardMixin with their injection requirements.
+│   │       │   # Declares all three narrow mixins with their fail-closed injection requirements.
 │   │       └── assets/happy-artillery/icon.png
 │   │           # Packaged Happy Artillery icon.
 │   └── test/
