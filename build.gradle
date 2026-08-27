@@ -52,6 +52,10 @@ dependencies {
 	compileOnly "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:4.1.3+4575b05f9c"
 	compileOnly "net.fabricmc.fabric-api:fabric-networking-api-v1:6.3.3+72073ef09c"
 	compileOnly "net.fabricmc.fabric-api:fabric-api-base:2.0.4+ece063239c"
+	compileOnly "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
+
+	testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 processResources {
@@ -67,7 +71,11 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('test') {
-	failOnNoDiscoveredTests = false
+	useJUnitPlatform()
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('test')
 }
 
 java {
