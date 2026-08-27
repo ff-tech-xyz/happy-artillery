@@ -14,12 +14,14 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.Bootstrap;
-import net.minecraft.util.Unit;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.component.CustomData;
 import org.junit.jupiter.api.BeforeAll;
@@ -241,30 +243,6 @@ final class ControlsTest {
         assertNotSame(firstRead, observed.stack());
     }
 
-    @Test
-    void holdModeContinuouslyUsesMainAndOffhandServerState() {
-        ItemStack control = Controls.fireControl();
-
-        Controls.ObservedUse main = observe(true, InteractionHand.MAIN_HAND, control);
-        Controls.ObservedUse off = observe(true, InteractionHand.OFF_HAND, control);
-
-        assertEquals(Controls.FireIntent.HELD,
-                Controls.fireIntent(true, Controls.ObservedClick.none(), main));
-        assertEquals(InteractionHand.MAIN_HAND, main.hand());
-        assertEquals(Controls.FireIntent.HELD,
-                Controls.fireIntent(true, Controls.ObservedClick.none(), off));
-        assertEquals(InteractionHand.OFF_HAND, off.hand());
-    }
-
-    @Test
-    void releasingServerUseStateCancelsHoldIntent() {
-        ItemStack control = Controls.fireControl();
-
-        Controls.ObservedUse released = observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(true, Controls.ObservedClick.of(control), released));
-    }
 
     @Test
     void observedUseRejectsUsingStateWithoutAnObservedHand() {
@@ -274,72 +252,6 @@ final class ControlsTest {
                 () -> new Controls.ObservedUse(true, null, control));
     }
 
-    @Test
-    void fireIntentRequiresTheFireMarkerNotPlainForgedOrCryIdentity() {
-        Components.register();
-        ItemStack fire = Controls.fireControl();
-        ItemStack cry = Controls.cryControl();
-        ItemStack plain = new ItemStack(Items.FIRE_CHARGE);
-        ItemStack forgedConsumable = plain.copy();
-        forgedConsumable.set(DataComponents.CONSUMABLE, fire.get(DataComponents.CONSUMABLE));
-        ItemStack oppositeMarker = forgedConsumable.copy();
-        oppositeMarker.set(Components.CRY_CONTROL, Unit.INSTANCE);
-
-        assertEquals(Controls.FireIntent.HELD,
-                Controls.fireIntent(true, Controls.ObservedClick.none(),
-                        observe(true, InteractionHand.MAIN_HAND, fire)));
-        for (ItemStack rejected : List.of(plain, forgedConsumable, oppositeMarker, cry)) {
-            assertEquals(Controls.FireIntent.NONE,
-                    Controls.fireIntent(true, Controls.ObservedClick.none(),
-                            observe(true, InteractionHand.MAIN_HAND, rejected)));
-            assertEquals(Controls.FireIntent.NONE,
-                    Controls.fireIntent(false, Controls.ObservedClick.of(rejected),
-                            observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY)));
-        }
-    }
-
-    @Test
-    void bothMarkersRejectHoldAndClick() {
-        ItemStack both = Controls.fireControl();
-        both.set(Components.CRY_CONTROL, Unit.INSTANCE);
-
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(true, Controls.ObservedClick.none(),
-                        observe(true, InteractionHand.MAIN_HAND, both)));
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(false, Controls.ObservedClick.of(both),
-                        observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY)));
-    }
-
-    @Test
-    void holdModeRejectsPlainAndOtherConsumableStacks() {
-        ItemStack plain = new ItemStack(Items.FIRE_CHARGE);
-        ItemStack food = new ItemStack(Items.APPLE);
-
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(true, Controls.ObservedClick.none(),
-                        observe(true, InteractionHand.MAIN_HAND, plain)));
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(true, Controls.ObservedClick.none(),
-                        observe(true, InteractionHand.OFF_HAND, food)));
-    }
-
-    @Test
-    void clickModeUsesExactlyTheObservedClickWithoutHoldOrRateInference() {
-        ItemStack control = Controls.fireControl();
-        Controls.ObservedUse released = observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-
-        Controls.ObservedClick click = Controls.ObservedClick.of(control);
-        control.setCount(7);
-
-        assertEquals(1, click.stack().getCount());
-        assertEquals(Controls.FireIntent.CLICK, Controls.fireIntent(false, click, released));
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(false, Controls.ObservedClick.none(), released));
-        assertEquals(Controls.FireIntent.NONE,
-                Controls.fireIntent(false,
-                        Controls.ObservedClick.of(new ItemStack(Items.FIRE_CHARGE)), released));
-    }
 
     @Test
     void productionObservationCallsTheThreeExactLivingEntityApis() throws IOException {
@@ -369,6 +281,35 @@ final class ControlsTest {
                 inventory, "setItem", "(ILnet/minecraft/world/item/ItemStack;)V")));
         assertTrue(calls.contains(new MethodReference(
                 stack, "copy", "()Lnet/minecraft/world/item/ItemStack;")));
+    }
+
+    @Test
+    void productionPilotAdapterBindsExactVehiclePassengerAndUuidApis() throws Exception {
+        List<MethodReference> calls = methodReferences(Controls.ServerPlayerControlAccess.class);
+
+        assertEquals(Controls.Admission.class, Controls.class.getDeclaredMethod(
+                "handleUseEntity", ServerPlayer.class, Entity.class, InteractionHand.class,
+                RiderState.class, long.class).getReturnType());
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/server/level/ServerPlayer", "getVehicle",
+                "()Lnet/minecraft/world/entity/Entity;")));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "getFirstPassenger",
+                "()Lnet/minecraft/world/entity/Entity;")));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "getControllingPassenger",
+                "()Lnet/minecraft/world/entity/LivingEntity;")));
+        assertTrue(calls.contains(new MethodReference(
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "getUUID",
+                "()Ljava/util/UUID;")));
+    }
+
+    @Test
+    void configuredPlainItemLookupCannotUseTheDefaultingRegistryApi() throws IOException {
+        List<MethodReference> calls = methodReferences(Controls.class);
+
+        assertTrue(calls.stream().anyMatch(call -> call.name().equals("getOptional")));
+        assertFalse(calls.stream().anyMatch(call -> call.name().equals("getValue")));
     }
 
     @Test
@@ -596,6 +537,220 @@ final class ControlsTest {
         assertTrue(untouched.events().isEmpty());
     }
 
+    @Test
+    void onlyTheControllingFirstPassengerOfThePersistedHappyGhastIsAdmitted() {
+        UUID ghastId = UUID.fromString("fd4a9cc6-c4d9-4a5b-9c69-bab1bd621d0a");
+        TestGhast ghast = new TestGhast(ghastId);
+        TestRider pilot = new TestRider();
+        TestRider passenger = new TestRider();
+        ghast.firstPassenger = pilot;
+        ghast.controller = pilot;
+        pilot.vehicle = ghast;
+        passenger.vehicle = ghast;
+        RiderState active = activeState(ghastId, 40L);
+        pilot.mainHand = Controls.cryControl();
+        passenger.mainHand = Controls.cryControl();
+        pilot.slots[4] = Controls.fireControl();
+        pilot.slots[5] = Controls.cryControl();
+        passenger.slots[4] = Controls.fireControl();
+        passenger.slots[5] = Controls.cryControl();
+
+        Controls.Admission accepted = Controls.handleUseItem(
+                pilot, InteractionHand.MAIN_HAND,
+                active, 41L, TestControlAccess.INSTANCE);
+        Controls.Admission rejected = Controls.handleUseItem(
+                passenger, InteractionHand.MAIN_HAND,
+                active, 41L, TestControlAccess.INSTANCE);
+
+        assertEquals(Controls.ControlIntent.CRY, accepted.intent());
+        assertEquals(41L, accepted.state().lastHandledTick());
+        assertEquals(Controls.ControlIntent.NONE, rejected.intent());
+        assertSame(active, rejected.state());
+    }
+
+    @Test
+    void useEntityRejectsAnArbitraryTargetWithoutSpendingTheTickThenAcceptsTheRiddenGhast() {
+        UUID ghastId = UUID.fromString("d68bfd39-9457-4940-b4f4-dddc81d19886");
+        TestGhast riddenGhast = new TestGhast(ghastId);
+        TestGhast otherTarget = new TestGhast(UUID.randomUUID());
+        TestRider pilot = new TestRider();
+        riddenGhast.firstPassenger = pilot;
+        riddenGhast.controller = pilot;
+        pilot.vehicle = riddenGhast;
+        pilot.mainHand = Controls.cryControl();
+        pilot.slots[4] = Controls.fireControl();
+        pilot.slots[5] = Controls.cryControl();
+        RiderState active = activeState(ghastId, 50L);
+
+        Controls.Admission ignored = Controls.handleUseEntity(
+                pilot, otherTarget, InteractionHand.MAIN_HAND,
+                active, 51L, TestControlAccess.INSTANCE);
+        Controls.Admission accepted = Controls.handleUseEntity(
+                pilot, riddenGhast, InteractionHand.MAIN_HAND,
+                ignored.state(), 51L, TestControlAccess.INSTANCE);
+
+        assertEquals(Controls.ControlIntent.NONE, ignored.intent());
+        assertSame(active, ignored.state());
+        assertEquals(Controls.ControlIntent.CRY, accepted.intent());
+        assertEquals(51L, accepted.state().lastHandledTick());
+    }
+
+    @Test
+    void callbacksHandsHoldSamplingAndTickDedupShareOneAdmissionPath(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        UUID ghastId = UUID.fromString("616c2e80-dde7-4c21-bdad-a10913b31e5d");
+        TestGhast ghast = new TestGhast(ghastId);
+        TestRider pilot = new TestRider();
+        ghast.firstPassenger = pilot;
+        ghast.controller = pilot;
+        pilot.vehicle = ghast;
+        pilot.slots[4] = Controls.fireControl();
+        pilot.slots[5] = Controls.cryControl();
+        RiderState active = activeState(ghastId, 70L);
+        try {
+            pilot.offHand = Controls.cryControl();
+            Controls.Admission item = Controls.handleUseItem(
+                    pilot, InteractionHand.OFF_HAND,
+                    active, 71L, TestControlAccess.INSTANCE);
+            pilot.mainHand = Controls.cryControl();
+            Controls.Admission duplicate = Controls.handleUseEntity(
+                    pilot, ghast, InteractionHand.MAIN_HAND,
+                    item.state(), 71L, TestControlAccess.INSTANCE);
+            Controls.Admission nextTick = Controls.handleUseEntity(
+                    pilot, ghast, InteractionHand.MAIN_HAND,
+                    item.state(), 72L, TestControlAccess.INSTANCE);
+
+            assertEquals(Controls.ControlIntent.CRY, item.intent());
+            assertEquals(Controls.ControlIntent.NONE, duplicate.intent());
+            assertSame(item.state(), duplicate.state());
+            assertEquals(Controls.ControlIntent.CRY, nextTick.intent());
+
+            pilot.observedUse = observe(true, InteractionHand.OFF_HAND, Controls.fireControl());
+            Controls.Admission held = Controls.sampleHeld(
+                    pilot, nextTick.state(), 73L, TestControlAccess.INSTANCE);
+            pilot.mainHand = Controls.cryControl();
+            Controls.Admission callbackAfterHold = Controls.handleUseEntity(
+                    pilot, ghast, InteractionHand.MAIN_HAND,
+                    held.state(), 73L, TestControlAccess.INSTANCE);
+            Controls.Admission heldWithoutAnotherPacket = Controls.sampleHeld(
+                    pilot, held.state(), 74L, TestControlAccess.INSTANCE);
+            assertEquals(Controls.ControlIntent.FIRE, held.intent());
+            assertEquals(Controls.ControlIntent.NONE, callbackAfterHold.intent());
+            assertSame(held.state(), callbackAfterHold.state());
+            assertEquals(Controls.ControlIntent.FIRE, heldWithoutAnotherPacket.intent());
+
+            Files.writeString(file, """
+                    {"controls":{"holdToFire":false}}
+                    """);
+            Config.reload(file);
+            pilot.mainHand = Controls.fireControl();
+            pilot.observedUse = observe(false, InteractionHand.OFF_HAND, ItemStack.EMPTY);
+            Controls.Admission released = Controls.sampleHeld(
+                    pilot, heldWithoutAnotherPacket.state(), 75L, TestControlAccess.INSTANCE);
+            Controls.Admission click = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    heldWithoutAnotherPacket.state(), 75L, TestControlAccess.INSTANCE);
+            Controls.Admission noHoldInClickMode = Controls.sampleHeld(
+                    pilot, click.state(), 76L, TestControlAccess.INSTANCE);
+            assertEquals(Controls.ControlIntent.NONE, released.intent());
+            assertSame(heldWithoutAnotherPacket.state(), released.state());
+            assertEquals(Controls.ControlIntent.FIRE, click.intent());
+            assertEquals(Controls.ControlIntent.NONE, noHoldInClickMode.intent());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void rejectedInputsSpendNoTickAndPlainItemsRequireLiveExplicitOptIn(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        UUID ghastId = UUID.fromString("815abdfa-9ea1-48e5-863f-a863f1be7905");
+        TestGhast ghast = new TestGhast(ghastId);
+        TestRider pilot = new TestRider();
+        ghast.firstPassenger = pilot;
+        ghast.controller = pilot;
+        pilot.vehicle = ghast;
+        pilot.slots[4] = Controls.fireControl();
+        pilot.slots[5] = Controls.cryControl();
+        RiderState active = activeState(ghastId, 90L);
+        try {
+            pilot.mainHand = new ItemStack(Items.GHAST_TEAR);
+            Controls.Admission plainDisabled = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            ItemStack bothMarkers = Controls.fireControl();
+            bothMarkers.set(Components.CRY_CONTROL, Unit.INSTANCE);
+            pilot.mainHand = bothMarkers;
+            Controls.Admission ambiguousMarked = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            pilot.mainHand = Controls.cryControl();
+            pilot.slots[5] = new ItemStack(Items.GHAST_TEAR);
+            Controls.Admission missingActiveMarker = Controls.handleUseEntity(
+                    pilot, ghast, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            pilot.slots[5] = Controls.cryControl();
+            pilot.vehicle = null;
+            Controls.Admission unridden = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            pilot.vehicle = ghast;
+            ghast.controller = new TestRider();
+            Controls.Admission nonPilot = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            ghast.controller = pilot;
+            RiderState wrongGhast = activeState(UUID.randomUUID(), 90L);
+            Controls.Admission wrongPersistedGhast = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    wrongGhast, 91L, TestControlAccess.INSTANCE);
+
+            for (Controls.Admission rejection : List.of(
+                    plainDisabled, ambiguousMarked, missingActiveMarker, unridden, nonPilot,
+                    wrongPersistedGhast)) {
+                assertEquals(Controls.ControlIntent.NONE, rejection.intent());
+                assertEquals(90L, rejection.state().lastHandledTick());
+            }
+
+            Controls.Admission acceptedAfterRejections = Controls.handleUseEntity(
+                    pilot, ghast, InteractionHand.MAIN_HAND,
+                    active, 91L, TestControlAccess.INSTANCE);
+            assertEquals(Controls.ControlIntent.CRY, acceptedAfterRejections.intent());
+            assertNotSame(active, acceptedAfterRejections.state());
+            assertEquals(active.fireStash(), acceptedAfterRejections.state().fireStash());
+            assertEquals(active.cryStash(), acceptedAfterRejections.state().cryStash());
+            assertEquals(active.riddenGhastId(), acceptedAfterRejections.state().riddenGhastId());
+            assertEquals(active.hudCache(), acceptedAfterRejections.state().hudCache());
+
+            Files.writeString(file, """
+                    {"controls":{"fireSlot":1,"crySlot":2,"allowPlainItems":true}}
+                    """);
+            Config.reload(file);
+            pilot.mainHand = new ItemStack(Items.GHAST_TEAR);
+            Controls.Admission plainEnabledWithPersistedSlots = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND,
+                    active, 92L, TestControlAccess.INSTANCE);
+            assertEquals(Controls.ControlIntent.CRY, plainEnabledWithPersistedSlots.intent());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    private static RiderState activeState(UUID ghastId, long lastHandledTick) {
+        return new RiderState(
+                Optional.of(new RiderState.StashedStack(4, ItemStack.EMPTY)),
+                Optional.of(new RiderState.StashedStack(5, ItemStack.EMPTY)),
+                Optional.of(ghastId),
+                lastHandledTick,
+                Optional.of(new RiderState.HudCache(0.25, "white", "READY", 39L)));
+    }
+
     private static Controls.ObservedUse observe(
             boolean using, InteractionHand hand, ItemStack stack) {
         RecordingObservation source = new RecordingObservation(using, hand, stack);
@@ -734,6 +889,62 @@ final class ControlsTest {
                 throw new IllegalStateException("fixture write failure " + writes);
             }
             stacks[slot] = stack.copy();
+        }
+    }
+
+    private static final class TestRider {
+        private Object vehicle;
+        private ItemStack mainHand = ItemStack.EMPTY;
+        private ItemStack offHand = ItemStack.EMPTY;
+        private final ItemStack[] slots = new ItemStack[9];
+        private Controls.ObservedUse observedUse = observe(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+
+        private TestRider() {
+            Arrays.fill(slots, ItemStack.EMPTY);
+        }
+    }
+
+    private static final class TestGhast {
+        private final UUID id;
+        private TestRider firstPassenger;
+        private TestRider controller;
+
+        private TestGhast(UUID id) {
+            this.id = id;
+        }
+    }
+
+    private enum TestControlAccess implements Controls.ControlAccess<TestRider, TestGhast> {
+        INSTANCE;
+
+        @Override
+        public Optional<TestGhast> riddenHappyGhast(TestRider rider) {
+            return rider.vehicle instanceof TestGhast ghast ? Optional.of(ghast) : Optional.empty();
+        }
+
+        @Override
+        public boolean isControllingFirstPassenger(TestRider rider, TestGhast ghast) {
+            return ghast.firstPassenger == rider && ghast.controller == rider;
+        }
+
+        @Override
+        public UUID ghastId(TestGhast ghast) {
+            return ghast.id;
+        }
+
+        @Override
+        public ItemStack itemInHand(TestRider rider, InteractionHand hand) {
+            return (hand == InteractionHand.MAIN_HAND ? rider.mainHand : rider.offHand).copy();
+        }
+
+        @Override
+        public ItemStack itemAt(TestRider rider, int slot) {
+            return rider.slots[slot].copy();
+        }
+
+        @Override
+        public Controls.ObservedUse observedUse(TestRider rider) {
+            return rider.observedUse;
         }
     }
 }

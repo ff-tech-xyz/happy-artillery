@@ -10,7 +10,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.component.Consumable;
@@ -19,7 +21,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Owns the guarded hold consumable and server-observed fire intent seam. */
+/** Sole pilot-input, control-item, and indexed inventory owner. */
 public final class Controls {
     private static final Consumable HOLD_USE = Consumable.builder()
             .consumeSeconds(Float.MAX_VALUE)
@@ -230,25 +232,149 @@ public final class Controls {
                 observation.getUseItem(source));
     }
 
-    static FireIntent fireIntent(
-            boolean holdToFire,
-            ObservedClick click,
-            ObservedUse observedUse) {
-        Objects.requireNonNull(click, "click");
-        Objects.requireNonNull(observedUse, "observedUse");
-        if (holdToFire) {
-            return observedUse.using() && isHoldControl(observedUse.stack())
-                    ? FireIntent.HELD
-                    : FireIntent.NONE;
-        }
-        return click.observed() && isHoldControl(click.stack())
-                ? FireIntent.CLICK
-                : FireIntent.NONE;
+
+    static Admission handleUseItem(
+            ServerPlayer player,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick) {
+        return handleUseItem(player, hand, state, gameTick, ServerPlayerControlAccess.INSTANCE);
     }
 
-    private static boolean isHoldControl(ItemStack stack) {
-        return isFireControl(stack);
+    static <P, G> Admission handleUseItem(
+            P player,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            ControlAccess<P, G> access) {
+        Objects.requireNonNull(hand, "hand");
+        return admit(player, CallbackSource.CALLBACK, hand, access.itemInHand(player, hand),
+                Optional.empty(), state, gameTick, access);
     }
+
+    static Admission handleUseEntity(
+            ServerPlayer player,
+            Entity target,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick) {
+        return handleUseEntity(
+                player, target, hand, state, gameTick, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static <P, G> Admission handleUseEntity(
+            P player,
+            Object target,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            ControlAccess<P, G> access) {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(hand, "hand");
+        return admit(player, CallbackSource.CALLBACK, hand, access.itemInHand(player, hand),
+                Optional.of(target), state, gameTick, access);
+    }
+
+    static Admission sampleHeld(ServerPlayer player, RiderState state, long gameTick) {
+        return sampleHeld(player, state, gameTick, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static <P, G> Admission sampleHeld(
+            P player,
+            RiderState state,
+            long gameTick,
+            ControlAccess<P, G> access) {
+        ObservedUse observed = access.observedUse(player);
+        ItemStack input = observed.using() ? observed.stack() : ItemStack.EMPTY;
+        return admit(player, CallbackSource.SERVER_TICK, observed.hand(), input,
+                Optional.empty(), state, gameTick, access);
+    }
+
+    private static <P, G> Admission admit(
+            P player,
+            CallbackSource source,
+            InteractionHand hand,
+            ItemStack input,
+            Optional<Object> clickedTarget,
+            RiderState state,
+            long gameTick,
+            ControlAccess<P, G> access) {
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(hand, "hand");
+        Objects.requireNonNull(input, "input");
+        Objects.requireNonNull(clickedTarget, "clickedTarget");
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(access, "access");
+
+        Optional<G> ridden = access.riddenHappyGhast(player);
+        if (ridden.isEmpty() || clickedTarget.filter(target -> target != ridden.get()).isPresent()
+                || !access.isControllingFirstPassenger(player, ridden.get())
+                || !state.riddenGhastId().equals(Optional.of(access.ghastId(ridden.get())))) {
+            return new Ignored(state);
+        }
+        ControlIntent intent = classify(player, source, input, state, access);
+        if (intent == ControlIntent.NONE || state.lastHandledTick() == gameTick) {
+            return new Ignored(state);
+        }
+        RiderState updated = new RiderState(
+                state.fireStash(), state.cryStash(), state.riddenGhastId(), gameTick, state.hudCache());
+        return new Accepted(intent, updated);
+    }
+
+    private static <P, G> ControlIntent classify(
+            P player,
+            CallbackSource source,
+            ItemStack input,
+            RiderState state,
+            ControlAccess<P, G> access) {
+        Config.Controls settings = Config.current().controls();
+        boolean markedFire = isFireControl(input);
+        boolean markedCry = isCryControl(input);
+        boolean plainFire = settings.allowPlainItems() && isPlainConfiguredItem(input, settings.fireItem());
+        boolean plainCry = settings.allowPlainItems() && isPlainConfiguredItem(input, settings.cryItem());
+        if (plainFire && plainCry) {
+            plainFire = false;
+            plainCry = false;
+        }
+        if (source == CallbackSource.SERVER_TICK) {
+            return settings.holdToFire() && activeFireControl(player, state, access)
+                    && (markedFire || plainFire)
+                    ? ControlIntent.FIRE
+                    : ControlIntent.NONE;
+        }
+        if ((markedCry || plainCry) && activeCryControl(player, state, access)) {
+            return ControlIntent.CRY;
+        }
+        return !settings.holdToFire() && (markedFire || plainFire)
+                && activeFireControl(player, state, access)
+                ? ControlIntent.FIRE
+                : ControlIntent.NONE;
+    }
+
+    private static boolean isPlainConfiguredItem(ItemStack stack, String itemId) {
+        return !stack.has(Components.FIRE_CONTROL)
+                && !stack.has(Components.CRY_CONTROL)
+                && stack.is(BuiltInRegistries.ITEM
+                        .getOptional(Identifier.parse(itemId))
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Validated control item is no longer registered: " + itemId)));
+    }
+
+    private static <P, G> boolean activeFireControl(
+            P player, RiderState state, ControlAccess<P, G> access) {
+        return state.fireStash()
+                .map(stash -> isFireControl(access.itemAt(player, stash.slotIndex())))
+                .orElse(false);
+    }
+
+    private static <P, G> boolean activeCryControl(
+            P player, RiderState state, ControlAccess<P, G> access) {
+        return state.cryStash()
+                .map(stash -> isCryControl(access.itemAt(player, stash.slotIndex())))
+                .orElse(false);
+    }
+
 
     private static boolean isFireControl(ItemStack stack) {
         return stack.has(Components.FIRE_CONTROL) && !stack.has(Components.CRY_CONTROL);
@@ -258,10 +384,43 @@ public final class Controls {
         return stack.has(Components.CRY_CONTROL) && !stack.has(Components.FIRE_CONTROL);
     }
 
-    enum FireIntent {
-        NONE,
-        CLICK,
-        HELD
+
+    enum CallbackSource {
+        CALLBACK,
+        SERVER_TICK
+    }
+
+    enum ControlIntent {
+        FIRE,
+        CRY,
+        NONE
+    }
+
+    sealed interface Admission permits Accepted, Ignored {
+        ControlIntent intent();
+
+        RiderState state();
+    }
+
+    record Accepted(ControlIntent intent, RiderState state) implements Admission {
+        Accepted {
+            Objects.requireNonNull(intent, "intent");
+            Objects.requireNonNull(state, "state");
+            if (intent == ControlIntent.NONE) {
+                throw new IllegalArgumentException("Accepted admission requires a control intent");
+            }
+        }
+    }
+
+    record Ignored(RiderState state) implements Admission {
+        Ignored {
+            Objects.requireNonNull(state, "state");
+        }
+
+        @Override
+        public ControlIntent intent() {
+            return ControlIntent.NONE;
+        }
     }
 
     record ObservedUse(boolean using, InteractionHand hand, ItemStack stack) {
@@ -276,24 +435,6 @@ public final class Controls {
         }
     }
 
-    record ObservedClick(boolean observed, ItemStack stack) {
-        ObservedClick {
-            stack = Objects.requireNonNull(stack, "stack").copy();
-        }
-
-        static ObservedClick of(ItemStack stack) {
-            return new ObservedClick(true, stack);
-        }
-
-        static ObservedClick none() {
-            return new ObservedClick(false, ItemStack.EMPTY);
-        }
-
-        @Override
-        public ItemStack stack() {
-            return stack.copy();
-        }
-    }
 
     interface UseObservation<T> {
         boolean isUsingItem(T source);
@@ -301,6 +442,55 @@ public final class Controls {
         InteractionHand getUsedItemHand(T source);
 
         ItemStack getUseItem(T source);
+    }
+
+    interface ControlAccess<P, G> {
+        Optional<G> riddenHappyGhast(P player);
+
+        boolean isControllingFirstPassenger(P player, G ghast);
+
+        UUID ghastId(G ghast);
+
+        ItemStack itemInHand(P player, InteractionHand hand);
+
+        ItemStack itemAt(P player, int slot);
+
+        ObservedUse observedUse(P player);
+    }
+
+    enum ServerPlayerControlAccess implements ControlAccess<ServerPlayer, HappyGhast> {
+        INSTANCE;
+
+        @Override
+        public Optional<HappyGhast> riddenHappyGhast(ServerPlayer player) {
+            Entity vehicle = player.getVehicle();
+            return vehicle instanceof HappyGhast ghast ? Optional.of(ghast) : Optional.empty();
+        }
+
+        @Override
+        public boolean isControllingFirstPassenger(ServerPlayer player, HappyGhast ghast) {
+            return ghast.getFirstPassenger() == player && ghast.getControllingPassenger() == player;
+        }
+
+        @Override
+        public UUID ghastId(HappyGhast ghast) {
+            return ghast.getUUID();
+        }
+
+        @Override
+        public ItemStack itemInHand(ServerPlayer player, InteractionHand hand) {
+            return player.getItemInHand(hand).copy();
+        }
+
+        @Override
+        public ItemStack itemAt(ServerPlayer player, int slot) {
+            return player.getInventory().getItem(slot).copy();
+        }
+
+        @Override
+        public ObservedUse observedUse(ServerPlayer player) {
+            return observeUse(player);
+        }
     }
 
     interface InventoryAccess<T> {

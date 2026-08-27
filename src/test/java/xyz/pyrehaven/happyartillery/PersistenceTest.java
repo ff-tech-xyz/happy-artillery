@@ -9,6 +9,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
@@ -185,6 +186,26 @@ final class PersistenceTest {
     }
 
     @Test
+    void stashedStackConstructorAcceptsOnlyHotbarSlotIndexes() {
+        assertEquals(0, new RiderState.StashedStack(0, ItemStack.EMPTY).slotIndex());
+        assertEquals(8, new RiderState.StashedStack(8, ItemStack.EMPTY).slotIndex());
+        assertThrows(IllegalArgumentException.class,
+                () -> new RiderState.StashedStack(-1, ItemStack.EMPTY));
+        assertThrows(IllegalArgumentException.class,
+                () -> new RiderState.StashedStack(9, ItemStack.EMPTY));
+    }
+
+    @Test
+    void stashedStackCodecAcceptsOnlyHotbarSlotIndexes() {
+        assertEquals(0, RiderState.StashedStack.CODEC.parse(registryOps, encodedStash(0))
+                .getOrThrow().slotIndex());
+        assertEquals(8, RiderState.StashedStack.CODEC.parse(registryOps, encodedStash(8))
+                .getOrThrow().slotIndex());
+        assertTrue(RiderState.StashedStack.CODEC.parse(registryOps, encodedStash(-1)).result().isEmpty());
+        assertTrue(RiderState.StashedStack.CODEC.parse(registryOps, encodedStash(9)).result().isEmpty());
+    }
+
+    @Test
     void ghastStateReplacementUsesItsRegisteredTypeAndPreservesImmutableValues() {
         FaithfulAttachmentTarget target = new FaithfulAttachmentTarget();
         AttachmentType<GhastState> ghastType = GhastState.register();
@@ -215,6 +236,13 @@ final class PersistenceTest {
         assertSame(initial, RiderState.replace(target, updated));
         assertSame(updated, target.getAttached(riderType));
         assertEquals(RiderState.fresh(), initial);
+    }
+
+    private static CompoundTag encodedStash(int slotIndex) {
+        CompoundTag tag = new CompoundTag();
+        tag.putInt("slot_index", slotIndex);
+        tag.put("stack", new CompoundTag());
+        return tag;
     }
 
     private static byte[] serialized(Tag tag) {

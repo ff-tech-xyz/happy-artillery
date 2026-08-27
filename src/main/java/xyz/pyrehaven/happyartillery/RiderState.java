@@ -70,11 +70,14 @@ public record RiderState(
 
     public record StashedStack(int slotIndex, ItemStack stack) {
         public static final Codec<StashedStack> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.INT.fieldOf("slot_index").forGetter(StashedStack::slotIndex),
+                Codec.intRange(0, 8).fieldOf("slot_index").forGetter(StashedStack::slotIndex),
                 ItemStack.OPTIONAL_CODEC.fieldOf("stack").forGetter(StashedStack::stack)
         ).apply(instance, StashedStack::new));
 
         public StashedStack {
+            if (slotIndex < 0 || slotIndex > 8) {
+                throw new IllegalArgumentException("Stashed slot index must be in the hotbar: " + slotIndex);
+            }
             stack = Objects.requireNonNull(stack, "stack").copy();
         }
 
