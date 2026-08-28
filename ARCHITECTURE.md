@@ -18,8 +18,8 @@ happy-artillery/
 │   │   │   ├── BiomeClass.java
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
-│   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus shot, cry,
-│   │   │   │   # and pending-detonation Overworld-game-time deadlines.
+│   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus independent
+│   │   │   │   # fire-ready, cry-ready, and pending-detonation Overworld-game-time deadlines.
 │   │   │   ├── Heat.java
 │   │   │   │   # Pure heat authority: anchored, non-double-counted water/passive cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
@@ -34,7 +34,8 @@ happy-artillery/
 │   │   │   │   # slot locking helpers, callback deduplication, and hold/click intent.
 │   │   │   ├── Abilities.java
 │   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including server-queue
-│   │   │   │   # deadlines, load-time re-establishment, projectile, protected block effects, sound, and removal.
+│   │   │   │   # deadlines, load-time re-establishment, vanilla LargeFireball spawning, configured protected
+│   │   │   │   # overheat effects, sound, and removal; normal fire has no custom projectile or veto path.
 │   │   │   ├── Hud.java
 │   │   │   │   # Sole boss/action-bar and warning-particle owner for pilots and read-only passengers;
 │   │   │   │   # owns and evicts bounded process-local display handles.
@@ -73,8 +74,8 @@ happy-artillery/
 │           │   # Component registration/serialization, pilot admission, callbacks, indexed swap/restore,
 │           │   # live slot reload, death ordering, SlotGuardMixin decisions, and dedup tests.
 │           ├── AbilitiesTest.java
-│           │   # Fire/cry gates, sealed outcomes, feedback, effects, veto adapters, server-queue fuse
-│           │   # scheduling/load wake-up, and exactly-once detonation tests.
+│           │   # Fire/cry gates, sealed outcomes, vanilla LargeFireball identity/ownership/defaults,
+│           │   # feedback/effects, server-queue fuse scheduling/load wake-up, and detonation tests.
 │           ├── HudTest.java
 │           │   # Pilot/passenger visibility, dirty checks, throttling, priority, particles, and teardown tests.
 │           └── HappyArtilleryIntegrationTest.java
