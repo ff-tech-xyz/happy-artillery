@@ -24,8 +24,9 @@ final class BiomeClassTest {
 
     @Test
     void vanillaDimensionsAreClassifiedByTheirResourceKeyIdentity() {
-        assertEquals(BiomeClass.NETHER, BiomeClass.classify(Level.NETHER, 0.0));
-        assertEquals(BiomeClass.END, BiomeClass.classify(Level.END, 2.0));
+        Config config = Config.defaults();
+        assertEquals(BiomeClass.NETHER, BiomeClass.classify(Level.NETHER, 0.0, config));
+        assertEquals(BiomeClass.END, BiomeClass.classify(Level.END, 2.0, config));
     }
 
     @Test
@@ -35,10 +36,11 @@ final class BiomeClassTest {
         ResourceKey<Level> netherNamed = dimension("example:nether_expanded");
         ResourceKey<Level> endNamed = dimension("example:the_endless");
 
-        assertEquals(BiomeClass.COLD, BiomeClass.classify(netherNamed, 0.3));
-        assertEquals(BiomeClass.BASE, BiomeClass.classify(netherNamed, 0.3000001));
-        assertEquals(BiomeClass.BASE, BiomeClass.classify(endNamed, 0.9999999));
-        assertEquals(BiomeClass.HOT, BiomeClass.classify(endNamed, 1.0));
+        Config config = Config.defaults();
+        assertEquals(BiomeClass.COLD, BiomeClass.classify(netherNamed, 0.3, config));
+        assertEquals(BiomeClass.BASE, BiomeClass.classify(netherNamed, 0.3000001, config));
+        assertEquals(BiomeClass.BASE, BiomeClass.classify(endNamed, 0.9999999, config));
+        assertEquals(BiomeClass.HOT, BiomeClass.classify(endNamed, 1.0, config));
     }
 
     @Test
@@ -49,7 +51,7 @@ final class BiomeClassTest {
         Config.load(file);
         ResourceKey<Level> custom = dimension("example:moon");
 
-        assertEquals(BiomeClass.BASE, BiomeClass.classify(custom, -100.0));
+        assertEquals(BiomeClass.BASE, BiomeClass.classify(custom, -100.0, Config.current()));
 
         Files.writeString(file, """
                 {"heat":{
@@ -60,9 +62,9 @@ final class BiomeClassTest {
                 """);
         Config.reload(file);
 
-        assertEquals(BiomeClass.COLD, BiomeClass.classify(custom, -2.0));
-        assertEquals(BiomeClass.BASE, BiomeClass.classify(custom, 0.0));
-        assertEquals(BiomeClass.HOT, BiomeClass.classify(custom, 2.0));
+        assertEquals(BiomeClass.COLD, BiomeClass.classify(custom, -2.0, Config.current()));
+        assertEquals(BiomeClass.BASE, BiomeClass.classify(custom, 0.0, Config.current()));
+        assertEquals(BiomeClass.HOT, BiomeClass.classify(custom, 2.0, Config.current()));
     }
 
     @Test
@@ -70,17 +72,17 @@ final class BiomeClassTest {
         Path file = directory.resolve("happy-artillery.json");
         Config initial = Config.load(file);
 
-        assertEquals(initial.heat().cold(), BiomeClass.COLD.profile());
-        assertEquals(initial.heat().base(), BiomeClass.BASE.profile());
-        assertEquals(initial.heat().hot(), BiomeClass.HOT.profile());
-        assertEquals(initial.heat().nether(), BiomeClass.NETHER.profile());
-        assertEquals(initial.heat().end(), BiomeClass.END.profile());
+        assertEquals(initial.heat().cold(), BiomeClass.COLD.profile(initial));
+        assertEquals(initial.heat().base(), BiomeClass.BASE.profile(initial));
+        assertEquals(initial.heat().hot(), BiomeClass.HOT.profile(initial));
+        assertEquals(initial.heat().nether(), BiomeClass.NETHER.profile(initial));
+        assertEquals(initial.heat().end(), BiomeClass.END.profile(initial));
 
         Files.writeString(file, "{\"heat\":{\"cold\":{\"heatPerShot\":9.0,\"coolPerSecond\":8.0}}}");
         Config reloaded = Config.reload(file);
 
-        assertEquals(reloaded.heat().cold(), BiomeClass.COLD.profile());
-        assertEquals(new Config.HeatProfile(9.0, 8.0), BiomeClass.COLD.profile());
+        assertEquals(reloaded.heat().cold(), BiomeClass.COLD.profile(reloaded));
+        assertEquals(new Config.HeatProfile(9.0, 8.0), BiomeClass.COLD.profile(reloaded));
     }
 
     private static ResourceKey<Level> dimension(String identifier) {

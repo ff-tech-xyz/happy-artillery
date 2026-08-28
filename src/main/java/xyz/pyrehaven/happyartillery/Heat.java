@@ -40,6 +40,7 @@ public final class Heat {
                 cooledHeat,
                 now,
                 state.firingWindowEndTick(),
+                state.fireReadyTick(),
                 state.cryReadyTick(),
                 state.detonateAtTick());
     }
@@ -63,6 +64,7 @@ public final class Heat {
                 shotHeat,
                 advanced.heatAnchorTick(),
                 firingWindowEnd,
+                advanced.fireReadyTick(),
                 advanced.cryReadyTick(),
                 advanced.detonateAtTick());
         return new ShotResult(updated, shotHeat >= heat.limit());

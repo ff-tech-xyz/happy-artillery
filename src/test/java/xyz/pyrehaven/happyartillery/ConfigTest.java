@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,10 +31,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ConfigTest {
+    @TempDir
+    Path resetDirectory;
+
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+    }
+
+    @AfterEach
+    void restoreValidatedDefaults() throws Exception {
+        Path file = resetDirectory.resolve("reset-defaults.json");
+        Files.writeString(file, new Gson().toJson(Config.defaults()));
+        Config restored = Config.load(file);
+        assertEquals(Config.defaults(), restored);
+        assertSame(restored, Config.current());
     }
 
     @Test
@@ -52,8 +65,7 @@ final class ConfigTest {
                         "fireItem", "minecraft:fire_charge", "cryItem", "minecraft:ghast_tear",
                         "holdToFire", true, "allowPlainItems", false, "lockControlSlots", true),
                 "fire", Map.of(
-                        "shotCooldownSeconds", 0.25, "explosionPower", 2.0, "speed", 0.35,
-                        "spawnDistance", 2.0, "breaksBlocks", true, "respectProtection", true),
+                        "shotCooldownSeconds", 0.25, "explosionPower", 1),
                 "heat", Map.ofEntries(
                         Map.entry("limit", 100.0), Map.entry("firingWindowSeconds", 1.0),
                         Map.entry("cold", Map.of("heatPerShot", 0.70, "coolPerSecond", 1.0)),
@@ -67,7 +79,7 @@ final class ConfigTest {
                 "overheat", Map.ofEntries(
                         Map.entry("fuseTicks", 0), Map.entry("explosionPower", 6.0),
                         Map.entry("fireballCount", 24), Map.entry("fireballSpeed", 0.4),
-                        Map.entry("fireballPower", 2.0), Map.entry("fireAttempts", 24),
+                        Map.entry("fireballPower", 2), Map.entry("fireAttempts", 24),
                         Map.entry("fireRadius", 8.0), Map.entry("killsGhast", true),
                         Map.entry("breaksBlocks", true), Map.entry("respectProtection", true)),
                 "cry", Map.of("enabled", true, "volume", 10.0, "cooldownSeconds", 10.0),
@@ -147,7 +159,7 @@ final class ConfigTest {
         assertEquals(4.0, loaded.overheat().fireRadius());
         assertEquals(12, loaded.overheat().fireballCount());
         assertEquals(9.0, loaded.overheat().explosionPower());
-        assertTrue(loaded.fire().respectProtection());
+        assertTrue(loaded.overheat().respectProtection());
     }
 
     @Test
@@ -192,8 +204,8 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(8, serialized.size());
-        assertEquals(44, declaredKeyCount(serialized));
-        assertEquals(49, nestedLeafCount(serialized));
+        assertEquals(40, declaredKeyCount(serialized));
+        assertEquals(45, nestedLeafCount(serialized));
         assertEquals(serialized, JsonParser.parseString(Files.readString(file)));
     }
 
@@ -210,15 +222,13 @@ final class ConfigTest {
         assertEquals(4.0, survival.overheat().explosionPower());
         assertEquals(12, survival.overheat().fireballCount());
         assertEquals(4.0, survival.overheat().fireRadius());
-        assertTrue(survival.fire().respectProtection());
         assertTrue(survival.overheat().respectProtection());
 
         Files.writeString(file, "{\"preset\":\"off\"}");
         Config off = Config.reload(file);
         assertEquals(0, off.overheat().fireAttempts());
-        assertEquals(false, off.fire().breaksBlocks());
         assertEquals(false, off.overheat().breaksBlocks());
-        assertEquals(2.0, off.fire().explosionPower());
+        assertEquals(1, off.fire().explosionPower());
     }
 
     @Test
@@ -227,7 +237,7 @@ final class ConfigTest {
         Files.writeString(file, """
                 {
                   "controls": {"fireSlot": 0, "crySlot": 8},
-                  "fire": {"explosionPower": 0, "spawnDistance": 0},
+                  "fire": {"explosionPower": 0},
                   "heat": {"firingWindowSeconds": 0},
                   "water": {"coolPerSecond": 0, "floor": 100},
                   "overheat": {
@@ -326,7 +336,7 @@ final class ConfigTest {
                 Arguments.of("wrong scalar type", "{\"hud\":{\"bossBar\":\"false\"}}"),
                 Arguments.of("non-finite number", "{\"heat\":{\"limit\":NaN}}"),
                 Arguments.of("impossible range", "{\"controls\":{\"fireSlot\":9}}"),
-                Arguments.of("zero positive value", "{\"fire\":{\"speed\":0}}"),
+                Arguments.of("zero positive value", "{\"fire\":{\"shotCooldownSeconds\":0}}"),
                 Arguments.of("negative duration", "{\"fire\":{\"shotCooldownSeconds\":-1}}"),
                 Arguments.of("negative count", "{\"overheat\":{\"fireballCount\":-1}}"),
                 Arguments.of("duplicate slots", "{\"controls\":{\"fireSlot\":5,\"crySlot\":5}}"),
@@ -368,8 +378,10 @@ final class ConfigTest {
         String[] paths = {
                 "controls.fireSlot",
                 "controls.crySlot",
+                "fire.explosionPower",
                 "overheat.fuseTicks",
                 "overheat.fireballCount",
+                "overheat.fireballPower",
                 "overheat.fireAttempts",
                 "hud.refreshTicks",
                 "hud.warningFromPercent"

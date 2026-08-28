@@ -323,7 +323,8 @@ public final class HeatTest {
     }
 
     private static GhastState state(double heat, long anchor, long firingWindowEnd) {
-        return new GhastState(heat, anchor, firingWindowEnd, 300L, OptionalLong.of(400L));
+        return new GhastState(heat, anchor, firingWindowEnd, 250L, 300L,
+                OptionalLong.of(400L));
     }
 
     private static Config.Water water(double coolPerSecond) {

@@ -16,6 +16,7 @@ public record GhastState(
         double heat,
         long heatAnchorTick,
         long firingWindowEndTick,
+        long fireReadyTick,
         long cryReadyTick,
         OptionalLong detonateAtTick) {
     private static AttachmentType<GhastState> type;
@@ -24,6 +25,7 @@ public record GhastState(
             Codec.DOUBLE.fieldOf("heat").forGetter(GhastState::heat),
             Codec.LONG.fieldOf("heat_anchor_tick").forGetter(GhastState::heatAnchorTick),
             Codec.LONG.fieldOf("firing_window_end_tick").forGetter(GhastState::firingWindowEndTick),
+            Codec.LONG.fieldOf("fire_ready_tick").forGetter(GhastState::fireReadyTick),
             Codec.LONG.fieldOf("cry_ready_tick").forGetter(GhastState::cryReadyTick),
             Codec.LONG.optionalFieldOf("detonate_at_tick").forGetter(GhastState::boxedDetonateAtTick)
     ).apply(instance, GhastState::fromCodec));
@@ -33,7 +35,7 @@ public record GhastState(
     }
 
     public static GhastState fresh() {
-        return new GhastState(0.0, 0L, 0L, 0L, OptionalLong.empty());
+        return new GhastState(0.0, 0L, 0L, 0L, 0L, OptionalLong.empty());
     }
 
     static synchronized AttachmentType<GhastState> register() {
@@ -58,12 +60,14 @@ public record GhastState(
             double heat,
             long heatAnchorTick,
             long firingWindowEndTick,
+            long fireReadyTick,
             long cryReadyTick,
             Optional<Long> detonateAtTick) {
         return new GhastState(
                 heat,
                 heatAnchorTick,
                 firingWindowEndTick,
+                fireReadyTick,
                 cryReadyTick,
                 detonateAtTick.isPresent()
                         ? OptionalLong.of(detonateAtTick.orElseThrow())

@@ -69,11 +69,18 @@ final class PersistenceTest {
     }
 
     @Test
+    void ghastStateDeclaresIndependentFireReadyTick() {
+        assertTrue(java.util.Arrays.stream(GhastState.class.getRecordComponents())
+                .anyMatch(component -> component.getName().equals("fireReadyTick")
+                        && component.getType() == long.class));
+    }
+
+    @Test
     void ghastStatePersistsEveryOverworldGameTimeValue() {
         GhastState fresh = GhastState.fresh();
-        assertEquals(new GhastState(0.0, 0L, 0L, 0L, OptionalLong.empty()), fresh);
+        assertEquals(new GhastState(0.0, 0L, 0L, 0L, 0L, OptionalLong.empty()), fresh);
 
-        GhastState scheduled = new GhastState(37.5, 12_000L, 12_020L, 12_200L,
+        GhastState scheduled = new GhastState(37.5, 12_000L, 12_020L, 12_100L, 12_200L,
                 OptionalLong.of(12_040L));
         Tag encoded = GhastState.CODEC.encodeStart(NbtOps.INSTANCE, scheduled).getOrThrow();
         GhastState decoded = GhastState.CODEC.parse(NbtOps.INSTANCE, encoded).getOrThrow();
@@ -87,7 +94,7 @@ final class PersistenceTest {
     @Test
     void stateRecordsRejectNullFields() {
         assertThrows(NullPointerException.class,
-                () -> new GhastState(0.0, 0L, 0L, 0L, null));
+                () -> new GhastState(0.0, 0L, 0L, 0L, 0L, null));
         assertThrows(NullPointerException.class,
                 () -> new RiderState(null, Optional.empty(), Optional.empty(), 0L, Optional.empty()));
         assertThrows(NullPointerException.class,
@@ -210,7 +217,8 @@ final class PersistenceTest {
         FaithfulAttachmentTarget target = new FaithfulAttachmentTarget();
         AttachmentType<GhastState> ghastType = GhastState.register();
         GhastState initial = GhastState.fresh();
-        GhastState updated = new GhastState(8.0, 100L, 120L, 140L, OptionalLong.of(160L));
+        GhastState updated = new GhastState(8.0, 100L, 120L, 130L, 140L,
+                OptionalLong.of(160L));
 
         assertNull(GhastState.replace(target, initial));
         assertSame(initial, target.getAttached(ghastType));

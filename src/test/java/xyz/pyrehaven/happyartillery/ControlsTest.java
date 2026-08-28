@@ -349,7 +349,7 @@ final class ControlsTest {
                 "net/minecraft/world/entity/player/Inventory", "getSelectedSlot", "()I")));
         assertTrue(calls.contains(new MethodReference(
                 "net/minecraft/world/inventory/Slot", "getContainerSlot", "()I")));
-        ClassNode adapter = classNode(
+        ClassNode adapter = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Controls$ServerPlayerContainerDecisionAccess");
         assertTrue(adapter.methods.stream().flatMap(method -> Stream.iterate(
                         method.instructions.getFirst(), java.util.Objects::nonNull,
@@ -604,7 +604,8 @@ final class ControlsTest {
 
     @Test
     void deathDropMixinWrapsTheExactCommittedDropInvocationAndDelegatesOnce() throws Exception {
-        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.DeathDropMixin");
+        ClassNode mixin = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.mixin.DeathDropMixin");
         AnnotationNode target = annotation(mixin.invisibleAnnotations,
                 "Lorg/spongepowered/asm/mixin/Mixin;");
         assertEquals(List.of(Type.getType(ServerPlayer.class)), annotationValue(target, "value"));
@@ -654,7 +655,8 @@ final class ControlsTest {
 
     @Test
     void playerDropMixinCancelsTheExactDirectDropBoundaryThroughControlsOnly() throws Exception {
-        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.PlayerDropMixin");
+        ClassNode mixin = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.mixin.PlayerDropMixin");
         AnnotationNode target = annotation(mixin.invisibleAnnotations,
                 "Lorg/spongepowered/asm/mixin/Mixin;");
         assertEquals(List.of(Type.getType(ServerPlayer.class)), annotationValue(target, "value"));
@@ -674,7 +676,8 @@ final class ControlsTest {
 
     @Test
     void slotGuardMixinCancelsTheExactContainerBoundaryThroughControlsOnly() throws Exception {
-        ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin.SlotGuardMixin");
+        ClassNode mixin = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.mixin.SlotGuardMixin");
         AnnotationNode target = annotation(mixin.invisibleAnnotations,
                 "Lorg/spongepowered/asm/mixin/Mixin;");
         assertEquals(List.of(Type.getType(net.minecraft.world.inventory.AbstractContainerMenu.class)),
@@ -719,7 +722,8 @@ final class ControlsTest {
     @Test
     void allMixinClassesContainNoStateConfigInventoryOrPilotPolicyCalls() throws Exception {
         for (String name : List.of("DeathDropMixin", "PlayerDropMixin", "SlotGuardMixin")) {
-            ClassNode mixin = classNode("xyz.pyrehaven.happyartillery.mixin." + name);
+            ClassNode mixin = BytecodeTestSupport.classNode(
+                    "xyz.pyrehaven.happyartillery.mixin." + name);
             List<MethodInsnNode> calls = mixin.methods.stream().flatMap(method -> Stream.iterate(
                             method.instructions.getFirst(), java.util.Objects::nonNull,
                             org.objectweb.asm.tree.AbstractInsnNode::getNext))
@@ -1458,15 +1462,6 @@ final class ControlsTest {
                         Components.CRY_CONTROL, Components.FIRE_CONTROL));
     }
 
-    private static ClassNode classNode(String className) throws IOException {
-        String resource = "/" + className.replace('.', '/') + ".class";
-        try (InputStream input = ControlsTest.class.getResourceAsStream(resource)) {
-            assertNotNull(input, "missing compiled class " + className);
-            ClassNode node = new ClassNode();
-            new ClassReader(input).accept(node, 0);
-            return node;
-        }
-    }
 
     private static AnnotationNode annotation(List<AnnotationNode> annotations, String descriptor) {
         if (annotations == null) {
@@ -1871,6 +1866,21 @@ final class ControlsTest {
         @Override
         public Controls.ObservedUse observedUse(TestRider rider) {
             return rider.observedUse;
+        }
+    }
+}
+
+final class BytecodeTestSupport {
+    private BytecodeTestSupport() {
+    }
+
+    static ClassNode classNode(String className) throws IOException {
+        String resource = "/" + className.replace('.', '/') + ".class";
+        try (InputStream input = BytecodeTestSupport.class.getResourceAsStream(resource)) {
+            assertNotNull(input, "missing compiled class " + className);
+            ClassNode node = new ClassNode();
+            new ClassReader(input).accept(node, 0);
+            return node;
         }
     }
 }
