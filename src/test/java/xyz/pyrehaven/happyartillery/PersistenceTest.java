@@ -76,16 +76,25 @@ final class PersistenceTest {
     }
 
     @Test
+    void ghastStateDeclaresPersistedDetonatingRiderIdentity() {
+        assertTrue(java.util.Arrays.stream(GhastState.class.getRecordComponents())
+                .anyMatch(component -> component.getName().equals("detonatingRiderId")
+                        && component.getType() == Optional.class));
+    }
+
+    @Test
     void ghastStatePersistsEveryOverworldGameTimeValue() {
         GhastState fresh = GhastState.fresh();
         assertEquals(new GhastState(0.0, 0L, 0L, 0L, 0L, OptionalLong.empty()), fresh);
 
+        UUID riderId = UUID.fromString("377b6687-dcea-41a8-b213-724860ce2d25");
         GhastState scheduled = new GhastState(37.5, 12_000L, 12_020L, 12_100L, 12_200L,
-                OptionalLong.of(12_040L));
+                OptionalLong.of(12_040L), Optional.of(riderId));
         Tag encoded = GhastState.CODEC.encodeStart(NbtOps.INSTANCE, scheduled).getOrThrow();
         GhastState decoded = GhastState.CODEC.parse(NbtOps.INSTANCE, encoded).getOrThrow();
 
         assertEquals(scheduled, decoded);
+        assertEquals(riderId, decoded.detonatingRiderId().orElseThrow());
         assertNotSame(scheduled, decoded);
         assertArrayEquals(serialized(encoded), serialized(
                 GhastState.CODEC.encodeStart(NbtOps.INSTANCE, decoded).getOrThrow()));
@@ -109,6 +118,18 @@ final class PersistenceTest {
                 () -> new RiderState.HudCache(0.0, null, "", 0L));
         assertThrows(NullPointerException.class,
                 () -> new RiderState.HudCache(0.0, "white", null, 0L));
+    }
+
+    @Test
+    void pendingDeadlineAndDetonatingRiderIdentityAreOnePersistedState() {
+        UUID riderId = UUID.fromString("e514734c-ad6e-4538-b005-c6fc67b0547e");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new GhastState(1.0, 1L, 1L, 1L, 1L,
+                        OptionalLong.of(2L), Optional.empty()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GhastState(1.0, 1L, 1L, 1L, 1L,
+                        OptionalLong.empty(), Optional.of(riderId)));
     }
 
     @Test
@@ -217,8 +238,9 @@ final class PersistenceTest {
         FaithfulAttachmentTarget target = new FaithfulAttachmentTarget();
         AttachmentType<GhastState> ghastType = GhastState.register();
         GhastState initial = GhastState.fresh();
+        UUID riderId = UUID.fromString("e8dc8c1d-04b6-4641-819a-7f59df63fcab");
         GhastState updated = new GhastState(8.0, 100L, 120L, 130L, 140L,
-                OptionalLong.of(160L));
+                OptionalLong.of(160L), Optional.of(riderId));
 
         assertNull(GhastState.replace(target, initial));
         assertSame(initial, target.getAttached(ghastType));

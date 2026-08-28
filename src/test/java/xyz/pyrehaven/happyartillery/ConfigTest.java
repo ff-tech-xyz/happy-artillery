@@ -81,7 +81,7 @@ final class ConfigTest {
                         Map.entry("fireballCount", 24), Map.entry("fireballSpeed", 0.4),
                         Map.entry("fireballPower", 2), Map.entry("fireAttempts", 24),
                         Map.entry("fireRadius", 8.0), Map.entry("killsGhast", true),
-                        Map.entry("breaksBlocks", true), Map.entry("respectProtection", true)),
+                        Map.entry("breaksBlocks", true)),
                 "cry", Map.of("enabled", true, "volume", 10.0, "cooldownSeconds", 10.0),
                 "hud", Map.of("bossBar", true, "actionBar", true,
                         "refreshTicks", 4, "warningFromPercent", 85)),
@@ -159,7 +159,8 @@ final class ConfigTest {
         assertEquals(4.0, loaded.overheat().fireRadius());
         assertEquals(12, loaded.overheat().fireballCount());
         assertEquals(9.0, loaded.overheat().explosionPower());
-        assertTrue(loaded.overheat().respectProtection());
+        assertTrue(Stream.of(Config.Overheat.class.getRecordComponents())
+                .noneMatch(component -> component.getName().equals("respectProtection")));
     }
 
     @Test
@@ -204,8 +205,8 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(8, serialized.size());
-        assertEquals(40, declaredKeyCount(serialized));
-        assertEquals(45, nestedLeafCount(serialized));
+        assertEquals(39, declaredKeyCount(serialized));
+        assertEquals(44, nestedLeafCount(serialized));
         assertEquals(serialized, JsonParser.parseString(Files.readString(file)));
     }
 
@@ -222,7 +223,7 @@ final class ConfigTest {
         assertEquals(4.0, survival.overheat().explosionPower());
         assertEquals(12, survival.overheat().fireballCount());
         assertEquals(4.0, survival.overheat().fireRadius());
-        assertTrue(survival.overheat().respectProtection());
+        assertTrue(survival.overheat().breaksBlocks());
 
         Files.writeString(file, "{\"preset\":\"off\"}");
         Config off = Config.reload(file);

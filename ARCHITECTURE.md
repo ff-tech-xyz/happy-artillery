@@ -10,8 +10,8 @@ happy-artillery/
 │   │   ├── java/xyz/pyrehaven/happyartillery/
 │   │   │   ├── HappyArtillery.java
 │   │   │   │   # Composition root that invokes each owner's registration, op-only reload command,
-│   │   │   │   # durable Overworld-game-time context, sole player tick driver, and ghast-load callback;
-│   │   │   │   # no gameplay policy or second fuse poller.
+│   │   │   │   # durable Overworld-game-time context, sole player tick driver, ghast-load callback,
+│   │   │   │   # and bounded player-availability wake-up; no gameplay policy or second fuse poller.
 │   │   │   ├── Config.java
 │   │   │   │   # Sole config schema/codec, defaults, presets, validation, atomic live value, load,
 │   │   │   │   # rewrite, and reload owner.
@@ -19,7 +19,7 @@ happy-artillery/
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
 │   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus independent
-│   │   │   │   # fire-ready, cry-ready, and pending-detonation Overworld-game-time deadlines.
+│   │   │   │   # fire-ready and cry-ready ticks, plus paired pending-detonation deadline/rider identity.
 │   │   │   ├── Heat.java
 │   │   │   │   # Pure heat authority: anchored, non-double-counted water/passive cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
@@ -33,9 +33,9 @@ happy-artillery/
 │   │   │   │   # Sole pilot/input and control-item owner: swap/stash/restore, pre-drop restoration,
 │   │   │   │   # slot locking helpers, callback deduplication, and hold/click intent.
 │   │   │   ├── Abilities.java
-│   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including server-queue
-│   │   │   │   # deadlines, load-time re-establishment, vanilla LargeFireball spawning, configured protected
-│   │   │   │   # overheat effects, sound, and removal; normal fire has no custom projectile or veto path.
+│   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including active and
+│   │   │   │   # bounded rider-deferred task states keyed by persisted ghast UUID, load/player wake-ups,
+│   │   │   │   # durable pre-effect consumption, vanilla LargeFireball spawning, effects, sound, and removal.
 │   │   │   ├── Hud.java
 │   │   │   │   # Sole boss/action-bar and warning-particle owner for pilots and read-only passengers;
 │   │   │   │   # owns and evicts bounded process-local display handles.

@@ -31,8 +31,8 @@ deliberate startup failure and non-deployable identity, no source shell represen
   only with server ticks, survives restart without interpreting a new process-local counter, and provides
   one comparable value to every loaded dimension. No duration advances while the server is stopped.
 - `GhastState` therefore stores heat plus its last-advanced game tick, firing-window end tick,
-  independent per-ghast fire-ready and cry-ready ticks, and a pending-detonation deadline. The
-  abbreviated sample in the specification is not the complete record contract.
+  independent per-ghast fire-ready and cry-ready ticks, and a paired pending-detonation deadline plus
+  detonating-rider UUID. The abbreviated sample in the specification is not the complete record contract.
 - `Hud` owns bounded process-local boss-bar handles. Serializable HUD dirty-check values live in the
   persistent `RiderState`; live packet objects do not become persistence data.
 - `Components` defines, catalogs, and registers both component types through one idempotence-checked
@@ -55,7 +55,7 @@ Config is feature-grouped nested immutable values held in one `AtomicReference` 
 `preset` applies first; explicit keys override it. Every successful load rewrites the complete schema.
 `/ha reload` is operator-only.
 
-Defaults (eight groups, 40 declared keys):
+Defaults (eight groups, 39 declared keys):
 
 | Group | Keys and values |
 |---|---|
@@ -64,14 +64,14 @@ Defaults (eight groups, 40 declared keys):
 | fire | `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
 | heat | `limit=100.0`, `firingWindowSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldMaxTemperature=0.3`, `hotMinTemperature=1.0`, `unknownDimensionUsesTemperature=true` |
 | water | `coolPerSecond=5.0`, `floor=0.0`, `blocksFiring=true` |
-| overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `fireAttempts=24`, `fireRadius=8.0`, `killsGhast=true`, `breaksBlocks=true`, `respectProtection=true` |
+| overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `fireAttempts=24`, `fireRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
 | cry | `enabled=true`, `volume=10.0`, `cooldownSeconds=10.0` |
 | hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85` |
 
 Presets:
 
 - `pvp`: the defaults above.
-- `survival`: overheat protection remains required, fire radius 4, fireball count 12, and overheat power 4.
+- `survival`: fire radius 4, fireball count 12, and overheat power 4.
 - `off`: overheat block breaking and fire placement are disabled; normal fire still follows vanilla
   `mobGriefing`, and entity damage remains.
 
@@ -81,8 +81,9 @@ Presets:
   `server.getTickCount()` and never wall time. The driver reads that clock once per server tick and passes
   the value through context. Restart resumes in the same tick domain; stopped time does not count.
 - `GhastState` is an immutable persistent attachment containing `heat`, `heatAnchorTick`,
-  `firingWindowEndTick`, `fireReadyTick`, `cryReadyTick`, and optional `detonateAtTick`. The fire
-  cooldown is not inferred from the firing window. Updates replace the attachment value.
+  `firingWindowEndTick`, `fireReadyTick`, `cryReadyTick`, optional `detonateAtTick`, and optional
+  `detonatingRiderId`. The two detonation fields are present or absent together. The fire cooldown is
+  not inferred from the firing window. Updates replace the attachment value.
 - `RiderState` is an immutable persistent player attachment containing each byte-exact stashed ItemStack
   paired with the slot index from which it was removed, ridden-ghast UUID, `lastHandledTick`, and
   serializable HUD dirty-cache data.
@@ -95,12 +96,20 @@ Presets:
 
 - Cry admission compares `now` with `cryReadyTick`; accepted cry sets a new absolute game-time deadline.
 - A pending fuse detonates once when `now >= detonateAtTick`. `Abilities` is the only fuse scheduler:
-  accepting a fused overheat submits the absolute deadline to the server task queue, and the ghast-load
+  every accepted overheat, including `fuseTicks=0`, submits the persisted ghast/deadline/rider pair to
+  `FuseQueue`. An already-due submission executes that exact owned task through the same private due-task
+  routine as later queue runs and returns its exact outcome; a future deadline remains active. The ghast-load
   callback asks that same owner to re-establish an overdue or future task from persisted state. The
-  queued task re-reads the attachment/deadline before acting. Rider dismount does not cancel it; unload
-  may make that task a no-op, after which entity load is the bounded wake-up. There is no player-tick
-  fuse poller or world/entity scan. Alternating riders cannot shorten cry cooldown, and restart cannot
-  reset or lengthen either deadline.
+  queued task re-reads the attachment/deadline and resolves the persisted rider UUID through the server
+  player list before acting. Rider dismount does not cancel it. Entity unload leaves pending state for the
+  existing ghast-load wake-up. If only the rider is unavailable while the ghast remains loaded, the same
+  ghast/deadline/rider task moves to one bounded rider-indexed deferred collection inside `FuseQueue`;
+  player availability reactivates it exactly once for the next normal due-task run. Deferred rider work is
+  keyed by the persisted ghast UUID, not a Java entity reference. A reload object for that UUID replaces
+  the active or deferred task's entity reference without adding work; changed deadline/rider state replaces
+  the old task. Deferred work is not retried by the player tick or any other per-tick poller. There is no
+  world/entity scan or second queue.
+  Alternating riders cannot shorten cry cooldown, and restart cannot reset or lengthen either deadline.
 - Entity attachment removal owns ghast-state eviction. Rider stash survives disconnect/crash until
   reconciliation restores it; HUD handles are always process-local and explicitly removed.
 
@@ -200,20 +209,32 @@ Normal fire:
 
 Overheat:
 
-- The crossing shot commits once. With `fuseTicks=0`, detonation is immediate; otherwise persistent
-  pending state blocks further shots and `Abilities` schedules its absolute deadline on the server
-  task queue. The same owner re-establishes the task when the ghast loads, including after restart.
-- At the ghast position, attempt the configured power-6 explosion with the rider as cause, spawn 24
-  evenly distributed sphere fireballs at speed 0.4/power 2, attempt up to 24 supported fire placements
-  within radius 8, then remove the ghast only when `killsGhast=true`. When `killsGhast=false`, keep the
-  ghast alive, reset heat to zero, and clear pending detonation state after the effects. The rider takes
-  the blast normally.
-- Overheat's configured explosion and fire placement honor `overheat.breaksBlocks` and, when enabled,
-  `overheat.respectProtection` through the separately tested protection adapter. A veto skips only that
-  block mutation; it does not create a fallback explosion or bypass.
-- The pending event is one-shot in both branches: execution consumes/clears its persisted deadline so a
-  stale or duplicate queued task cannot repeat the effects. Ghast removal also removes its attachment;
-  `killsGhast=false` retains the ghast with the reset state described above.
+- The crossing shot commits once. `FuseQueue` accepts both zero and positive fuses. With `fuseTicks=0`,
+  its queue-owned submission executes immediately; otherwise persistent pending state blocks further shots
+  while that same queue owns the absolute deadline. The same owner re-establishes the task when the ghast
+  loads, including after restart.
+- At the ghast position, make one best-effort effect pass: attempt the configured power-6 explosion,
+  every one of the 24 evenly distributed sphere fireballs at speed 0.4/power 2, and each of up to 24 fire
+  candidates within radius 8 without aborting later attempts after a rejection. Occupied or unsupported
+  fire candidates are accepted skips; actual rejected explosion, entity-add, fire mutation, or removal
+  attempts are reported truthfully as a consumed pass with failures. Once the ghast is loaded, the deadline
+  is due, and the persisted rider resolves, the required attachment replacement durably consumes the
+  deadline/rider pair before any explosion, fireball, fire, or removal attempt. If that write throws, the
+  pass fails loudly before any world effect, and the queue restores exactly one active owner before
+  propagating the exception. A later due run can therefore retry the still-pending pair without relying on
+  entity replacement. If an unexpected effect exception occurs after consumption, it may propagate while
+  the exact task remains the queue's one active owner. The next due run re-reads the empty persisted pair,
+  cleans that stale ownership as ignored, and performs no effects; later load callbacks cannot recreate it.
+  When `killsGhast=true`, consumption preserves ordinary heat
+  and cooldowns, then effects run and ghast discard is attempted last. When `killsGhast=false`, pre-effect
+  consumption keeps the ghast alive and resets heat and timing. The rider takes the blast normally.
+- `overheat.breaksBlocks` is the sole block-mutation toggle. When false, the explosion has no block
+  interaction and fire placement is skipped. Happy Artillery adds no claims adapter, veto, or bypass.
+- Event consumption is one-shot in both branches: a successful pass and a consumed pass with rejected
+  attempts both leave non-pending state, so stale or duplicate queued tasks cannot repeat effects. With
+  `fuseTicks=0`, those outcomes map to `Detonated` and `Rejected(EFFECT_FAILED)` respectively. A pass
+  deferred before any effect because the ghast or persisted rider is unavailable retains pending state
+  and immediate fire reports `Rejected(EFFECT_FAILED)`.
 
 Cry:
 
@@ -266,12 +287,12 @@ movement/drop route; two-rider pilot authorization plus passenger HUD; creative 
 denial; live reload to different fire/cry slots during an active ride; and Bedrock mount/fire/dismount
 without ghost items. The active ride must remain locked to and restore from its persisted original indexes;
 the next ride must use the new indexes. Verify vanilla normal-fire `mobGriefing` on/off behavior and real
-`LargeFireball` identity, overheat protection vetoes with a real claims integration, persistent heat/stash
+`LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat/stash
 and an in-flight vanilla fireball across restart, paused
 cooldown/fuse while stopped, one-time unload catch-up with no
 repeated cooling, single-digit HUD packet updates per rider/second, bounded per-online-player idle work,
 and README/jar version agreement. Automated seams may cover these contracts in guarded earlier slices,
-but no Java/Bedrock, claims-integration, mod-compatibility, packet-capture, restart, or gameplay evidence is credited until
+but no Java/Bedrock, mod-compatibility, packet-capture, restart, or gameplay evidence is credited until
 the complete graph is runnable.
 
 ## Minecraft 26.2 mapped behavior evidence

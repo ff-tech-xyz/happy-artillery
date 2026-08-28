@@ -160,11 +160,11 @@ public record Config(
             case "pvp" -> defaults;
             case "survival" -> new Config(
                     name, defaults.controls(), defaults.fire(), defaults.heat(), defaults.water(),
-                    new Overheat(0, 4.0, 12, 0.4, 2, 24, 4.0, true, true, true),
+                    new Overheat(0, 4.0, 12, 0.4, 2, 24, 4.0, true, true),
                     defaults.cry(), defaults.hud());
             case "off" -> new Config(
                     name, defaults.controls(), defaults.fire(), defaults.heat(), defaults.water(),
-                    new Overheat(0, 6.0, 24, 0.4, 2, 0, 8.0, true, false, true),
+                    new Overheat(0, 6.0, 24, 0.4, 2, 0, 8.0, true, false),
                     defaults.cry(), defaults.hud());
             default -> throw new IllegalArgumentException("Unknown preset: " + name);
         };
@@ -316,7 +316,7 @@ public record Config(
                         1.0,
                         true),
                 new Water(5.0, 0.0, true),
-                new Overheat(0, 6.0, 24, 0.4, 2, 24, 8.0, true, true, true),
+                new Overheat(0, 6.0, 24, 0.4, 2, 24, 8.0, true, true),
                 new Cry(true, 10.0, 10.0),
                 new Hud(true, true, 4, 85));
     }
@@ -364,8 +364,7 @@ public record Config(
             int fireAttempts,
             double fireRadius,
             boolean killsGhast,
-            boolean breaksBlocks,
-            boolean respectProtection) {
+            boolean breaksBlocks) {
     }
 
     public record Cry(boolean enabled, double volume, double cooldownSeconds) {

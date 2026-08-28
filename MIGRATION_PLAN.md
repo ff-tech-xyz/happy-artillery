@@ -54,9 +54,8 @@ is written. It may not change Loom, Minecraft, Fabric, mappings, Gradle, or Java
 - Normal fire uses the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, owned by the ridden Happy
   Ghast. Vanilla `mobGriefing`, hit damage, constructor movement, explosion interaction, and entity
   persistence remain authoritative; there is no protection-veto adapter or custom projectile owner.
-  Overheat keeps its separate protection adapter and claims-integration gate. Pre-drop restoration,
-  Java + Bedrock hold behavior, and HUD packet bounds remain mandatory final-candidate gates, not later
-  polish.
+  Overheat has no claims adapter; `breaksBlocks` is its sole block-mutation toggle. Pre-drop restoration,
+  Java + Bedrock hold behavior, and HUD packet bounds remain mandatory final-candidate gates, not polish.
 - The fail-loud requirement prevents a committed partial server from running. Attachment persistence is
   first proven automatically by codec/attachment round-trip. A disposable, never-committed compile/API
   spike may disable the guard only to resolve framework signatures, but the committed checkpoint must
@@ -96,7 +95,7 @@ case, atomic call-time reads, distinct in-range fire/cry slots, and failed-reloa
 previous valid value without rewriting the invalid file. Normal-fire `explosionPower` and overheat
 `fireballPower` are strict integers; normal-fire defaults to vanilla power `1`. Remove normal-fire
 `speed`, `spawnDistance`, `breaksBlocks`, and `respectProtection`; no compatibility alias preserves those
-rejected normal-fire promises. Retain the independent `overheat.respectProtection` field.
+rejected normal-fire promises. Remove `overheat.respectProtection`; no claims adapter is part of 1.2.0.
 
 **RED:** focused config assertions fail against the empty owner. **GREEN:** focused config tests, full
 tests, clean build, attachment-API compile-resolution proof, serialized complete-default comparison, and
@@ -117,8 +116,9 @@ proving no other production file classifies dimension or temperature. Commit
 Implement immutable `GhastState` and `RiderState` records/codecs. Each state owner defines/registers its
 persistent attachment type, and the composition root invokes those registration entries without owning
 their definitions or registering gameplay. Include heat/heat-anchor/firing-window and
-independent fire-ready/cry-ready/fuse-deadline Overworld game ticks, byte-exact two-stack stash with
-original slot indexes, ridden id, input dedup tick, and serializable HUD cache.
+independent fire-ready/cry-ready/fuse-deadline Overworld game ticks, the detonating rider UUID paired
+with the fuse deadline, byte-exact two-stack stash with original slot indexes, ridden id, input dedup
+tick, and serializable HUD cache.
 
 **RED:** grouped `PersistenceTest` fresh-state, codec, indexed ItemStack, attachment replacement,
 durable-tick continuity, and encode/decode assertions fail first. **GREEN:** focused/full tests, clean build,
@@ -192,24 +192,34 @@ automated seams. Run focused/full tests, clean build, sound/attachment mutation 
 and searches for a second feedback or cry owner. Commit `feat(abilities): add cry and feedback` and push.
 Remains non-deployable.
 
-### Slice 10 — Overheat, fuse, and protection integration
+### Slice 10 — Overheat, fuse, and rider-owned detonation
 
 Implement only overheat crossing, durable pending fuse, and detonation effects in `Abilities`. Cover the
 single limit-comparison result, pending-shot lockout, saved-game-time `detonateAtTick` across unload and
-restart, exactly-once explosion/sphere/fire effects, configured counts/geometry, conditional removal when
+restart, persisted detonating-rider identity, one best-effort configured effect pass, truthful consumed
+success/failure outcomes, configured counts/geometry, conditional removal when
 `killsGhast=true`, and retained-ghast heat/pending reset when `killsGhast=false`. `Abilities` must be the
-only scheduling owner: fuse acceptance submits the
-absolute deadline through the server task queue; a ghast-load entrypoint in the same owner re-establishes
-an overdue or future task from the attachment; and execution re-reads the current deadline before acting.
-Dismount leaves the task live. Unload may make a queued execution a no-op, with entity load as the one
-bounded wake-up. Do not add a player-tick fuse check, parallel poller, loaded-entity scan, or second queue.
+only scheduling owner: every accepted zero or positive fuse submits its persisted pair to `FuseQueue`.
+An already-due submission executes its exact owned task through the same private routine as `runDue` and
+returns the exact detonation outcome; a ghast-load entrypoint in the same owner re-establishes
+an overdue or future task from the attachment; work is keyed by persisted ghast UUID so reload objects
+replace active or rider-deferred references; and execution re-reads the current deadline before acting.
+Dismount leaves the task live. Unload makes execution a no-op while retaining pending state, with entity
+load as its bounded wake-up. An unavailable persisted rider moves the same task to the queue's bounded
+rider index; the player-availability callback reactivates it once. Resolve riders by UUID through the
+server player list. After loaded/due/rider admission, required attachment replacement consumes the pair
+before every world effect and fails loudly before effects if it throws. Any execution exception restores the
+exact task as the queue's one active owner before propagation. A later due run retries a still-pending pair,
+or re-reads an already-consumed empty pair and cleans the task as ignored without replaying effects. Do not
+add a player-tick fuse check,
+parallel poller, loaded-entity scan, or second queue.
 
-**RED/GREEN:** every transition, scheduling, reload wake-up, stale-task, and protection-adapter assertion
+**RED/GREEN:** every transition, scheduling, reload wake-up, stale-task, rider-resolution, and effect assertion
 fails then passes. Simulate dismount, unload before deadline, load before/after deadline, duplicate load
 callbacks, and restart reconstruction; each pending fuse must have one effective detonation and bounded
 queued work. Run focused/full tests, clean build, complete effect-mutation accounting, and
 alternate-effect/scheduler searches.
-Commit `feat(abilities): integrate protected overheat` and push. Remains non-deployable.
+Commit `feat(abilities): integrate overheat detonation` and push. Remains non-deployable.
 
 ### Slice 11 — Read-only pilot and passenger HUD
 
@@ -230,8 +240,9 @@ Implement the final `HappyArtillery` owner graph and integration tests behind th
 guard. The designed runtime order is: read saved Overworld game time once; reconcile all players; process
 each ridden ghast once through its pilot using one biome context; then render pilot/passenger HUD from the
 result snapshot. Invoke each callback, attachment, and component owner's registration entry exactly
-once; register the mixin path, death hook, ghast-load callback, and server-stop cleanup exactly once.
-The load callback delegates pending-fuse wake-up to `Abilities`; the player driver never polls fuses.
+once; register the mixin path, death hook, ghast-load callback, player-availability callback, and
+server-stop cleanup exactly once. The load and availability callbacks delegate pending-fuse wake-up to
+`Abilities`; the player driver never polls deferred fuses.
 
 **RED:** integration tests fail on missing registrations/order. **GREEN:** focused/full tests, clean build,
 registration enumeration, durable clock-context proof, and a no-rider harness proving exactly one bounded
@@ -244,7 +255,7 @@ must still fail loudly and remain undeployable.
 ### Slice 13 — Activate and prove the complete candidate
 
 Prerequisites: Slices 1-12 are pushed GREEN and independent architecture/behavior reviews find no hidden
-second owner. Integrated Java/Bedrock, claims, packet, restart, and gameplay evidence is intentionally
+second owner. Integrated Java/Bedrock, packet, restart, and gameplay evidence is intentionally
 not a prerequisite because guarded bytes were not runnable.
 
 **RED:** an integration assertion requires normal startup while the deliberate guard still fails.
@@ -268,7 +279,7 @@ exact deadlines, and byte-exact original-slot restoration. Failure stops all lat
 exact head, run the full Java + Bedrock abuse list, normal fire, every biome/water curve, per-ghast cry,
 instant/fused overheat including rider dismount and entity unload/reload, `mobGriefing` on/off, real
 `LargeFireball` identity/ownership plus one in-flight save/restart/resume, representative mod
-compatibility, real claims-plugin overheat vetoes, HUD packet capture, cleanup, and bounded idle-work
+compatibility, both overheat `breaksBlocks` settings, HUD packet capture, cleanup, and bounded idle-work
 profiler tests. In that session measure the preferred hold
 path at a steady configured four shots/second on both clients without packet-rate dependence.
 
@@ -304,11 +315,3 @@ callback effect, broad/sampled catch, routine per-tick logging, or silent placeh
 inventory write, discard, projectile spawn, explosion, fire placement, sound, particle, boss/action-bar
 send, attachment mutation, callback registration, and player/world/entity iteration; each must resolve to
 the single owner in the architecture tree.
-
-## Proposed project-state handoff
-
-The worker does not edit routed state. After review/commit/push, the coordinator can record:
-
-- **Decision:** `Normal artillery fire uses the real vanilla EntityTypes.FIREBALL/LargeFireball, constructed with the ridden Happy Ghast as owner. Defaults are exact Minecraft 26.2 ghast behavior: integer explosion power 1, direct-hit damage 6.0F, constructor movement at acceleration power 0.1 with 0.95 air inertia, four-block/Y-half-plus-0.5 launch placement, and LargeFireball's mobGriefing-gated MOB explosion. Removed normal fire's protection toggle and every custom normal-fire veto or projectile-persistence promise; in-flight restart behavior is vanilla entity persistence. The separate protected-overheat contract remains. Abilities remains the existing fire owner and GhastState adds independent fireReadyTick.`
-- **Tested:** `Validated the final three-document Slice 8 groundwork against the pinned Minecraft 26.2 official-name merged jar: Ghast, Ghast$GhastShootFireballGoal, LargeFireball, AbstractHurtingProjectile, Fireball, Projectile, and HappyGhast constructor/inheritance/save-load bytecode. Structure/path counts, sequential Slice 0-14, Markdown fences/final newlines, rejected normal-fire config/protection residue, git diff --check, and the canonical clean Gradle build passed. Only ARCHITECTURE.md, FEATURES.md, and MIGRATION_PLAN.md changed; source, tests, resources, build files, project state, runtime, releases, main, Modrinth, and production were untouched.`
-- **History:** `Prepared Slice 8 documentation groundwork from Elijah's vanilla-identity decision. Replaced the speed-0.35/power-2/custom-veto design with one Abilities-owned vanilla LargeFireball path, Happy-Ghast ownership, strict integer power defaults, mobGriefing compatibility, and accepted vanilla in-flight persistence. Kept the annotated proposed tree at fourteen production owners and preserved fail-loud/non-deployable identity for implementation.`

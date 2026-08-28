@@ -10,6 +10,7 @@ import net.minecraft.resources.Identifier;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.UUID;
 
 /** Immutable persistent Happy Ghast state in saved Overworld game-time ticks. */
 public record GhastState(
@@ -18,8 +19,10 @@ public record GhastState(
         long firingWindowEndTick,
         long fireReadyTick,
         long cryReadyTick,
-        OptionalLong detonateAtTick) {
+        OptionalLong detonateAtTick,
+        Optional<UUID> detonatingRiderId) {
     private static AttachmentType<GhastState> type;
+    private static final Codec<UUID> UUID_CODEC = Codec.STRING.xmap(UUID::fromString, UUID::toString);
 
     public static final Codec<GhastState> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.DOUBLE.fieldOf("heat").forGetter(GhastState::heat),
@@ -27,15 +30,33 @@ public record GhastState(
             Codec.LONG.fieldOf("firing_window_end_tick").forGetter(GhastState::firingWindowEndTick),
             Codec.LONG.fieldOf("fire_ready_tick").forGetter(GhastState::fireReadyTick),
             Codec.LONG.fieldOf("cry_ready_tick").forGetter(GhastState::cryReadyTick),
-            Codec.LONG.optionalFieldOf("detonate_at_tick").forGetter(GhastState::boxedDetonateAtTick)
+            Codec.LONG.optionalFieldOf("detonate_at_tick").forGetter(GhastState::boxedDetonateAtTick),
+            UUID_CODEC.optionalFieldOf("detonating_rider_id").forGetter(GhastState::detonatingRiderId)
     ).apply(instance, GhastState::fromCodec));
 
     public GhastState {
         Objects.requireNonNull(detonateAtTick, "detonateAtTick");
+        Objects.requireNonNull(detonatingRiderId, "detonatingRiderId");
+        if (detonateAtTick.isPresent() != detonatingRiderId.isPresent()) {
+            throw new IllegalArgumentException(
+                    "Pending detonation deadline and rider identity must be present together");
+        }
+    }
+
+    public GhastState(
+            double heat,
+            long heatAnchorTick,
+            long firingWindowEndTick,
+            long fireReadyTick,
+            long cryReadyTick,
+            OptionalLong detonateAtTick) {
+        this(heat, heatAnchorTick, firingWindowEndTick, fireReadyTick, cryReadyTick,
+                detonateAtTick, Optional.empty());
     }
 
     public static GhastState fresh() {
-        return new GhastState(0.0, 0L, 0L, 0L, 0L, OptionalLong.empty());
+        return new GhastState(
+                0.0, 0L, 0L, 0L, 0L, OptionalLong.empty(), Optional.empty());
     }
 
     static synchronized AttachmentType<GhastState> register() {
@@ -62,7 +83,8 @@ public record GhastState(
             long firingWindowEndTick,
             long fireReadyTick,
             long cryReadyTick,
-            Optional<Long> detonateAtTick) {
+            Optional<Long> detonateAtTick,
+            Optional<UUID> detonatingRiderId) {
         return new GhastState(
                 heat,
                 heatAnchorTick,
@@ -71,6 +93,7 @@ public record GhastState(
                 cryReadyTick,
                 detonateAtTick.isPresent()
                         ? OptionalLong.of(detonateAtTick.orElseThrow())
-                        : OptionalLong.empty());
+                        : OptionalLong.empty(),
+                detonatingRiderId);
     }
 }

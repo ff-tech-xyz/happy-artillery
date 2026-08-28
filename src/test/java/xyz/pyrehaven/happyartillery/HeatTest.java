@@ -3,7 +3,9 @@ package xyz.pyrehaven.happyartillery;
 import net.minecraft.nbt.NbtOps;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,6 +20,19 @@ public final class HeatTest {
                 before, 140L, new Config.HeatProfile(1.0, 0.0), false, water(5.0));
 
         assertEquals(state(40.0, 140L, 0L), after);
+    }
+
+    @Test
+    void heatAdvancePreservesPendingDeadlineAndRiderIdentity() {
+        UUID riderId = UUID.fromString("83e5e798-615a-4552-8000-74b04f756c42");
+        GhastState before = new GhastState(
+                40.0, 100L, 0L, 0L, 0L, OptionalLong.of(200L), Optional.of(riderId));
+
+        GhastState after = Heat.advance(
+                before, 140L, new Config.HeatProfile(1.0, 0.0), false, water(5.0));
+
+        assertEquals(OptionalLong.of(200L), after.detonateAtTick());
+        assertEquals(Optional.of(riderId), after.detonatingRiderId());
     }
 
     @Test
@@ -324,7 +339,7 @@ public final class HeatTest {
 
     private static GhastState state(double heat, long anchor, long firingWindowEnd) {
         return new GhastState(heat, anchor, firingWindowEnd, 250L, 300L,
-                OptionalLong.of(400L));
+                OptionalLong.empty());
     }
 
     private static Config.Water water(double coolPerSecond) {
