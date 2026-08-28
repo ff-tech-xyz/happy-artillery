@@ -28,6 +28,220 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class AbilitiesTest {
     @Test
+    void cryBoundaryIsSealedAndExposesOneEffectAccess() throws Exception {
+        Class<?> outcome = Class.forName("xyz.pyrehaven.happyartillery.Abilities$CryOutcome");
+        Class<?> access = Class.forName("xyz.pyrehaven.happyartillery.Abilities$CryAccess");
+
+        assertTrue(outcome.isSealed());
+        assertEquals(Set.of("Cried", "CryRejected"),
+                Stream.of(outcome.getPermittedSubclasses())
+                        .map(Class::getSimpleName)
+                        .collect(Collectors.toSet()));
+        assertEquals(Set.of("isPilot", "inWater", "playCry", "replaceState"),
+                Stream.of(access.getDeclaredMethods())
+                        .map(java.lang.reflect.Method::getName)
+                        .collect(Collectors.toSet()));
+        assertEquals(outcome, Abilities.class.getDeclaredMethod(
+                "cry", Object.class, Object.class, GhastState.class, long.class, Config.class, access)
+                .getReturnType());
+    }
+
+    @Test
+    void cryRejectsNonPilotBeforeWaterSoundOrStateMutation() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        access.pilot = false;
+
+        Abilities.CryOutcome outcome = cry(GhastState.fresh(), 100L, Config.defaults(), access);
+
+        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.NOT_PILOT), outcome);
+        assertEquals(1, access.pilotChecks);
+        assertEquals(0, access.waterChecks + access.sounds + access.replacements);
+    }
+
+    @Test
+    void cryRejectsWaterBeforeSoundOrStateMutation() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        access.inWater = true;
+
+        Abilities.CryOutcome outcome = cry(GhastState.fresh(), 100L, Config.defaults(), access);
+
+        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.IN_WATER), outcome);
+        assertEquals(1, access.pilotChecks);
+        assertEquals(1, access.waterChecks);
+        assertEquals(0, access.sounds + access.replacements);
+    }
+
+    @Test
+    void disabledCryRejectsBeforeCooldownSoundOrStateMutation() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        GhastState state = new GhastState(20.0, 50L, 75L, 0L, 500L,
+                java.util.OptionalLong.of(600L));
+
+        Abilities.CryOutcome outcome = cry(state, 100L, configWithCry(false, 10.0, 10.0), access);
+
+        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.DISABLED), outcome);
+        assertEquals(1, access.waterChecks);
+        assertEquals(0, access.sounds + access.replacements);
+        assertEquals(500L, state.cryReadyTick());
+    }
+
+    @Test
+    void cryReadyTickRejectsSavedGameTimeBeforeSoundOrStateMutation() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        GhastState state = new GhastState(20.0, 50L, 75L, 0L, 101L,
+                java.util.OptionalLong.of(600L));
+
+        Abilities.CryOutcome outcome = cry(state, 100L, Config.defaults(), access);
+
+        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.ON_COOLDOWN), outcome);
+        assertEquals(0, access.sounds + access.replacements);
+        assertEquals(101L, state.cryReadyTick());
+    }
+
+    @Test
+    void acceptedCryPlaysConfiguredSoundThenCommitsOnlyCryDeadline() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        GhastState original = new GhastState(20.0, 50L, 75L, 90L, 100L,
+                java.util.OptionalLong.of(600L));
+
+        Abilities.CryOutcome outcome = cry(
+                original, 100L, configWithCry(true, 7.5, 2.25), access);
+
+        GhastState committed = new GhastState(20.0, 50L, 75L, 90L, 145L,
+                java.util.OptionalLong.of(600L));
+        assertEquals(new Abilities.Cried(committed), outcome);
+        assertEquals(committed, access.replacedState);
+        assertEquals(List.of("sound", "replace"), access.events);
+        assertEquals(1, access.sounds);
+        assertEquals(1, access.replacements);
+        assertEquals(7.5, access.volume);
+        assertEquals(20.0, committed.heat());
+        assertEquals(50L, committed.heatAnchorTick());
+        assertEquals(75L, committed.firingWindowEndTick());
+        assertEquals(90L, committed.fireReadyTick());
+        assertEquals(java.util.OptionalLong.of(600L), committed.detonateAtTick());
+    }
+
+    @Test
+    void rejectedSoundDoesNotCommitCryDeadlineOrAnyOtherState() {
+        RecordingCryAccess access = new RecordingCryAccess();
+        access.soundAccepted = false;
+        GhastState original = new GhastState(20.0, 50L, 75L, 90L, 100L,
+                java.util.OptionalLong.of(600L));
+
+        Abilities.CryOutcome outcome = cry(original, 100L, Config.defaults(), access);
+
+        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.EFFECT_FAILED), outcome);
+        assertEquals(List.of("sound"), access.events);
+        assertEquals(1, access.sounds);
+        assertEquals(0, access.replacements);
+        assertEquals(100L, original.cryReadyTick());
+    }
+
+    @Test
+    void feedbackBoundaryOwnsActionBarAndBlockedSoundEffects() throws Exception {
+        Class<?> access = Class.forName("xyz.pyrehaven.happyartillery.Feedback$Access");
+
+        assertEquals(Set.of("actionBar", "blockedSound"),
+                Stream.of(access.getDeclaredMethods())
+                        .map(java.lang.reflect.Method::getName)
+                        .collect(Collectors.toSet()));
+        assertEquals(void.class, Feedback.class.getDeclaredMethod(
+                "present", Abilities.CryRejection.class, Object.class, access).getReturnType());
+    }
+
+    @Test
+    void inWaterCryRejectionMapsToOneShortActionBarLineAndDistinctSound() {
+        RecordingFeedbackAccess access = new RecordingFeedbackAccess();
+        Object player = new Object();
+
+        Feedback.present(Abilities.CryRejection.IN_WATER, player, access);
+
+        assertEquals(List.of("action:Can't use artillery in water", "sound"), access.events);
+    }
+
+    @Test
+    void cooldownAndAuthorizationCryRejectionsStaySilent() {
+        RecordingFeedbackAccess access = new RecordingFeedbackAccess();
+        Object player = new Object();
+
+        Feedback.present(Abilities.CryRejection.ON_COOLDOWN, player, access);
+        Feedback.present(Abilities.CryRejection.NOT_PILOT, player, access);
+
+        assertEquals(List.of(), access.events);
+    }
+
+    @Test
+    void minecraftCryAdapterUsesGhastScreamHostileConfiguredVolumeAndPointEightPitch()
+            throws Exception {
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode real = exactMethod(abilities, "cry",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
+                        + "Lxyz/pyrehaven/happyartillery/GhastState;J)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$CryOutcome;");
+        assertEquals(1, callsTo(real, "xyz/pyrehaven/happyartillery/Config", "current").size());
+
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerCryAccess");
+        MethodNode play = exactMethod(adapter, "playCry",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;D)Z");
+        List<FieldInsnNode> fields = instructions(play).stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .toList();
+        assertTrue(fields.stream().anyMatch(field -> field.owner.equals("net/minecraft/sounds/SoundEvents")
+                && field.name.equals("GHAST_SCREAM")));
+        assertTrue(fields.stream().anyMatch(field -> field.owner.equals("net/minecraft/sounds/SoundSource")
+                && field.name.equals("HOSTILE")));
+        assertEquals(List.of(0.8F), instructions(play).stream()
+                .filter(LdcInsnNode.class::isInstance)
+                .map(LdcInsnNode.class::cast)
+                .map(node -> node.cst)
+                .filter(Float.class::isInstance)
+                .toList());
+        assertEquals(1, callsTo(play, "net/minecraft/world/level/Level", "playSound").size());
+        assertTrue(instructions(play).stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .noneMatch(call -> Set.of(
+                        "hurt", "hurtServer", "addEffect", "setHealth", "kill", "discard",
+                        "explode", "addFreshEntity", "gameEvent", "setTarget", "setDeltaMovement")
+                        .contains(call.name)));
+        assertEquals(10.0, Config.defaults().cry().volume());
+    }
+
+    @Test
+    void minecraftFeedbackAdapterUsesOverlayMessageAndASeparateBlockedSound() throws Exception {
+        ClassNode feedback = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Feedback");
+        MethodNode real = exactMethod(feedback, "present",
+                "(Lxyz/pyrehaven/happyartillery/Abilities$CryRejection;"
+                        + "Lnet/minecraft/server/level/ServerPlayer;)V");
+        assertEquals(1, callsTo(real, "xyz/pyrehaven/happyartillery/Feedback", "present").size());
+
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Feedback$ServerPlayerFeedbackAccess");
+        MethodNode actionBar = exactMethod(adapter, "actionBar",
+                "(Lnet/minecraft/server/level/ServerPlayer;Ljava/lang/String;)V");
+        assertEquals(1, callsTo(actionBar, "net/minecraft/network/chat/Component", "literal").size());
+        assertEquals(1, callsTo(actionBar, "net/minecraft/server/level/ServerPlayer", "sendOverlayMessage").size());
+
+        MethodNode blockedSound = exactMethod(adapter, "blockedSound",
+                "(Lnet/minecraft/server/level/ServerPlayer;)V");
+        List<FieldInsnNode> fields = instructions(blockedSound).stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .toList();
+        assertTrue(fields.stream().anyMatch(field -> field.owner.equals("net/minecraft/sounds/SoundEvents")
+                && field.name.equals("FIRE_EXTINGUISH")));
+        assertTrue(fields.stream().noneMatch(field -> field.owner.equals("net/minecraft/sounds/SoundEvents")
+                && field.name.equals("GHAST_SCREAM")));
+        assertEquals(1, callsTo(blockedSound, "net/minecraft/server/level/ServerPlayer", "playSound").size());
+    }
+
+    @Test
     void fireOutcomesIncludeAnExplicitOverheatCrossingBoundary() throws Exception {
         Class<?> outcome = Class.forName("xyz.pyrehaven.happyartillery.Abilities$FireOutcome");
 
@@ -249,6 +463,11 @@ final class AbilitiesTest {
         }
     }
 
+    private static Abilities.CryOutcome cry(
+            GhastState state, long now, Config config, RecordingCryAccess access) {
+        return Abilities.cry(new Object(), new Object(), state, now, config, access);
+    }
+
     private static Abilities.FireOutcome fire(
             GhastState state, long now, RecordingAccess access) {
         return fire(state, now, Config.defaults(), access);
@@ -261,6 +480,13 @@ final class AbilitiesTest {
                 BiomeClass.BASE, access);
     }
 
+    private static Config configWithCry(boolean enabled, double volume, double cooldownSeconds) {
+        Config defaults = Config.defaults();
+        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+                defaults.water(), defaults.overheat(), new Config.Cry(enabled, volume, cooldownSeconds),
+                defaults.hud());
+    }
+
     private static Config configWithHeat(double heatPerShot, double limit) {
         Config defaults = Config.defaults();
         Config.Heat original = defaults.heat();
@@ -271,6 +497,60 @@ final class AbilitiesTest {
                 original.unknownDimensionUsesTemperature());
         return new Config(defaults.preset(), defaults.controls(), defaults.fire(), heat,
                 defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
+    }
+
+    private static final class RecordingFeedbackAccess implements Feedback.Access<Object> {
+        private final List<String> events = new ArrayList<>();
+
+        @Override
+        public void actionBar(Object player, String message) {
+            events.add("action:" + message);
+        }
+
+        @Override
+        public void blockedSound(Object player) {
+            events.add("sound");
+        }
+    }
+
+    private static final class RecordingCryAccess implements Abilities.CryAccess<Object, Object> {
+        private boolean pilot = true;
+        private boolean inWater;
+        private boolean soundAccepted = true;
+        private int pilotChecks;
+        private int waterChecks;
+        private int sounds;
+        private int replacements;
+        private double volume;
+        private GhastState replacedState;
+        private final List<String> events = new ArrayList<>();
+
+        @Override
+        public boolean isPilot(Object pilotObject, Object ghast) {
+            pilotChecks++;
+            return pilot;
+        }
+
+        @Override
+        public boolean inWater(Object ghast) {
+            waterChecks++;
+            return inWater;
+        }
+
+        @Override
+        public boolean playCry(Object ghast, double volume) {
+            sounds++;
+            this.volume = volume;
+            events.add("sound");
+            return soundAccepted;
+        }
+
+        @Override
+        public void replaceState(Object ghast, GhastState state) {
+            replacements++;
+            replacedState = state;
+            events.add("replace");
+        }
     }
 
     private static final class RecordingAccess implements Abilities.FireAccess<Object, Object> {
