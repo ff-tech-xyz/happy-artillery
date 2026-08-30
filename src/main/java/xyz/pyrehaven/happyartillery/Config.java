@@ -54,7 +54,14 @@ public record Config(
         }
         JsonObject explicit = parseStrictObject(Files.readString(path));
         validateIntegerLeaves(explicit);
-        String preset = explicit.has("preset") ? explicit.get("preset").getAsString() : "pvp";
+        String preset = "pvp";
+        if (explicit.has("preset")) {
+            JsonElement value = explicit.get("preset");
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException("preset must be a string");
+            }
+            preset = value.getAsString();
+        }
         JsonObject complete = JSON.toJsonTree(preset(preset)).getAsJsonObject();
         mergeKnown(complete, explicit);
         Config loaded = JSON.fromJson(complete, Config.class);

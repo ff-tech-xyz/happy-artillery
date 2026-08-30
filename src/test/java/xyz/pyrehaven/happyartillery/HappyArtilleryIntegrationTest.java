@@ -12,12 +12,16 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,6 +36,9 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -65,14 +72,12 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void missingConfigIsCreatedAndLoadedBeforeRegistrationAndTheExactGuard() throws Exception {
+    void missingConfigIsCreatedAndLoadedBeforeEachRegistrationExactlyOnce() throws Exception {
         RecordingRegistrar registrar = new RecordingRegistrar();
         Path configPath = tempDir.resolve("happy-artillery.json");
 
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> HappyArtillery.initialize(configPath, registrar));
+        assertDoesNotThrow(() -> HappyArtillery.initialize(configPath, registrar));
 
-        assertEquals("Happy Artillery structural groundwork is not a playable build", failure.getMessage());
         assertEquals(true, Files.isRegularFile(configPath));
         assertEquals(Config.defaults(), Config.current());
         assertEquals(Map.of(
@@ -84,7 +89,9 @@ final class HappyArtilleryIntegrationTest {
                 "ghast-load", 1,
                 "player-available", 1,
                 "player-tick", 1,
-                "server-stop", 1), registrar.calls);
+                "server-stop", 1,
+                "reload", 1), registrar.calls);
+        assertSame(configPath, registrar.reloadPath);
         assertEquals("components", registrar.order.getFirst());
     }
 
@@ -108,6 +115,120 @@ final class HappyArtilleryIntegrationTest {
         assertThrows(IOException.class, () -> HappyArtillery.initialize(tempDir, registrar));
 
         assertEquals(Map.of(), registrar.calls);
+    }
+
+    @Test
+    void successfulReloadRewritesSwapsReportsOnceAndReturnsBrigadierSuccess() throws Exception {
+        Path configPath = tempDir.resolve("happy-artillery.json");
+        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(configPath);
+        Files.writeString(configPath, "{\"preset\":\"survival\"}");
+        RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+        int result = HappyArtillery.executeReload(configPath, feedback);
+
+        assertEquals(1, result);
+        assertNotSame(previous, Config.current());
+        assertEquals("survival", Config.current().preset());
+        assertEquals(new com.google.gson.Gson().toJsonTree(Config.current()),
+                com.google.gson.JsonParser.parseString(Files.readString(configPath)));
+        assertEquals(List.of("success:Happy Artillery config reloaded."), feedback.messages);
+    }
+
+    @Test
+    void malformedReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
+        Path configPath = tempDir.resolve("happy-artillery.json");
+        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(configPath);
+        byte[] invalid = "{ malformed".getBytes();
+        Files.write(configPath, invalid);
+        RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+        int result = HappyArtillery.executeReload(configPath, feedback);
+
+        assertEquals(0, result);
+        assertSame(previous, Config.current());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
+        assertEquals(List.of(
+                "failure:Happy Artillery config reload failed: Invalid config JSON"),
+                feedback.messages);
+    }
+
+    @Test
+    void invalidReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
+        Path configPath = tempDir.resolve("happy-artillery.json");
+        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(configPath);
+        byte[] invalid = "{\"controls\":{\"fireSlot\":9}}".getBytes();
+        Files.write(configPath, invalid);
+        RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+        int result = HappyArtillery.executeReload(configPath, feedback);
+
+        assertEquals(0, result);
+        assertSame(previous, Config.current());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
+        assertEquals(List.of(
+                "failure:Happy Artillery config reload failed: "
+                        + "controls.fireSlot must be between 0 and 8"),
+                feedback.messages);
+    }
+
+    @Test
+    void reloadIoFailureReportsOnceReturnsFailureAndPreservesState() throws Exception {
+        Path validPath = tempDir.resolve("valid.json");
+        Files.writeString(validPath, "{\"controls\":{\"fireSlot\":2}}");
+        Config previous = Config.load(validPath);
+        RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+        int result = HappyArtillery.executeReload(tempDir, feedback);
+
+        assertEquals(0, result);
+        assertSame(previous, Config.current());
+        assertEquals(1, feedback.messages.size());
+        assertEquals(true, feedback.messages.getFirst().startsWith(
+                "failure:Happy Artillery config reload failed: "));
+    }
+
+    @Test
+    void nonStringPresetReloadsReportOnceAndPreserveStateAndBytes() throws Exception {
+        List<String> invalidDocuments = List.of(
+                "{\"preset\":null}", "{\"preset\":[]}", "{\"preset\":{}}");
+        for (int index = 0; index < invalidDocuments.size(); index++) {
+            Path configPath = tempDir.resolve("preset-type-" + index + ".json");
+            Files.writeString(configPath, "{\"preset\":\"survival\"}");
+            Config previous = Config.load(configPath);
+            byte[] invalid = invalidDocuments.get(index).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            Files.write(configPath, invalid);
+            RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+            int result = HappyArtillery.executeReload(configPath, feedback);
+
+            assertEquals(0, result);
+            assertSame(previous, Config.current());
+            org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
+            assertEquals(List.of(
+                    "failure:Happy Artillery config reload failed: preset must be a string"),
+                    feedback.messages);
+        }
+    }
+
+    @Test
+    void productBuildInputsUseDeployableHappyArtilleryIdentity() throws Exception {
+        String metadataBytes = Files.readString(Path.of("src/main/resources/fabric.mod.json"));
+        com.google.gson.JsonObject metadata = com.google.gson.JsonParser.parseString(metadataBytes)
+                .getAsJsonObject();
+        String buildBytes = Files.readString(Path.of("build.gradle"));
+
+        assertEquals("Happy Artillery", metadata.get("name").getAsString());
+        assertFalse(metadata.get("description").getAsString().toLowerCase().contains("structural"));
+        assertFalse(metadata.get("description").getAsString().toLowerCase().contains("no gameplay"));
+        assertFalse(metadataBytes.toLowerCase().contains("non-deployable"));
+        assertFalse(buildBytes.toLowerCase().contains("non-deployable"));
+        assertEquals(1, buildBytes.lines()
+                .filter(line -> line.strip().equals(
+                        "archivesName = \"${project.archives_base_name}\""))
+                .count());
     }
 
     @Test
@@ -235,7 +356,7 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void productionStartupUsesExactFabricConfigPathBeforeRegistrationAndGuard() throws IOException {
+    void productionStartupUsesExactFabricConfigPathBeforeRegistration() throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
         MethodNode onInitialize = method(root, "onInitialize", "()V");
         List<MethodInsnNode> entryCalls = methodCalls(onInitialize);
@@ -259,7 +380,7 @@ final class HappyArtilleryIntegrationTest {
         int firstRegistration = callIndex(initializeCalls,
                 "xyz/pyrehaven/happyartillery/HappyArtillery$Registrar", "registerComponents");
         assertEquals(true, load >= 0 && load < firstRegistration);
-        assertEquals(1, Stream.iterate(initialize.instructions.getFirst(), java.util.Objects::nonNull,
+        assertEquals(0, Stream.iterate(initialize.instructions.getFirst(), java.util.Objects::nonNull,
                         instruction -> instruction.getNext())
                 .filter(TypeInsnNode.class::isInstance).map(TypeInsnNode.class::cast)
                 .filter(instruction -> instruction.desc.equals("java/lang/IllegalStateException")).count());
@@ -277,10 +398,13 @@ final class HappyArtilleryIntegrationTest {
                         "net/fabricmc/fabric/api/networking/v1/ServerPlayConnectionEvents.JOIN",
                         "net/fabricmc/fabric/api/networking/v1/ServerPlayConnectionEvents.DISCONNECT"),
                 "registerPlayerTick", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents.END_SERVER_TICK"),
-                "registerServerStop", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerLifecycleEvents.SERVER_STOPPED"));
+                "registerServerStop", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerLifecycleEvents.SERVER_STOPPED"),
+                "registerReload", List.of("net/fabricmc/fabric/api/command/v2/CommandRegistrationCallback.EVENT"));
 
         for (Map.Entry<String, List<String>> entry : expected.entrySet()) {
-            MethodNode method = method(registrar, entry.getKey(), "()V");
+            String descriptor = entry.getKey().equals("registerReload")
+                    ? "(Ljava/nio/file/Path;)V" : "()V";
+            MethodNode method = method(registrar, entry.getKey(), descriptor);
             List<String> events = Stream.iterate(method.instructions.getFirst(), java.util.Objects::nonNull,
                             instruction -> instruction.getNext())
                     .filter(FieldInsnNode.class::isInstance).map(FieldInsnNode.class::cast)
@@ -291,6 +415,58 @@ final class HappyArtilleryIntegrationTest {
                     .filter(call -> call.owner.equals("net/fabricmc/fabric/api/event/Event")
                             && call.name.equals("register")).count(), entry.getKey());
         }
+    }
+
+    @Test
+    void reloadCommandGraphUsesExactPathRootChildPermissionAndExecutionBoundary() throws IOException {
+        ClassNode registrar = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$FabricRegistrar");
+        String callbackDescriptor = "(Ljava/nio/file/Path;Lcom/mojang/brigadier/CommandDispatcher;"
+                + "Lnet/minecraft/commands/CommandBuildContext;"
+                + "Lnet/minecraft/commands/Commands$CommandSelection;)V";
+        MethodNode callback = method(registrar, "lambda$registerReload$0", callbackDescriptor);
+        assertEquals(List.of(
+                        "ALOAD 1",
+                        "LDC ha",
+                        "INVOKESTATIC net/minecraft/commands/Commands.literal"
+                                + "(Ljava/lang/String;)Lcom/mojang/brigadier/builder/LiteralArgumentBuilder;",
+                        "GETSTATIC net/minecraft/commands/Commands.LEVEL_GAMEMASTERS"
+                                + " Lnet/minecraft/server/permissions/PermissionCheck;",
+                        "INVOKESTATIC net/minecraft/commands/Commands.hasPermission"
+                                + "(Lnet/minecraft/server/permissions/PermissionCheck;)"
+                                + "Lnet/minecraft/server/permissions/PermissionProviderCheck;",
+                        "INVOKEVIRTUAL com/mojang/brigadier/builder/LiteralArgumentBuilder.requires"
+                                + "(Ljava/util/function/Predicate;)"
+                                + "Lcom/mojang/brigadier/builder/ArgumentBuilder;",
+                        "CHECKCAST com/mojang/brigadier/builder/LiteralArgumentBuilder",
+                        "LDC reload",
+                        "INVOKESTATIC net/minecraft/commands/Commands.literal"
+                                + "(Ljava/lang/String;)Lcom/mojang/brigadier/builder/LiteralArgumentBuilder;",
+                        "ALOAD 0",
+                        "INVOKEDYNAMIC run(Ljava/nio/file/Path;)Lcom/mojang/brigadier/Command;",
+                        "INVOKEVIRTUAL com/mojang/brigadier/builder/LiteralArgumentBuilder.executes"
+                                + "(Lcom/mojang/brigadier/Command;)"
+                                + "Lcom/mojang/brigadier/builder/ArgumentBuilder;",
+                        "INVOKEVIRTUAL com/mojang/brigadier/builder/LiteralArgumentBuilder.then"
+                                + "(Lcom/mojang/brigadier/builder/ArgumentBuilder;)"
+                                + "Lcom/mojang/brigadier/builder/ArgumentBuilder;",
+                        "CHECKCAST com/mojang/brigadier/builder/LiteralArgumentBuilder",
+                        "INVOKEVIRTUAL com/mojang/brigadier/CommandDispatcher.register"
+                                + "(Lcom/mojang/brigadier/builder/LiteralArgumentBuilder;)"
+                                + "Lcom/mojang/brigadier/tree/LiteralCommandNode;",
+                        "POP",
+                        "RETURN"),
+                semanticShape(callback));
+
+        MethodNode execution = method(registrar, "lambda$registerReload$1",
+                "(Ljava/nio/file/Path;Lcom/mojang/brigadier/context/CommandContext;)I");
+        assertEquals(List.of(
+                        "com/mojang/brigadier/context/CommandContext.getSource()Ljava/lang/Object;",
+                        "xyz/pyrehaven/happyartillery/HappyArtillery.executeReload(Ljava/nio/file/Path;"
+                                + "Lxyz/pyrehaven/happyartillery/HappyArtillery$ReloadFeedback;)I"),
+                methodCalls(execution).stream()
+                        .filter(call -> call.name.equals("getSource") || call.name.equals("executeReload"))
+                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
     }
 
     @Test
@@ -556,6 +732,7 @@ final class HappyArtilleryIntegrationTest {
     private static final class RecordingRegistrar implements HappyArtillery.Registrar {
         private final Map<String, Integer> calls = new LinkedHashMap<>();
         private final List<String> order = new ArrayList<>();
+        private Path reloadPath;
 
         private void record(String name) {
             calls.merge(name, 1, Integer::sum);
@@ -571,6 +748,17 @@ final class HappyArtilleryIntegrationTest {
         @Override public void registerPlayerAvailable() { record("player-available"); }
         @Override public void registerPlayerTick() { record("player-tick"); }
         @Override public void registerServerStop() { record("server-stop"); }
+        public void registerReload(Path path) {
+            reloadPath = path;
+            record("reload");
+        }
+    }
+
+    private static final class RecordingReloadFeedback implements HappyArtillery.ReloadFeedback {
+        private final List<String> messages = new ArrayList<>();
+
+        @Override public void success(String message) { messages.add("success:" + message); }
+        @Override public void failure(String message) { messages.add("failure:" + message); }
     }
 
     private static MethodNode method(ClassNode owner, String name, String descriptor) {
@@ -579,6 +767,45 @@ final class HappyArtilleryIntegrationTest {
                 .toList();
         assertEquals(1, matches.size(), owner.name + "." + name + descriptor);
         return matches.getFirst();
+    }
+
+    private static List<String> semanticShape(MethodNode method) {
+        List<String> shape = new ArrayList<>();
+        for (AbstractInsnNode instruction = method.instructions.getFirst();
+                instruction != null; instruction = instruction.getNext()) {
+            if (instruction.getOpcode() < 0) {
+                continue;
+            }
+            String opcode = switch (instruction.getOpcode()) {
+                case Opcodes.ALOAD -> "ALOAD";
+                case Opcodes.LDC -> "LDC";
+                case Opcodes.INVOKESTATIC -> "INVOKESTATIC";
+                case Opcodes.GETSTATIC -> "GETSTATIC";
+                case Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
+                case Opcodes.CHECKCAST -> "CHECKCAST";
+                case Opcodes.INVOKEDYNAMIC -> "INVOKEDYNAMIC";
+                case Opcodes.POP -> "POP";
+                case Opcodes.RETURN -> "RETURN";
+                default -> throw new AssertionError(
+                        "Unexpected command instruction opcode " + instruction.getOpcode());
+            };
+            if (instruction instanceof VarInsnNode variable) {
+                shape.add(opcode + " " + variable.var);
+            } else if (instruction instanceof LdcInsnNode constant) {
+                shape.add(opcode + " " + constant.cst);
+            } else if (instruction instanceof FieldInsnNode field) {
+                shape.add(opcode + " " + field.owner + "." + field.name + " " + field.desc);
+            } else if (instruction instanceof MethodInsnNode call) {
+                shape.add(opcode + " " + call.owner + "." + call.name + call.desc);
+            } else if (instruction instanceof TypeInsnNode type) {
+                shape.add(opcode + " " + type.desc);
+            } else if (instruction instanceof InvokeDynamicInsnNode dynamic) {
+                shape.add(opcode + " " + dynamic.name + dynamic.desc);
+            } else {
+                shape.add(opcode);
+            }
+        }
+        return shape;
     }
 
     private static List<MethodInsnNode> methodCalls(MethodNode method) {

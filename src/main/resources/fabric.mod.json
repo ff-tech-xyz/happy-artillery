@@ -2,8 +2,8 @@
 	"schemaVersion": 1,
 	"id": "happy-artillery",
 	"version": "${version}",
-	"name": "Happy Artillery - NON-DEPLOYABLE STRUCTURAL GROUNDWORK",
-	"description": "Structural groundwork for the Happy Artillery rebuild. This build intentionally provides no gameplay.",
+	"name": "Happy Artillery",
+	"description": "Pilot Happy Ghasts as mobile artillery with fire, cry, heat, overheat, controls, and rider HUDs.",
 	"authors": [
 		"OG Moo-cow"
 	],

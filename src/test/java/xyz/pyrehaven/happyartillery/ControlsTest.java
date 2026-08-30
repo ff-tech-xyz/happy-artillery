@@ -77,13 +77,9 @@ final class ControlsTest {
     }
 
     @Test
-    void happyArtilleryRegistersComponentsBeforeTheDeliberateGuard() {
-        IllegalStateException failure = assertThrows(
-                IllegalStateException.class,
-                () -> new HappyArtillery().onInitialize());
+    void happyArtilleryRegistersComponentsDuringNormalInitialization() {
+        new HappyArtillery().onInitialize();
 
-        assertEquals("Happy Artillery structural groundwork is not a playable build",
-                failure.getMessage());
         assertSame(Components.FIRE_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
                 Identifier.fromNamespaceAndPath("happy-artillery", "fire_control")));
         assertSame(Components.CRY_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(

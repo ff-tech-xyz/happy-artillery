@@ -1,6 +1,8 @@
 package xyz.pyrehaven.happyartillery;
 
+import com.mojang.brigadier.Command;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
@@ -10,6 +12,9 @@ import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -55,8 +60,20 @@ public final class HappyArtillery implements ModInitializer {
         registrar.registerPlayerAvailable();
         registrar.registerPlayerTick();
         registrar.registerServerStop();
-        throw new IllegalStateException(
-                "Happy Artillery structural groundwork is not a playable build");
+        registrar.registerReload(configPath);
+    }
+
+    static int executeReload(Path configPath, ReloadFeedback feedback) {
+        Objects.requireNonNull(configPath, "configPath");
+        Objects.requireNonNull(feedback, "feedback");
+        try {
+            Config.reload(configPath);
+            feedback.success("Happy Artillery config reloaded.");
+            return Command.SINGLE_SUCCESS;
+        } catch (IllegalArgumentException | IOException failure) {
+            feedback.failure("Happy Artillery config reload failed: " + failure.getMessage());
+            return 0;
+        }
     }
 
     static <P, G> void tick(DriverAccess<P, G> access) {
@@ -199,6 +216,12 @@ public final class HappyArtillery implements ModInitializer {
         void registerPlayerAvailable();
         void registerPlayerTick();
         void registerServerStop();
+        void registerReload(Path configPath);
+    }
+
+    interface ReloadFeedback {
+        void success(String message);
+        void failure(String message);
     }
 
     private enum FabricRegistrar implements Registrar {
@@ -246,6 +269,34 @@ public final class HappyArtillery implements ModInitializer {
         public void registerServerStop() {
             ServerLifecycleEvents.SERVER_STOPPED.register(server ->
                     serverStopped(MinecraftLifecycleAccess.INSTANCE));
+        }
+
+        @Override
+        public void registerReload(Path configPath) {
+            CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                    dispatcher.register(Commands.literal("ha")
+                            .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                            .then(Commands.literal("reload")
+                                    .executes(context -> executeReload(configPath,
+                                            new CommandSourceReloadFeedback(context.getSource()))))));
+        }
+    }
+
+    private static final class CommandSourceReloadFeedback implements ReloadFeedback {
+        private final CommandSourceStack source;
+
+        private CommandSourceReloadFeedback(CommandSourceStack source) {
+            this.source = Objects.requireNonNull(source, "source");
+        }
+
+        @Override
+        public void success(String message) {
+            source.sendSuccess(() -> Component.literal(message), false);
+        }
+
+        @Override
+        public void failure(String message) {
+            source.sendFailure(Component.literal(message));
         }
     }
 

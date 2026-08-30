@@ -306,6 +306,22 @@ final class ConfigTest {
         assertArrayEquals(original, Files.readAllBytes(file));
     }
 
+    @ParameterizedTest(name = "preset type {0} is a validation failure")
+    @MethodSource("nonStringPresets")
+    void nonStringPresetFailsAsIllegalArgumentWithoutChangingStateOrBytes(
+            String description, String invalidJson, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file, "{\"preset\":\"survival\"}");
+        Config previous = Config.load(file);
+        byte[] invalid = invalidJson.getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        assertThrows(IllegalArgumentException.class, () -> Config.reload(file), description);
+
+        assertSame(previous, Config.current(), description);
+        assertArrayEquals(invalid, Files.readAllBytes(file), description);
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("nonStrictJsonDocuments")
     void nonStrictJsonFailsWithoutChangingActiveConfigOrFile(
@@ -355,6 +371,13 @@ final class ConfigTest {
                 Arguments.of("unquoted keys", "{controls:{\"fireSlot\":2}}"),
                 Arguments.of("trailing comment after the document", "{} /* trailing */"),
                 Arguments.of("trailing token after the document", "{} true"));
+    }
+
+    private static Stream<Arguments> nonStringPresets() {
+        return Stream.of(
+                Arguments.of("null", "{\"preset\":null}"),
+                Arguments.of("array", "{\"preset\":[]}"),
+                Arguments.of("object", "{\"preset\":{}}"));
     }
 
     private static Stream<Arguments> unregisteredControlItems() {
