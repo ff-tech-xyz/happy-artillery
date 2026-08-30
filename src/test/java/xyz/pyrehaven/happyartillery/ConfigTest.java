@@ -247,7 +247,7 @@ final class ConfigTest {
                     "fireRadius": 0
                   },
                   "cry": {"volume": 0, "cooldownSeconds": 0},
-                  "hud": {"refreshTicks": 1, "warningFromPercent": 0}
+                  "hud": {"refreshTicks": 4, "warningFromPercent": 0}
                 }
                 """);
 
@@ -340,6 +340,10 @@ final class ConfigTest {
                 Arguments.of("zero positive value", "{\"fire\":{\"shotCooldownSeconds\":0}}"),
                 Arguments.of("negative duration", "{\"fire\":{\"shotCooldownSeconds\":-1}}"),
                 Arguments.of("negative count", "{\"overheat\":{\"fireballCount\":-1}}"),
+                Arguments.of("HUD refresh below the four-tick packet floor",
+                        "{\"hud\":{\"refreshTicks\":1}}"),
+                Arguments.of("HUD refresh just below the four-tick packet floor",
+                        "{\"hud\":{\"refreshTicks\":3}}"),
                 Arguments.of("duplicate slots", "{\"controls\":{\"fireSlot\":5,\"crySlot\":5}}"),
                 Arguments.of("crossed temperatures", "{\"heat\":{\"coldMaxTemperature\":1.0,\"hotMinTemperature\":1.0}}"),
                 Arguments.of("water floor above heat limit", "{\"water\":{\"floor\":101}}"));

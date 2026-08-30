@@ -1,5 +1,422 @@
 package xyz.pyrehaven.happyartillery;
 
-/** Structural shell for rider status presentation. */
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerBossEvent;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.BossEvent;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+/** Sole boss/action-bar and warning-particle owner for every rider. */
 public final class Hud {
+    private final Map<Object, Session> sessions = new HashMap<>();
+
+    <R, H> RiderState update(
+            Object riderId,
+            R rider,
+            Object ghastId,
+            RiderState riderState,
+            long now,
+            Snapshot snapshot,
+            Config config,
+            PresentationAccess<R, H> access) {
+        Objects.requireNonNull(riderId, "riderId");
+        Objects.requireNonNull(rider, "rider");
+        Objects.requireNonNull(ghastId, "ghastId");
+        Objects.requireNonNull(riderState, "riderState");
+        Objects.requireNonNull(snapshot, "snapshot");
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(access, "access");
+
+        Session session = sessions.get(riderId);
+        boolean freshSession = session == null || !ghastId.equals(session.ghastId);
+        boolean viewerReplaced = false;
+        boolean attachmentDelivered = false;
+        if (freshSession) {
+            if (session != null && session.display != null) {
+                @SuppressWarnings("unchecked")
+                H handle = (H) session.display.handle();
+                @SuppressWarnings("unchecked")
+                R oldViewer = (R) session.viewer;
+                access.removeViewer(handle, oldViewer);
+            }
+            session = new Session(ghastId, rider, config.hud().actionBar());
+            sessions.put(riderId, session);
+        } else if (session.viewer != rider) {
+            if (session.display != null) {
+                @SuppressWarnings("unchecked")
+                H handle = (H) session.display.handle();
+                @SuppressWarnings("unchecked")
+                R oldViewer = (R) session.viewer;
+                access.removeViewer(handle, oldViewer);
+                access.addViewer(handle, rider);
+                attachmentDelivered = true;
+            }
+            session.viewer = rider;
+            session.resetChannels(config.hud().actionBar());
+            viewerReplaced = true;
+        }
+        boolean actionReenabled = !session.actionEnabled && config.hud().actionBar();
+        session.actionEnabled = config.hud().actionBar();
+
+        RiderState.HudCache cache = freshSession
+                ? freshCache()
+                : riderState.hudCache().orElseGet(Hud::freshCache);
+        if (viewerReplaced || actionReenabled) {
+            cache = new RiderState.HudCache(
+                    cache.bossProgress(), cache.bossColor(), "", Long.MIN_VALUE);
+        }
+        boolean refreshDue = !session.refreshed
+                || refreshDue(now, session.lastRefreshTick, config.hud().refreshTicks());
+        double progress = normalized(snapshot.heat(), config.heat().limit());
+        Color color = color(progress, snapshot.biomeClass(), config.hud().warningFromPercent());
+        double warning = warningThreshold(config.hud().warningFromPercent());
+        boolean aboveWarning = progress >= warning;
+        if (aboveWarning && !session.warningAbove) {
+            session.warningPending = true;
+        }
+        session.warningAbove = aboveWarning;
+        Display display = session.display;
+        if (display != null && !config.hud().bossBar()) {
+            @SuppressWarnings("unchecked")
+            H handle = (H) display.handle();
+            access.removeViewer(handle, rider);
+            display = null;
+            session.display = null;
+            cache = new RiderState.HudCache(
+                    -1.0, "", cache.actionBarText(), cache.lastActionBarTick());
+        }
+        if (config.hud().bossBar() && display == null) {
+            H handle = access.createBossBar(progress, color);
+            access.addViewer(handle, rider);
+            display = new Display(handle);
+            session.display = display;
+            cache = new RiderState.HudCache(
+                    progress, color.name(), cache.actionBarText(), cache.lastActionBarTick());
+            attachmentDelivered = true;
+        }
+
+        if (attachmentDelivered) {
+            session.lastRefreshTick = now;
+            session.refreshed = true;
+        } else if (refreshDue) {
+            String actionText = actionText(progress, snapshot);
+            for (int offset = 0; offset < 4; offset++) {
+                int channel = (session.nextChannel + offset) % 4;
+                boolean delivered = false;
+                if (channel == 0 && session.warningPending) {
+                    access.warningParticle(rider);
+                    session.warningPending = false;
+                    delivered = true;
+                } else if (channel == 1 && display != null
+                        && Double.compare(progress, cache.bossProgress()) != 0) {
+                    @SuppressWarnings("unchecked")
+                    H handle = (H) display.handle();
+                    access.setProgress(handle, progress);
+                    cache = new RiderState.HudCache(
+                            progress, cache.bossColor(),
+                            cache.actionBarText(), cache.lastActionBarTick());
+                    delivered = true;
+                } else if (channel == 2 && display != null
+                        && !color.name().equals(cache.bossColor())) {
+                    @SuppressWarnings("unchecked")
+                    H handle = (H) display.handle();
+                    access.setColor(handle, color);
+                    cache = new RiderState.HudCache(
+                            cache.bossProgress(), color.name(),
+                            cache.actionBarText(), cache.lastActionBarTick());
+                    delivered = true;
+                } else if (channel == 3
+                        && session.actionEnabled
+                        && !actionText.equals(cache.actionBarText())) {
+                    access.actionBar(rider, actionText,
+                            snapshot.biomeClass() == BiomeClass.NETHER ? Color.RED : color);
+                    cache = new RiderState.HudCache(
+                            cache.bossProgress(), cache.bossColor(), actionText, now);
+                    delivered = true;
+                }
+                if (delivered) {
+                    session.nextChannel = (channel + 1) % 4;
+                    break;
+                }
+            }
+            session.lastRefreshTick = now;
+            session.refreshed = true;
+        }
+        if (riderState.hudCache().isPresent() && riderState.hudCache().get().equals(cache)) {
+            return riderState;
+        }
+        return new RiderState(
+                riderState.fireStash(), riderState.cryStash(), riderState.riddenGhastId(),
+                riderState.lastHandledTick(), Optional.of(cache));
+    }
+
+    RiderState update(
+            ServerPlayer rider,
+            HappyGhast ghast,
+            RiderState riderState,
+            long now,
+            Snapshot snapshot,
+            Config config) {
+        Objects.requireNonNull(ghast, "ghast");
+        return update(rider.getUUID(), rider, ghast.getUUID(), riderState, now, snapshot, config,
+                new MinecraftPresentationAccess(ghast));
+    }
+
+    <R, H> List<RiderView<R>> updateAll(
+            Object ghastId,
+            List<RiderView<R>> riders,
+            long now,
+            Snapshot snapshot,
+            Config config,
+            PresentationAccess<R, H> access) {
+        Objects.requireNonNull(riders, "riders");
+        List<RiderView<R>> updated = new ArrayList<>(riders.size());
+        for (RiderView<R> view : riders) {
+            updated.add(new RiderView<>(view.riderId(), view.rider(),
+                    update(view.riderId(), view.rider(), ghastId, view.state(), now, snapshot, config, access)));
+        }
+        return List.copyOf(updated);
+    }
+
+    void remove(ServerPlayer rider) {
+        remove(rider.getUUID(), rider, new MinecraftPresentationAccess(null));
+    }
+
+    void clear() {
+        clear(new MinecraftPresentationAccess(null));
+    }
+
+    <R, H> void remove(Object riderId, R rider, PresentationAccess<R, H> access) {
+        Objects.requireNonNull(riderId, "riderId");
+        Objects.requireNonNull(rider, "rider");
+        Objects.requireNonNull(access, "access");
+        Session session = sessions.remove(riderId);
+        if (session != null && session.display != null) {
+            @SuppressWarnings("unchecked")
+            H handle = (H) session.display.handle();
+            @SuppressWarnings("unchecked")
+            R currentViewer = (R) session.viewer;
+            access.removeViewer(handle, currentViewer);
+        }
+    }
+
+    <R, H> void clear(PresentationAccess<R, H> access) {
+        Objects.requireNonNull(access, "access");
+        for (Map.Entry<Object, Session> entry : sessions.entrySet()) {
+            if (entry.getValue().display == null) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            R rider = (R) entry.getValue().viewer;
+            @SuppressWarnings("unchecked")
+            H handle = (H) entry.getValue().display.handle();
+            access.removeViewer(handle, rider);
+        }
+        sessions.clear();
+    }
+
+    int handleCount() {
+        return (int) sessions.values().stream().filter(session -> session.display != null).count();
+    }
+
+    private static String actionText(double progress, Snapshot snapshot) {
+        if (snapshot.biomeClass() == BiomeClass.NETHER) {
+            return "NETHER · NO COOLING";
+        }
+        return "HEAT " + Math.round(progress * 100.0) + "% · " + snapshot.status().label;
+    }
+
+    private static double normalized(double heat, double limit) {
+        return Math.max(0.0, Math.min(1.0, heat / limit));
+    }
+
+    private static Color color(double progress, BiomeClass biomeClass, int warningFromPercent) {
+        double warning = warningThreshold(warningFromPercent);
+        if (progress >= warning) {
+            return Color.RED;
+        }
+        return switch (biomeClass) {
+            case COLD -> Color.BLUE;
+            case HOT, NETHER -> Color.GOLD;
+            case BASE, END -> Color.GREEN;
+        };
+    }
+
+    private static double warningThreshold(int warningFromPercent) {
+        return Math.max(0.0, Math.min(1.0, warningFromPercent / 100.0));
+    }
+
+    private static boolean refreshDue(long now, long lastRefreshTick, int refreshTicks) {
+        if (now < lastRefreshTick) {
+            return true;
+        }
+        long elapsed = now - lastRefreshTick;
+        return elapsed < 0 || elapsed >= refreshTicks;
+    }
+
+    private static RiderState.HudCache freshCache() {
+        return new RiderState.HudCache(-1.0, "", "", Long.MIN_VALUE);
+    }
+
+    public record RiderView<R>(Object riderId, R rider, RiderState state) {
+        public RiderView {
+            Objects.requireNonNull(riderId, "riderId");
+            Objects.requireNonNull(rider, "rider");
+            Objects.requireNonNull(state, "state");
+        }
+    }
+
+    public record Snapshot(double heat, BiomeClass biomeClass, Status status) {
+        public Snapshot {
+            Objects.requireNonNull(biomeClass, "biomeClass");
+            Objects.requireNonNull(status, "status");
+        }
+    }
+
+    public enum Status {
+        COOLING,
+        FIRING,
+        NO_COOLING;
+
+        private final String label;
+
+        Status() {
+            label = name().replace('_', ' ');
+        }
+    }
+
+    public enum Color {
+        RED,
+        GOLD,
+        BLUE,
+        GREEN
+    }
+
+    interface PresentationAccess<R, H> {
+        H createBossBar(double progress, Color color);
+
+        void addViewer(H handle, R rider);
+
+        void setProgress(H handle, double progress);
+
+        void setColor(H handle, Color color);
+
+        void removeViewer(H handle, R rider);
+
+        void actionBar(R rider, String text, Color color);
+
+        void warningParticle(R rider);
+    }
+
+    private static final class MinecraftPresentationAccess
+            implements PresentationAccess<ServerPlayer, ServerBossEvent> {
+        private final HappyGhast ghast;
+
+        private MinecraftPresentationAccess(HappyGhast ghast) {
+            this.ghast = ghast;
+        }
+
+        @Override
+        public ServerBossEvent createBossBar(double progress, Color color) {
+            ServerBossEvent bar = new ServerBossEvent(
+                    UUID.randomUUID(), Component.literal("Happy Artillery"), bossColor(color),
+                    BossEvent.BossBarOverlay.PROGRESS);
+            bar.setProgress((float) progress);
+            return bar;
+        }
+
+        @Override
+        public void addViewer(ServerBossEvent handle, ServerPlayer rider) {
+            handle.addPlayer(rider);
+        }
+
+        @Override
+        public void setProgress(ServerBossEvent handle, double progress) {
+            handle.setProgress((float) progress);
+        }
+
+        @Override
+        public void setColor(ServerBossEvent handle, Color color) {
+            handle.setColor(bossColor(color));
+        }
+
+        @Override
+        public void removeViewer(ServerBossEvent handle, ServerPlayer rider) {
+            handle.removePlayer(rider);
+        }
+
+        @Override
+        public void actionBar(ServerPlayer rider, String text, Color color) {
+            rider.sendOverlayMessage(Component.literal(text).withStyle(textColor(color)));
+        }
+
+        @Override
+        public void warningParticle(ServerPlayer rider) {
+            if (ghast == null || !(ghast.level() instanceof ServerLevel level)) {
+                throw new IllegalStateException("Warning particles require the ridden server ghast");
+            }
+            level.sendParticles(rider, ParticleTypes.FLAME, false, false,
+                    ghast.getX(), ghast.getY(0.5) + 0.5, ghast.getZ(),
+                    8, 0.5, 0.5, 0.5, 0.01);
+        }
+
+        private static BossEvent.BossBarColor bossColor(Color color) {
+            return switch (color) {
+                case RED -> BossEvent.BossBarColor.RED;
+                case GOLD -> BossEvent.BossBarColor.YELLOW;
+                case BLUE -> BossEvent.BossBarColor.BLUE;
+                case GREEN -> BossEvent.BossBarColor.GREEN;
+            };
+        }
+
+        private static ChatFormatting textColor(Color color) {
+            return switch (color) {
+                case RED -> ChatFormatting.RED;
+                case GOLD -> ChatFormatting.GOLD;
+                case BLUE -> ChatFormatting.BLUE;
+                case GREEN -> ChatFormatting.GREEN;
+            };
+        }
+    }
+
+    private static final class Session {
+        private final Object ghastId;
+        private Object viewer;
+        private Display display;
+        private long lastRefreshTick = Long.MIN_VALUE;
+        private boolean refreshed;
+        private boolean actionEnabled;
+        private boolean warningAbove;
+        private boolean warningPending;
+        private int nextChannel;
+
+        private Session(Object ghastId, Object viewer, boolean actionEnabled) {
+            this.ghastId = ghastId;
+            this.viewer = viewer;
+            this.actionEnabled = actionEnabled;
+        }
+
+        private void resetChannels(boolean enabled) {
+            lastRefreshTick = Long.MIN_VALUE;
+            refreshed = false;
+            actionEnabled = enabled;
+            warningAbove = false;
+            warningPending = false;
+            nextChannel = 0;
+        }
+    }
+
+    private record Display(Object handle) {
+    }
 }

@@ -248,7 +248,7 @@ public record Config(
 
         requireNonNegative("cry.volume", cry.volume());
         requireNonNegative("cry.cooldownSeconds", cry.cooldownSeconds());
-        requireRange("hud.refreshTicks", hud.refreshTicks(), 1, Integer.MAX_VALUE);
+        requireRange("hud.refreshTicks", hud.refreshTicks(), 4, Integer.MAX_VALUE);
         requireRange("hud.warningFromPercent", hud.warningFromPercent(), 0, 100);
     }
 
