@@ -49,8 +49,9 @@ is written. It may not change Loom, Minecraft, Fabric, mappings, Gradle, or Java
   a later ride; restoration, locking, and active control lookup use the persisted indexes.
 - Passengers receive read-only HUD; only the pilot advances state or abilities. `NOT_PILOT` remains a
   silent authorization result, not an unreachable passenger-feedback promise.
-- `Components` defines, catalogs, and registers its types; `HappyArtillery` only invokes that owner while
-  composing the graph.
+- `Components` solely encodes and recognizes fire/cry identity in a namespaced vanilla `CUSTOM_DATA`
+  tag, preserving unrelated custom data. No Happy Artillery data-component type or composition-root
+  registration seam exists, so unmodded clients need no custom synchronized registry entry.
 - Normal fire uses the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, owned by the ridden Happy
   Ghast. Vanilla `mobGriefing`, hit damage, constructor movement, explosion interaction, and entity
   persistence remain authoritative; there is no protection-veto adapter or custom projectile owner.
@@ -153,8 +154,8 @@ checks. Commit `feat(controls): establish hold input seam` and push. Packet-rate
 ### Slice 7 — Components, controls, and pre-drop restoration
 
 Implement `Components`, `Controls`, `DeathDropMixin`, `PlayerDropMixin`, `SlotGuardMixin`, mixin
-metadata, and grouped `ControlsTest`. Cover
-component identity, persistence, and exactly-once registration through the Components-owned boundary;
+metadata, and grouped `ControlsTest`. Cover namespaced vanilla-custom-data marker identity,
+persistence/network round trips without a custom registry entry, fire/cry distinction, fake rejection;
 pilot-only admission; both callbacks/hands; one-input-per-player-tick deduplication; hold/click intent;
 exactly two mount/two restore writes; byte-exact indexed stash; active-ride reload retaining original
 indexes for lookup, locking, and restoration; next-ride adoption of new indexes; scoped creative cleanup;
@@ -239,7 +240,7 @@ Remains non-deployable.
 Implement the final `HappyArtillery` owner graph and integration tests behind the deliberate startup
 guard. The designed runtime order is: read saved Overworld game time once; reconcile all players; process
 each ridden ghast once through its pilot using one biome context; then render pilot/passenger HUD from the
-result snapshot. Invoke each callback, attachment, and component owner's registration entry exactly
+result snapshot. Invoke each callback and attachment owner's registration entry exactly
 once; register the mixin path, death hook, ghast-load callback, player-availability callback, and
 server-stop cleanup exactly once. The load and availability callbacks delegate pending-fuse wake-up to
 `Abilities`; the player driver never polls deferred fuses.

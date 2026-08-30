@@ -51,7 +51,6 @@ public final class HappyArtillery implements ModInitializer {
     static void initialize(Path configPath, Registrar registrar) throws IOException {
         Config.load(Objects.requireNonNull(configPath, "configPath"));
         Objects.requireNonNull(registrar, "registrar");
-        registrar.registerComponents();
         registrar.registerGhastState();
         registrar.registerRiderState();
         registrar.registerUseItem();
@@ -207,7 +206,6 @@ public final class HappyArtillery implements ModInitializer {
     }
 
     interface Registrar {
-        void registerComponents();
         void registerGhastState();
         void registerRiderState();
         void registerUseItem();
@@ -227,7 +225,6 @@ public final class HappyArtillery implements ModInitializer {
     private enum FabricRegistrar implements Registrar {
         INSTANCE;
 
-        @Override public void registerComponents() { Components.register(); }
         @Override public void registerGhastState() { GhastState.register(); }
         @Override public void registerRiderState() { RiderState.register(); }
 

@@ -4,9 +4,7 @@ import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
@@ -16,7 +14,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.inventory.ContainerInput;
@@ -77,74 +74,46 @@ final class ControlsTest {
     }
 
     @Test
-    void happyArtilleryRegistersComponentsDuringNormalInitialization() {
+    @Order(1)
+    void initializationRequiresNoHappyArtilleryDataComponentRegistryEntriesOrRegistrationSeam()
+            throws Exception {
         new HappyArtillery().onInitialize();
 
-        assertSame(Components.FIRE_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                Identifier.fromNamespaceAndPath("happy-artillery", "fire_control")));
-        assertSame(Components.CRY_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                Identifier.fromNamespaceAndPath("happy-artillery", "cry_control")));
+        List<Identifier> customEntries = BuiltInRegistries.DATA_COMPONENT_TYPE.keySet().stream()
+                .filter(id -> id.getNamespace().equals("happy-artillery"))
+                .toList();
+        assertEquals(List.of(), customEntries);
+        assertThrows(NoSuchMethodException.class,
+                () -> HappyArtillery.Registrar.class.getDeclaredMethod("registerComponents"));
+        assertFalse(methodReferences(HappyArtillery.class).stream()
+                .anyMatch(call -> call.name().equals("registerComponents")));
     }
 
     @Test
-    void componentsRegisterExactFireAndCryMarkerIdentities() {
-        Components.register();
-        DataComponentType<?> fire = Components.FIRE_CONTROL;
-        DataComponentType<?> cry = Components.CRY_CONTROL;
+    void packagedMetadataAndRuntimeBytecodeRemainServerOnlyCompatible() throws Exception {
+        String metadata = Files.readString(Path.of("build/resources/main/fabric.mod.json"));
+        com.google.gson.JsonObject projectMetadata = com.google.gson.JsonParser.parseString(metadata)
+                .getAsJsonObject();
+        assertEquals("happy-artillery", projectMetadata.get("id").getAsString());
+        assertEquals("*", projectMetadata.get("environment").getAsString());
 
-        assertSame(fire, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                Identifier.fromNamespaceAndPath("happy-artillery", "fire_control")));
-        assertSame(cry, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                Identifier.fromNamespaceAndPath("happy-artillery", "cry_control")));
-        assertNotSame(fire, cry);
-    }
-
-    @Test
-    void componentCatalogIsExactlyTwoImmutablePersistentSynchronizedUnitMarkers() {
-        Components.register();
-
-        assertEquals(List.of(Components.FIRE_CONTROL, Components.CRY_CONTROL), Components.catalog());
-        assertThrows(UnsupportedOperationException.class,
-                () -> Components.catalog().add(Components.FIRE_CONTROL));
-        for (DataComponentType<Unit> marker : Components.catalog()) {
-            assertFalse(marker.isTransient());
-            assertSame(Unit.INSTANCE, marker.codecOrThrow()
-                    .parse(JsonOps.INSTANCE, marker.codecOrThrow()
-                            .encodeStart(JsonOps.INSTANCE, Unit.INSTANCE)
-                            .getOrThrow())
-                    .getOrThrow());
-
-            RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(
-                    Unpooled.buffer(),
-                    RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY));
-            try {
-                marker.streamCodec().encode(buffer, Unit.INSTANCE);
-                assertSame(Unit.INSTANCE, marker.streamCodec().decode(buffer));
-            } finally {
-                buffer.release();
-            }
+        for (String className : List.of(
+                Components.class.getName(),
+                HappyArtillery.class.getName(),
+                HappyArtillery.class.getName() + "$FabricRegistrar")) {
+            ClassNode owner = BytecodeTestSupport.classNode(className);
+            assertFalse(owner.fields.stream().map(field -> field.desc)
+                    .anyMatch(desc -> desc.contains("DataComponentType")), className);
+            assertFalse(owner.methods.stream().flatMap(method -> Stream.iterate(
+                            method.instructions.getFirst(), java.util.Objects::nonNull,
+                            org.objectweb.asm.tree.AbstractInsnNode::getNext))
+                    .anyMatch(instruction -> instruction instanceof FieldInsnNode field
+                            && field.name.equals("DATA_COMPONENT_TYPE")
+                            || instruction instanceof MethodInsnNode call
+                            && (call.name.equals("registerComponents")
+                                    || call.owner.equals("net/minecraft/core/Registry")
+                                            && call.name.equals("register"))), className);
         }
-    }
-
-    @Test
-    @Order(1)
-    void componentRegistrationRetriesPartialStateAndRejectsDifferentIdentity() {
-        Identifier fireId = Identifier.fromNamespaceAndPath("happy-artillery", "fire_control");
-        Identifier cryId = Identifier.fromNamespaceAndPath("happy-artillery", "cry_control");
-        Registry.register(BuiltInRegistries.DATA_COMPONENT_TYPE, fireId, Components.FIRE_CONTROL);
-
-        Components.register();
-        Components.register();
-
-        assertSame(Components.FIRE_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                fireId));
-        assertSame(Components.CRY_CONTROL, BuiltInRegistries.DATA_COMPONENT_TYPE.getValue(
-                cryId));
-        DataComponentType<Unit> different = DataComponentType.<Unit>builder()
-                .persistent(Unit.CODEC)
-                .networkSynchronized(Unit.STREAM_CODEC)
-                .build();
-        assertThrows(IllegalStateException.class, () -> Components.register(fireId, different));
     }
 
     @ParameterizedTest(name = "{0} survives persistence and network round trips")
@@ -152,16 +121,15 @@ final class ControlsTest {
     void markerIdentitySurvivesItemPersistenceAndNetworkRoundTrips(
             String name,
             ItemStack original,
-            DataComponentType<Unit> marker,
-            DataComponentType<Unit> opposite) {
-        Components.register();
+            Components.Control marker,
+            Components.Control opposite) {
         ItemStack persisted = ItemStack.CODEC.parse(
                         JsonOps.INSTANCE,
                         ItemStack.CODEC.encodeStart(JsonOps.INSTANCE, original).getOrThrow())
                 .getOrThrow();
 
-        assertSame(Unit.INSTANCE, persisted.get(marker));
-        assertFalse(persisted.has(opposite));
+        assertTrue(Components.is(persisted, marker));
+        assertFalse(Components.is(persisted, opposite));
         assertTrue(ItemStack.matches(original, persisted));
 
         RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(
@@ -171,8 +139,8 @@ final class ControlsTest {
             ItemStack.STREAM_CODEC.encode(buffer, original);
             ItemStack synchronizedStack = ItemStack.STREAM_CODEC.decode(buffer);
 
-            assertSame(Unit.INSTANCE, synchronizedStack.get(marker));
-            assertFalse(synchronizedStack.has(opposite));
+            assertTrue(Components.is(synchronizedStack, marker));
+            assertFalse(Components.is(synchronizedStack, opposite));
             assertTrue(ItemStack.matches(original, synchronizedStack));
         } finally {
             buffer.release();
@@ -180,20 +148,41 @@ final class ControlsTest {
     }
 
     @Test
-    void factoriesCreateFreshNamedGlintingFireAndCryControls() {
-        Components.register();
+    void markerHelperPreservesUnrelatedCustomDataOnANonFreshStack() {
+        ItemStack stack = new ItemStack(Items.DIAMOND);
+        CompoundTag existing = new CompoundTag();
+        existing.putString("another-mod:owner", "kept");
+        existing.putInt("sequence", 42);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(existing));
 
+        Components.mark(stack, Components.Control.FIRE);
+
+        CompoundTag marked = stack.get(DataComponents.CUSTOM_DATA).copyTag();
+        assertEquals("kept", marked.getString("another-mod:owner").orElseThrow());
+        assertEquals(42, marked.getInt("sequence").orElseThrow());
+        assertTrue(Components.is(stack, Components.Control.FIRE));
+        assertFalse(Components.is(stack, Components.Control.CRY));
+    }
+
+    @Test
+    void factoriesCreateFreshNamedGlintingFireAndCryControlsAndRejectNameTypeFakes() {
         ItemStack firstFire = Controls.fireControl();
         ItemStack secondFire = Controls.fireControl();
         ItemStack cry = Controls.cryControl();
+        ItemStack fakeFire = new ItemStack(Items.FIRE_CHARGE);
+        fakeFire.set(DataComponents.CUSTOM_NAME,
+                net.minecraft.network.chat.Component.literal("Fire Control"));
+        fakeFire.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
 
         assertNotSame(firstFire, secondFire);
         assertTrue(firstFire.is(Items.FIRE_CHARGE));
         assertTrue(cry.is(Items.GHAST_TEAR));
-        assertSame(Unit.INSTANCE, firstFire.get(Components.FIRE_CONTROL));
-        assertFalse(firstFire.has(Components.CRY_CONTROL));
-        assertSame(Unit.INSTANCE, cry.get(Components.CRY_CONTROL));
-        assertFalse(cry.has(Components.FIRE_CONTROL));
+        assertTrue(Components.is(firstFire, Components.Control.FIRE));
+        assertFalse(Components.is(firstFire, Components.Control.CRY));
+        assertTrue(Components.is(cry, Components.Control.CRY));
+        assertFalse(Components.is(cry, Components.Control.FIRE));
+        assertFalse(Components.is(fakeFire, Components.Control.FIRE));
+        assertFalse(Components.is(fakeFire, Components.Control.CRY));
         assertEquals("Fire Control", firstFire.getHoverName().getString());
         assertEquals("Cry Control", cry.getHoverName().getString());
         assertTrue(firstFire.hasFoil());
@@ -204,7 +193,6 @@ final class ControlsTest {
 
     @Test
     void factoriesReadEveryValidConfigChangeAtCallTime(@TempDir Path directory) throws Exception {
-        Components.register();
         Config original = Config.current();
         Path file = directory.resolve("happy-artillery.json");
         try {
@@ -404,8 +392,8 @@ final class ControlsTest {
         assertEquals(ghastId, mounted.riddenGhastId().orElseThrow());
         assertEquals(82L, mounted.lastHandledTick());
         assertEquals(Optional.of(hud), mounted.hudCache());
-        assertTrue(inventory.peek(4).has(Components.FIRE_CONTROL));
-        assertTrue(inventory.peek(5).has(Components.CRY_CONTROL));
+        assertTrue(Components.is(inventory.peek(4), Components.Control.FIRE));
+        assertTrue(Components.is(inventory.peek(5), Components.Control.CRY));
         assertNotSame(mounted.fireStash().orElseThrow().stack(), fireOriginal);
     }
 
@@ -420,8 +408,10 @@ final class ControlsTest {
         ItemStack duplicatedFire = Controls.fireControl();
         duplicatedFire.setCount(9);
         ItemStack duplicatedCry = Controls.cryControl();
-        ItemStack bothMarkers = Controls.fireControl();
-        bothMarkers.set(Components.CRY_CONTROL, Unit.INSTANCE);
+        ItemStack invalidMarker = Controls.fireControl();
+        CompoundTag invalidTag = new CompoundTag();
+        invalidTag.putString("happy-artillery:control", "invalid");
+        invalidMarker.set(DataComponents.CUSTOM_DATA, CustomData.of(invalidTag));
         inventory.seed(0, duplicatedFire);
         inventory.seed(1, new ItemStack(Items.FIRE_CHARGE, 4));
         inventory.seed(2, new ItemStack(Items.GHAST_TEAR, 3));
@@ -429,7 +419,7 @@ final class ControlsTest {
         inventory.seed(4, Controls.fireControl());
         inventory.seed(5, Controls.cryControl());
         inventory.seed(8, duplicatedCry);
-        inventory.seed(7, bothMarkers);
+        inventory.seed(7, invalidMarker);
         RiderState.HudCache hud = new RiderState.HudCache(0.5, "yellow", "READY", 99L);
         RiderState active = new RiderState(
                 Optional.of(new RiderState.StashedStack(4, fireOriginal)),
@@ -443,11 +433,11 @@ final class ControlsTest {
         assertEquals(List.of(
                 "write:4", "write:5",
                 "read:0", "write:0", "read:1", "read:2", "read:3",
-                "read:6", "read:7", "write:7", "read:8", "write:8"), inventory.events());
+                "read:6", "read:7", "read:8", "write:8"), inventory.events());
         assertTrue(ItemStack.matches(fireOriginal, inventory.peek(4)));
         assertTrue(ItemStack.matches(cryOriginal, inventory.peek(5)));
         assertTrue(inventory.peek(0).isEmpty());
-        assertTrue(inventory.peek(7).isEmpty());
+        assertFalse(inventory.peek(7).isEmpty());
         assertTrue(inventory.peek(8).isEmpty());
         assertEquals(4, inventory.peek(1).getCount());
         assertTrue(inventory.peek(1).is(Items.FIRE_CHARGE));
@@ -1123,10 +1113,12 @@ final class ControlsTest {
             assertTrue(Controls.isLockedSlot(active, 5));
             assertFalse(Controls.isLockedSlot(active, 1));
             assertFalse(Controls.isLockedSlot(active, 2));
-            assertTrue(Controls.fireControl(inventory, active, inventory).orElseThrow()
-                    .has(Components.FIRE_CONTROL));
-            assertTrue(Controls.cryControl(inventory, active, inventory).orElseThrow()
-                    .has(Components.CRY_CONTROL));
+            assertTrue(Components.is(
+                    Controls.fireControl(inventory, active, inventory).orElseThrow(),
+                    Components.Control.FIRE));
+            assertTrue(Components.is(
+                    Controls.cryControl(inventory, active, inventory).orElseThrow(),
+                    Components.Control.CRY));
             assertEquals(List.of("read:4", "read:5"), inventory.events());
             inventory.clearEvents();
 
@@ -1215,7 +1207,7 @@ final class ControlsTest {
 
         assertEquals("fixture write failure 2", failure.getMessage());
         assertEquals(List.of("read:4", "read:5", "write:4", "write:5"), inventory.events());
-        assertTrue(inventory.peek(4).has(Components.FIRE_CONTROL));
+        assertTrue(Components.is(inventory.peek(4), Components.Control.FIRE));
         assertTrue(ItemStack.matches(cryOriginal, inventory.peek(5)));
 
         RecordingInventory untouched = new RecordingInventory(9);
@@ -1542,9 +1534,11 @@ final class ControlsTest {
             Controls.Admission plainDisabled = Controls.handleUseItem(
                     pilot, InteractionHand.MAIN_HAND,
                     active, 91L, TestControlAccess.INSTANCE);
-            ItemStack bothMarkers = Controls.fireControl();
-            bothMarkers.set(Components.CRY_CONTROL, Unit.INSTANCE);
-            pilot.mainHand = bothMarkers;
+            ItemStack invalidMarker = Controls.fireControl();
+            CompoundTag invalidTag = new CompoundTag();
+            invalidTag.putString("happy-artillery:control", "invalid");
+            invalidMarker.set(DataComponents.CUSTOM_DATA, CustomData.of(invalidTag));
+            pilot.mainHand = invalidMarker;
             Controls.Admission ambiguousMarked = Controls.handleUseItem(
                     pilot, InteractionHand.MAIN_HAND,
                     active, 91L, TestControlAccess.INSTANCE);
@@ -1714,9 +1708,9 @@ final class ControlsTest {
     private static Stream<Arguments> controlStacks() {
         return Stream.of(
                 Arguments.of("fire", Controls.fireControl(),
-                        Components.FIRE_CONTROL, Components.CRY_CONTROL),
+                        Components.Control.FIRE, Components.Control.CRY),
                 Arguments.of("cry", Controls.cryControl(),
-                        Components.CRY_CONTROL, Components.FIRE_CONTROL));
+                        Components.Control.CRY, Components.Control.FIRE));
     }
 
 

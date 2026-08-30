@@ -2,14 +2,12 @@ package xyz.pyrehaven.happyartillery;
 
 import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.Holder;
-import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.util.Unit;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -41,12 +39,12 @@ public final class Controls {
 
     static ItemStack fireControl() {
         Config.Controls settings = Config.current().controls();
-        return control(settings.fireItem(), "Fire Control", Components.FIRE_CONTROL);
+        return control(settings.fireItem(), "Fire Control", Components.Control.FIRE);
     }
 
     static ItemStack cryControl() {
         Config.Controls settings = Config.current().controls();
-        return control(settings.cryItem(), "Cry Control", Components.CRY_CONTROL);
+        return control(settings.cryItem(), "Cry Control", Components.Control.CRY);
     }
 
     static RiderState mount(ServerPlayer player, RiderState state, UUID riddenGhastId) {
@@ -120,7 +118,8 @@ public final class Controls {
                 continue;
             }
             ItemStack stack = access.read(inventory, slot);
-            if (stack.has(Components.FIRE_CONTROL) || stack.has(Components.CRY_CONTROL)) {
+            if (Components.is(stack, Components.Control.FIRE)
+                    || Components.is(stack, Components.Control.CRY)) {
                 access.write(inventory, slot, ItemStack.EMPTY);
             }
         }
@@ -494,12 +493,12 @@ public final class Controls {
     private static ItemStack control(
             String itemId,
             String name,
-            DataComponentType<Unit> marker) {
+            Components.Control marker) {
         ItemStack control = new ItemStack(BuiltInRegistries.ITEM
                 .getOptional(Identifier.parse(itemId))
                 .orElseThrow(() -> new IllegalStateException(
                         "Validated control item is no longer registered: " + itemId)));
-        control.set(marker, Unit.INSTANCE);
+        Components.mark(control, marker);
         control.set(DataComponents.CUSTOM_NAME, Component.literal(name));
         control.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
         control.set(DataComponents.CONSUMABLE, HOLD_USE);
@@ -707,8 +706,8 @@ public final class Controls {
     }
 
     private static boolean isPlainConfiguredItem(ItemStack stack, String itemId) {
-        return !stack.has(Components.FIRE_CONTROL)
-                && !stack.has(Components.CRY_CONTROL)
+        return !Components.is(stack, Components.Control.FIRE)
+                && !Components.is(stack, Components.Control.CRY)
                 && stack.is(BuiltInRegistries.ITEM
                         .getOptional(Identifier.parse(itemId))
                         .orElseThrow(() -> new IllegalStateException(
@@ -731,11 +730,13 @@ public final class Controls {
 
 
     private static boolean isFireControl(ItemStack stack) {
-        return stack.has(Components.FIRE_CONTROL) && !stack.has(Components.CRY_CONTROL);
+        return Components.is(stack, Components.Control.FIRE)
+                && !Components.is(stack, Components.Control.CRY);
     }
 
     private static boolean isCryControl(ItemStack stack) {
-        return stack.has(Components.CRY_CONTROL) && !stack.has(Components.FIRE_CONTROL);
+        return Components.is(stack, Components.Control.CRY)
+                && !Components.is(stack, Components.Control.FIRE);
     }
 
 

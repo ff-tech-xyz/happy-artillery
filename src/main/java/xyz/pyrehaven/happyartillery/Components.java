@@ -1,48 +1,44 @@
 package xyz.pyrehaven.happyartillery;
 
-import net.minecraft.core.Registry;
-import net.minecraft.core.component.DataComponentType;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
-import net.minecraft.util.Unit;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 
-import java.util.List;
+import java.util.Objects;
 
-/** Owns the two persistent, synchronized control marker components. */
+/** Owns control marker encoding and identity on vanilla item custom data. */
 public final class Components {
-    public static final DataComponentType<Unit> FIRE_CONTROL = marker();
-    public static final DataComponentType<Unit> CRY_CONTROL = marker();
-    private static final List<DataComponentType<Unit>> CATALOG = List.of(FIRE_CONTROL, CRY_CONTROL);
-    private static final Identifier FIRE_ID =
-            Identifier.fromNamespaceAndPath("happy-artillery", "fire_control");
-    private static final Identifier CRY_ID =
-            Identifier.fromNamespaceAndPath("happy-artillery", "cry_control");
+    private static final String MARKER_TAG = "happy-artillery:control";
 
     private Components() {
     }
 
-    public static synchronized void register() {
-        register(FIRE_ID, FIRE_CONTROL);
-        register(CRY_ID, CRY_CONTROL);
-    }
+    enum Control {
+        FIRE("fire"),
+        CRY("cry");
 
-    static void register(Identifier id, DataComponentType<Unit> marker) {
-        var existing = BuiltInRegistries.DATA_COMPONENT_TYPE.getOptional(id);
-        if (existing.isEmpty()) {
-            Registry.register(BuiltInRegistries.DATA_COMPONENT_TYPE, id, marker);
-        } else if (existing.get() != marker) {
-            throw new IllegalStateException("Different data component already registered for " + id);
+        private final String value;
+
+        Control(String value) {
+            this.value = value;
         }
     }
 
-    static List<DataComponentType<Unit>> catalog() {
-        return CATALOG;
+    static void mark(ItemStack stack, Control control) {
+        Objects.requireNonNull(stack, "stack");
+        Objects.requireNonNull(control, "control");
+        CustomData existing = stack.get(DataComponents.CUSTOM_DATA);
+        CompoundTag marker = existing == null ? new CompoundTag() : existing.copyTag();
+        marker.putString(MARKER_TAG, control.value);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(marker));
     }
 
-    private static DataComponentType<Unit> marker() {
-        return DataComponentType.<Unit>builder()
-                .persistent(Unit.CODEC)
-                .networkSynchronized(Unit.STREAM_CODEC)
-                .build();
+    static boolean is(ItemStack stack, Control control) {
+        Objects.requireNonNull(stack, "stack");
+        Objects.requireNonNull(control, "control");
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        return data != null
+                && data.copyTag().getString(MARKER_TAG).filter(control.value::equals).isPresent();
     }
 }

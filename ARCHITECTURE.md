@@ -27,8 +27,8 @@ happy-artillery/
 │   │   │   │   # Immutable persistent player attachment value/codec for stashed stacks plus their original
 │   │   │   │   # slot indexes, ridden ghast id, input deduplication, and HUD dirty-check state.
 │   │   │   ├── Components.java
-│   │   │   │   # Defines, catalogs, and registers fire/cry control data components exactly once; exposes
-│   │   │   │   # one registration call for HappyArtillery composition.
+│   │   │   │   # Sole fire/cry marker codec/helper owner using namespaced vanilla CUSTOM_DATA; preserves
+│   │   │   │   # unrelated custom data and creates no synchronized registry entry.
 │   │   │   ├── Controls.java
 │   │   │   │   # Sole pilot/input and control-item owner: swap/stash/restore, pre-drop restoration,
 │   │   │   │   # slot locking helpers, callback deduplication, and hold/click intent.
@@ -71,7 +71,8 @@ happy-artillery/
 │           │   # Ghast/Rider fresh values, codecs, immutable attachment replacement, durable tick anchors,
 │           │   # indexed ItemStack stashes, ridden id, input tick, and HUD-cache round trips.
 │           ├── ControlsTest.java
-│           │   # Component registration/serialization, pilot admission, callbacks, indexed swap/restore,
+│           │   # Vanilla marker identity/serialization, server-only compatibility, pilot admission,
+│           │   # callbacks, indexed swap/restore,
 │           │   # live slot reload, death ordering, SlotGuardMixin decisions, and dedup tests.
 │           ├── AbilitiesTest.java
 │           │   # Fire/cry gates, sealed outcomes, vanilla LargeFireball identity/ownership/defaults,

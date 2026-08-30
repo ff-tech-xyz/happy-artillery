@@ -35,9 +35,9 @@ deliberate startup failure and non-deployable identity, no source shell represen
   detonating-rider UUID. The abbreviated sample in the specification is not the complete record contract.
 - `Hud` owns bounded process-local boss-bar handles. Serializable HUD dirty-check values live in the
   persistent `RiderState`; live packet objects do not become persistence data.
-- `Components` defines, catalogs, and registers both component types through one idempotence-checked
-  registration entry. `HappyArtillery` invokes that owner during composition; it does not register the
-  component types itself.
+- `Components` is the sole fire/cry marker codec/helper owner. It stores the exact distinction in a
+  namespaced tag inside vanilla `CUSTOM_DATA`, preserves unrelated custom data, and creates no custom
+  synchronized registry entry. `HappyArtillery` has no component-registration seam.
 - Passengers receive the same ghast heat/status HUD read-only. Only the controlling first passenger
   receives marked controls, advances state, or triggers abilities. No passenger action or feedback
   input is promised while marked controls are pilot-only and plain items are disabled.
@@ -121,8 +121,9 @@ Presets:
 - Screen slots 5 and 6 (indexes 4 and 5 by default) become Fire Control and Cry Control while piloting.
   Both hands and ridden-entity/item-use callbacks route to one handler. `lastHandledTick` permits at
   most one accepted input per player tick whichever callback arrives first.
-- Controls are fresh Fire Charge/Ghast Tear stacks carrying registered persistent data components,
-  display names, and glint. Raw items do nothing by default; `allowPlainItems` is the explicit opt-in.
+- Controls are fresh configured vanilla-item stacks carrying server-only-compatible namespaced markers
+  in vanilla custom data, plus display names and glint. Raw items do nothing by default;
+  `allowPlainItems` is the explicit opt-in.
 - On mount, the pilot's two complete ItemStacks are copied into persistent `RiderState`, then replaced
   with controls: exactly two inventory writes. Each stash entry records its original configured index.
   Existing items are never decorated or mutated.

@@ -81,7 +81,6 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(true, Files.isRegularFile(configPath));
         assertEquals(Config.defaults(), Config.current());
         assertEquals(Map.of(
-                "components", 1,
                 "ghast-state", 1,
                 "rider-state", 1,
                 "use-item", 1,
@@ -92,7 +91,8 @@ final class HappyArtilleryIntegrationTest {
                 "server-stop", 1,
                 "reload", 1), registrar.calls);
         assertSame(configPath, registrar.reloadPath);
-        assertEquals("components", registrar.order.getFirst());
+        assertEquals(9, registrar.order.size());
+        assertEquals("ghast-state", registrar.order.getFirst());
     }
 
     @Test
@@ -378,7 +378,7 @@ final class HappyArtilleryIntegrationTest {
         List<MethodInsnNode> initializeCalls = methodCalls(initialize);
         int load = callIndex(initializeCalls, "xyz/pyrehaven/happyartillery/Config", "load");
         int firstRegistration = callIndex(initializeCalls,
-                "xyz/pyrehaven/happyartillery/HappyArtillery$Registrar", "registerComponents");
+                "xyz/pyrehaven/happyartillery/HappyArtillery$Registrar", "registerGhastState");
         assertEquals(true, load >= 0 && load < firstRegistration);
         assertEquals(0, Stream.iterate(initialize.instructions.getFirst(), java.util.Objects::nonNull,
                         instruction -> instruction.getNext())
@@ -739,7 +739,6 @@ final class HappyArtilleryIntegrationTest {
             order.add(name);
         }
 
-        @Override public void registerComponents() { record("components"); }
         @Override public void registerGhastState() { record("ghast-state"); }
         @Override public void registerRiderState() { record("rider-state"); }
         @Override public void registerUseItem() { record("use-item"); }
