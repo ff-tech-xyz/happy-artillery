@@ -230,6 +230,10 @@ public final class Hud {
         return (int) sessions.values().stream().filter(session -> session.display != null).count();
     }
 
+    static Component bossBarName(Component customName) {
+        return customName != null ? customName : Component.literal("HappyGhast");
+    }
+
     private static String actionText(double progress, Snapshot snapshot) {
         if (snapshot.biomeClass() == BiomeClass.NETHER) {
             return "NETHER · NO COOLING";
@@ -330,7 +334,7 @@ public final class Hud {
         @Override
         public ServerBossEvent createBossBar(double progress, Color color) {
             ServerBossEvent bar = new ServerBossEvent(
-                    UUID.randomUUID(), Component.literal("Happy Artillery"), bossColor(color),
+                    UUID.randomUUID(), bossBarName(ghast.getCustomName()), bossColor(color),
                     BossEvent.BossBarOverlay.PROGRESS);
             bar.setProgress((float) progress);
             return bar;

@@ -1,5 +1,6 @@
 package xyz.pyrehaven.happyartillery;
 
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class HudTest {
@@ -547,6 +549,14 @@ final class HudTest {
 
         assertEquals(new TeardownObservation(List.of("remove", "remove"), 0),
                 new TeardownObservation(access.bossEvents(), hud.handleCount()));
+    }
+
+    @Test
+    void bossBarNamePreservesCustomComponentAndUsesExactUnnamedFallback() {
+        Component customName = Component.literal("Cloudbreaker");
+
+        assertSame(customName, Hud.bossBarName(customName));
+        assertEquals("HappyGhast", Hud.bossBarName(null).getString());
     }
 
     @Test
