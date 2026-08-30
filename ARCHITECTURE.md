@@ -1,7 +1,9 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-The annotated tree below is the complete proposed source-controlled shape. It contains fourteen
-production Java files and eight risk-grouped test files.
+The annotated tree below is the complete proposed source-controlled shape. It contains thirteen
+production Java files and eight risk-grouped test files. This proposed tree precedes the source
+moves: `DeathDropMixin` and `SlotGuardMixin` are absent; the reshaped `PlayerDropMixin` and new
+`ExternalContainerMixin` are the only mixins.
 
 ```text
 happy-artillery/
@@ -24,44 +26,42 @@ happy-artillery/
 │   │   │   │   # Pure heat authority: anchored, non-double-counted water/passive cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
 │   │   │   ├── RiderState.java
-│   │   │   │   # Immutable persistent player attachment value/codec for stashed stacks plus their original
-│   │   │   │   # slot indexes, ridden ghast id, input deduplication, and HUD dirty-check state.
+│   │   │   │   # Immutable persistent player attachment value/codec for ridden-ghast identity,
+│   │   │   │   # input deduplication, and HUD dirty-check state only.
 │   │   │   ├── Components.java
-│   │   │   │   # Sole fire/cry marker codec/helper owner using namespaced vanilla CUSTOM_DATA; preserves
-│   │   │   │   # unrelated custom data and creates no synchronized registry entry.
+│   │   │   │   # Sole fire/cry marker codec/helper owner using namespaced vanilla CUSTOM_DATA with
+│   │   │   │   # control type, owner UUID, and ride UUID; preserves unrelated custom data.
 │   │   │   ├── Controls.java
-│   │   │   │   # Sole pilot/input and control-item owner: swap/stash/restore, pre-drop restoration,
-│   │   │   │   # slot locking helpers, callback deduplication, and hold/click intent.
+│   │   │   │   # Sole control owner: atomic free-slot allocation, one bounded active-pilot inventory
+│   │   │   │   # snapshot, held admission, owner/ride cleanup, transfer cleanup, and ride transitions.
 │   │   │   ├── Abilities.java
 │   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including active and
 │   │   │   │   # bounded rider-deferred task states keyed by persisted ghast UUID, load/player wake-ups,
 │   │   │   │   # durable pre-effect consumption, vanilla LargeFireball spawning, effects, sound, and removal.
 │   │   │   ├── Hud.java
 │   │   │   │   # Sole boss/action-bar and warning-particle owner for pilots and read-only passengers;
-│   │   │   │   # owns and evicts bounded process-local display handles.
+│   │   │   │   # consumes the shared control snapshot and owns bounded process-local display handles.
 │   │   │   ├── Feedback.java
 │   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
-│   │   │       ├── DeathDropMixin.java
-│   │   │       │   # Wraps ServerPlayer's committed-death loot invocation so Controls restores the
-│   │   │       │   # persistent stash before vanilla snapshots or emits inventory drops.
 │   │   │       ├── PlayerDropMixin.java
-│   │   │       │   # Intercepts ServerPlayer's direct Q/drop path and delegates the selected-slot
-│   │   │       │   # protection decision to Controls.
-│   │   │       └── SlotGuardMixin.java
-│   │   │           # Intercepts AbstractContainerMenu mutation routes and delegates locked player-slot
-│   │   │           # decisions to Controls.
+│   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
+│   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
+│   │   │       └── ExternalContainerMixin.java
+│   │   │           # Observes Slot.setChanged() at HEAD after menu mutation and delegates removal of
+│   │   │           # marked controls from non-owner container destinations to Controls.
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.
 │   │       ├── happy-artillery.mixins.json
-│   │       │   # Declares all three narrow mixins with their fail-closed injection requirements.
+│   │       │   # Declares both narrow mixins with their fail-closed injection requirements.
 │   │       └── assets/happy-artillery/icon.png
 │   │           # Packaged Happy Artillery icon.
 │   └── test/
 │       └── java/xyz/pyrehaven/happyartillery/
 │           ├── ConfigTest.java
-│           │   # Config defaults, presets, validation, round-trip, rewrite, and reload-failure contract.
+│           │   # Config defaults, presets, removed/unknown-key rejection, validation, round-trip,
+│           │   # rewrite, registry-lifecycle resolution, and reload-failure contract.
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.
 │           ├── HeatTest.java
@@ -69,19 +69,19 @@ happy-artillery/
 │           │   # and exact detonation-edge tests.
 │           ├── PersistenceTest.java
 │           │   # Ghast/Rider fresh values, codecs, immutable attachment replacement, durable tick anchors,
-│           │   # indexed ItemStack stashes, ridden id, input tick, and HUD-cache round trips.
+│           │   # ride identity, input tick, and HUD-cache round trips with no ItemStack/index persistence.
 │           ├── ControlsTest.java
-│           │   # Vanilla marker identity/serialization, server-only compatibility, pilot admission,
-│           │   # callbacks, indexed swap/restore,
-│           │   # live slot reload, death ordering, SlotGuardMixin decisions, and dedup tests.
+│           │   # Owner/ride marker identity, atomic allocation, bounded snapshot, held admission,
+│           │   # same-player mobility, outbound consumption, cleanup, no-overwrite, and dedup tests.
 │           ├── AbilitiesTest.java
 │           │   # Fire/cry gates, sealed outcomes, vanilla LargeFireball identity/ownership/defaults,
 │           │   # feedback/effects, server-queue fuse scheduling/load wake-up, and detonation tests.
 │           ├── HudTest.java
-│           │   # Pilot/passenger visibility, dirty checks, throttling, priority, particles, and teardown tests.
+│           │   # Pilot/passenger visibility, control-warning priority, dirty checks, throttling,
+│           │   # particles, snapshot sharing, and teardown tests.
 │           └── HappyArtilleryIntegrationTest.java
-│               # Registration uniqueness, one-driver ordering, bounded online-player idle reconciliation,
-│               # no world/entity scan, and complete wiring tests.
+│               # Registration uniqueness, one-driver ordering, actor-local callbacks, one snapshot per
+│               # active pilot, pilotless-rider cleanup, no world/container/entity scan, and complete wiring.
 ├── AGENTS.md
 │   # Repository routing, structure, commit, verification, and runtime rules.
 ├── ARCHITECTURE.md

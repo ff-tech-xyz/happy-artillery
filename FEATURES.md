@@ -6,8 +6,9 @@ This document is the settled behavior contract for the ground-up 1.2.0 rewrite. 
 specification overrides the earlier G1-G9 questions. Released 1.1.2.2 behavior appears below only when
 it is useful regression evidence; defects are not compatibility requirements.
 
-The current branch is still structural groundwork. Until the final integration checkpoint removes the
-deliberate startup failure and non-deployable identity, no source shell represents playable behavior.
+The current branch contains a runnable 1.2.0 candidate, but it is not release-ready until the disposable
+movable-control migration and remaining release blockers in `MIGRATION_PLAN.md` pass exact-head review,
+deployment, and manual acceptance.
 
 ## Product boundary
 
@@ -22,11 +23,17 @@ deliberate startup failure and non-deployable identity, no source shell represen
 
 ## Architecture decisions and explicit assumptions
 
-- The complete smallest tree is **fourteen production Java files**: the eleven accepted non-mixin owners
-  plus `DeathDropMixin`, `PlayerDropMixin`, and `SlotGuardMixin`. Minecraft 26.2 has no usable committed
-  pre-drop Fabric event, so the death mixin wraps only the vanilla death-drop invocation. Container
-  mutation and direct Q/drop converge in unrelated `AbstractContainerMenu` and `ServerPlayer` targets,
-  so their fail-closed plumbing remains separate. All three mixins delegate policy to `Controls`.
+- The complete smallest tree is **thirteen production Java files**: the eleven accepted non-mixin owners
+  plus `PlayerDropMixin` and `ExternalContainerMixin`. Mapped Minecraft 26.2 evidence proves that
+  `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor drops,
+  menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. External chest/container
+  insertion does not reach that method, so `ExternalContainerMixin` observes the single post-mutation
+  `Slot.setChanged():void` boundary at `HEAD`. `Controls` inspects `Slot.getItem()` and `Slot.container`,
+  preserves only owner-matching player `Inventory` destinations, and consumes marked controls from every
+  other container. This covers ordinary placement, `QUICK_MOVE` empty/merge, number/offhand swaps, and
+  `QUICK_CRAFT` without reproducing `AbstractContainerMenu.doClick`. `PICKUP_ALL` is inbound
+  slot-to-cursor collection, not outbound chest insertion. Both mixins delegate policy to `Controls`;
+  there is no `DeathDropMixin` or predictive `SlotGuardMixin` in the proposed tree.
 - Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
   only with server ticks, survives restart without interpreting a new process-local counter, and provides
   one comparable value to every loaded dimension. No duration advances while the server is stopped.
@@ -34,7 +41,8 @@ deliberate startup failure and non-deployable identity, no source shell represen
   independent per-ghast fire-ready and cry-ready ticks, and a paired pending-detonation deadline plus
   detonating-rider UUID. The abbreviated sample in the specification is not the complete record contract.
 - `Hud` owns bounded process-local boss-bar handles. Serializable HUD dirty-check values live in the
-  persistent `RiderState`; live packet objects do not become persistence data.
+  persistent `RiderState`; live packet objects do not become persistence data. One bounded active-pilot
+  inventory snapshot is created by `Controls` and shared with admission and HUD each tick.
 - `Components` is the sole fire/cry marker codec/helper owner. It stores the exact distinction in a
   namespaced tag inside vanilla `CUSTOM_DATA`, preserves unrelated custom data, and creates no custom
   synchronized registry entry. `HappyArtillery` has no component-registration seam.
@@ -43,11 +51,13 @@ deliberate startup failure and non-deployable identity, no source shell represen
   input is promised while marked controls are pilot-only and plain items are disabled.
 - Startup config has a strict transaction boundary. A missing file is created from validated defaults,
   and missing known keys inherit defaults before a successful full-schema rewrite. An existing file
-  with malformed JSON, an unknown preset, invalid identifier, non-finite number, impossible range, or
-  cross-field violation aborts startup loudly; it is never replaced with defaults. `/ha reload` parses
-  and validates a candidate before the atomic swap: failure reports the error and leaves both the prior
-  valid in-memory value and the invalid file untouched. Unknown keys are discarded only by a successful
-  load/rewrite.
+  with malformed JSON, unknown or removed keys, an unknown preset, invalid identifier syntax, non-finite
+  number, impossible range, or cross-field violation aborts startup loudly; it is never replaced with
+  defaults. Unknown keys are rejected recursively with their full path. Item identifier syntax is checked
+  while parsing, and configured registry entries are resolved at the later server lifecycle point after
+  mod initializers. `/ha reload` parses, validates, and resolves a candidate before the atomic swap:
+  failure reports the error and leaves both the prior valid in-memory value and invalid file untouched.
+  Every successful load rewrites the complete known schema.
 
 ## Configuration
 
@@ -55,12 +65,12 @@ Config is feature-grouped nested immutable values held in one `AtomicReference` 
 `preset` applies first; explicit keys override it. Every successful load rewrites the complete schema.
 `/ha reload` is operator-only.
 
-Defaults (eight groups, 39 declared keys):
+Defaults (eight groups, 36 declared keys):
 
 | Group | Keys and values |
 |---|---|
 | preset | `pvp` |
-| controls | `fireSlot=4`, `crySlot=5`, `fireItem=minecraft:fire_charge`, `cryItem=minecraft:ghast_tear`, `holdToFire=true`, `allowPlainItems=false`, `lockControlSlots=true` |
+| controls | `fireItem=minecraft:fire_charge`, `cryItem=minecraft:ghast_tear`, `holdToFire=true`, `allowPlainItems=false` |
 | fire | `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
 | heat | `limit=100.0`, `firingWindowSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldMaxTemperature=0.3`, `hotMinTemperature=1.0`, `unknownDimensionUsesTemperature=true` |
 | water | `coolPerSecond=5.0`, `floor=0.0`, `blocksFiring=true` |
@@ -84,9 +94,9 @@ Presets:
   `firingWindowEndTick`, `fireReadyTick`, `cryReadyTick`, optional `detonateAtTick`, and optional
   `detonatingRiderId`. The two detonation fields are present or absent together. The fire cooldown is
   not inferred from the firing window. Updates replace the attachment value.
-- `RiderState` is an immutable persistent player attachment containing each byte-exact stashed ItemStack
-  paired with the slot index from which it was removed, ridden-ghast UUID, `lastHandledTick`, and
-  serializable HUD dirty-cache data.
+- `RiderState` is an immutable persistent player attachment containing only the ridden-ghast UUID,
+  `lastHandledTick`, and serializable HUD dirty-cache data. It stores no ItemStack, inventory index,
+  restoration data, or second control-state model.
 - `Heat.advance` applies cooling only over the not-yet-accounted interval and always moves
   `heatAnchorTick` to `now`. Passive cooling uses
   `max(0, now - max(heatAnchorTick, firingWindowEndTick))`; water cooling instead uses
@@ -110,39 +120,52 @@ Presets:
   the old task. Deferred work is not retried by the player tick or any other per-tick poller. There is no
   world/entity scan or second queue.
   Alternating riders cannot shorten cry cooldown, and restart cannot reset or lengthen either deadline.
-- Entity attachment removal owns ghast-state eviction. Rider stash survives disconnect/crash until
-  reconciliation restores it; HUD handles are always process-local and explicitly removed.
+- Entity attachment removal owns ghast-state eviction. Rider ride identity survives only as needed for
+  bounded reconciliation and cleanup; HUD handles are always process-local and explicitly removed.
 
 ## Controls and inventory safety
 
 - The Happy Ghast's controlling first passenger is the pilot. Only the pilot receives control items
   and can fire or cry. Other riders see the HUD read-only; they have no safe action input while plain
   items are disabled, so the product does not promise unreachable `NOT_PILOT` feedback.
-- Screen slots 5 and 6 (indexes 4 and 5 by default) become Fire Control and Cry Control while piloting.
-  Both hands and ridden-entity/item-use callbacks route to one handler. `lastHandledTick` permits at
-  most one accepted input per player tick whichever callback arrives first.
-- Controls are fresh configured vanilla-item stacks carrying server-only-compatible namespaced markers
-  in vanilla custom data, plus display names and glint. Raw items do nothing by default;
-  `allowPlainItems` is the explicit opt-in.
-- On mount, the pilot's two complete ItemStacks are copied into persistent `RiderState`, then replaced
-  with controls: exactly two inventory writes. Each stash entry records its original configured index.
-  Existing items are never decorated or mutated.
-- On dismount or loss of pilot status, the two stashed stacks are restored byte-for-byte, marked control
-  items in that player's inventory are removed as a creative-duplication guard, and the stash clears:
-  exactly two restoration writes plus the scoped marker sweep. Restoration always uses the persisted
-  original indexes, never the current config.
-- A successful live reload may change `fireSlot`/`crySlot`, but an active stash keeps its original indexes
-  for restoration, lock decisions, and control lookup until that ride reconciles and clears. New indexes
-  apply only to the next stash. Validation still requires distinct hotbar indexes. This avoids a global
-  search for active stashes and makes disconnected/crash-recovery riders safe.
-- The pre-drop player-death hook restores the stash **before vanilla creates inventory drops**. Tick
-  reconciliation is only a backstop. Death drops therefore contain the player's real items, never
-  controls. Disconnect, ghast death/removal, dimension change, kick, and crash recovery converge through
-  the same invariant without any all-world item scan.
-- `SlotGuardMixin` cancels `AbstractContainerMenu` click, drag, shift-click, hotkey/number-key swap,
-  pickup-all, and container `THROW` mutations affecting the two locked control slots while piloting.
-  `PlayerDropMixin` separately cancels direct selected-slot Q/drop through `ServerPlayer.drop(boolean)`.
-  Unrelated slots and non-pilots are untouched.
+- On becoming the pilot, `Controls` searches insertion candidates in exact order: hotbar indexes `0..8`,
+  then main-inventory indexes `9..35`. Armor and offhand are not allocation destinations. It reserves two
+  empty candidates before writing either control. With fewer than two, it writes nothing, preserves every
+  inventory byte, records the ride as reconciled to prevent retries/spam, and sends exactly one direct
+  message: `Happy Artillery needs 2 free inventory slots.`
+- Controls are fresh configured vanilla-item stacks carrying namespaced markers in vanilla custom data,
+  plus display names and glint. Each marker contains control type, owner UUID, and ridden-ghast UUID.
+  A marked stack authorizes only its owner during that exact ride. Raw configured items do nothing by
+  default; `allowPlainItems=true` is admission-only. Plain items are never deleted and never satisfy the
+  generated-control HUD presence check.
+- A matching generated control works only while the active pilot holds it in main hand or offhand. Its
+  hotbar index is irrelevant. A control in main inventory is retained but cannot activate until moved to
+  a hand through ordinary Minecraft inventory behavior. Both hands and ridden-entity/item-use callbacks
+  route to one handler; `lastHandledTick` permits at most one accepted input per player tick whichever
+  callback arrives first.
+- Controls move freely among the owning player's hotbar, main inventory, and offhand. There are no fixed
+  slots, stashes, restoration writes, or locked slots. No mount, dismount, reload, death, or recovery path
+  overwrites an ordinary ItemStack.
+- `Controls` creates one bounded snapshot per active pilot tick over inventory indexes `0..35` plus
+  offhand index `40`, and shares it with held admission and HUD. It distinguishes matching active,
+  stale/foreign, inventory-only, and missing controls. It never scans menus, containers, worlds, item
+  entities, or other players to locate a missing control.
+- Missing controls are not regenerated during the same ride. Dismounting and remounting is the only
+  regeneration path. Dismount, loss of pilot status, disconnect recovery, dimension transition, and
+  ghast removal remove only marked controls owned by that rider/ride and clear ride identity.
+- `PlayerDropMixin` observes the returned `ItemEntity` from the three-argument `ServerPlayer.drop`
+  boundary and discards marked control drops. This covers direct Q, cursor and menu `THROW`, creative,
+  and ordinary/offhand/equipment death drops while ordinary drops remain vanilla. Player death lets
+  vanilla empty the inventory; there is no pre-drop restoration.
+- `ExternalContainerMixin` observes `Slot.setChanged()` after menu mutation. At that boundary,
+  `Controls` preserves an owner-matching control only when the destination container is that owner's
+  player `Inventory`; it consumes a marked control in every other container. Ordinary placement,
+  `QUICK_MOVE` empty/merge, number/offhand swaps, and `QUICK_CRAFT` are covered without predicting or
+  cancelling `doClick`. `PICKUP_ALL` is inbound slot-to-cursor collection, not outbound container
+  insertion. Same-player movement and ordinary items remain vanilla.
+- Because 1.2.0 is unreleased, no legacy-stash compatibility alias or restoration layer is added. The
+  disposable test world must be reset, or otherwise proven free of an active old stash, before the new
+  `RiderState` codec is deployed.
 
 ### Hold-to-fire gate
 
@@ -189,12 +212,14 @@ Normal fire:
 
 - Spawn the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, not a custom entity or wrapper.
   Construct it with the ridden Happy Ghast as the `LivingEntity` owner, the pilot's normalized view as
-  the direction, and strict integer `fire.explosionPower=1` by default. Place it with vanilla ghast
-  launch geometry: four blocks forward in the aiming direction and at
-  `ghast.getY(0.5) + 0.5`. Use vanilla's shoot event `1016`. The pilot selects the aim, but movement is
-  otherwise the untouched vanilla large-fireball constructor/tick path: initial directional movement
-  `0.1`, air inertia `0.95`, and per-tick directional acceleration `0.1`. There is no configurable
-  speed/spawn-distance override, eager chunk loading, instant ray, or direct-damage fallback.
+  the direction, and strict integer `fire.explosionPower=1` by default. Compute one launch origin along
+  that normalized aim beyond the union of the Happy Ghast and complete passenger-tree collision bounds,
+  expanded by the spawned fireball's collision extents plus a small clearance. The resulting fireball
+  AABB must be disjoint from every ridden entity AABB for upward, downward, horizontal, and diagonal aim.
+  Use vanilla's shoot event `1016`. The pilot selects the aim, but movement is otherwise the untouched
+  vanilla large-fireball constructor/tick path: initial directional movement `0.1`, air inertia `0.95`,
+  and per-tick directional acceleration `0.1`. There is no configurable speed/spawn-distance override,
+  eager chunk loading, instant ray, or direct-damage fallback.
 - A direct entity hit deals vanilla's exact `6.0F` fireball damage before the same projectile performs
   its impact explosion. Default explosion power is vanilla ghast power `1`, represented as an integer
   because the mapped `LargeFireball(Level, LivingEntity, Vec3, int)` constructor requires `int`.
@@ -217,8 +242,9 @@ Overheat:
 - At the ghast position, make one best-effort effect pass: attempt the configured power-6 explosion,
   every one of the 24 evenly distributed sphere fireballs at speed 0.4/power 2, and each of up to 24 fire
   candidates within radius 8 without aborting later attempts after a rejection. Occupied or unsupported
-  fire candidates are accepted skips; actual rejected explosion, entity-add, fire mutation, or removal
-  attempts are reported truthfully as a consumed pass with failures. Once the ghast is loaded, the deadline
+  fire candidates are accepted skips. The explosion API supplies no rejection result: invoke it once and
+  do not count a fictitious failure. Rejected entity insertion, fire mutation, or ghast-removal attempts
+  are reported truthfully as a consumed pass with failures. Once the ghast is loaded, the deadline
   is due, and the persisted rider resolves, the required attachment replacement durably consumes the
   deadline/rider pair before any explosion, fireball, fire, or removal attempt. If that write throws, the
   pass fails loudly before any world effect, and the queue restores exactly one active owner before
@@ -241,8 +267,8 @@ Cry:
 
 - Enabled pilot input outside water and cooldown plays one `GHAST_SCREAM` at the ghast, hostile source,
   volume 10.0, pitch 0.8. It has no damage, debuff, reveal, or heat effect.
-- Cooldown is committed only when the sound effect is accepted and is stored on the ghast. Ordinary
-  denial does not start it.
+- Sound playback supplies no rejection result. The cooldown is committed after the infallible sound call
+  completes and is stored on the ghast. Ordinary admission denial does not start it.
 
 ## HUD, lifecycle, and work bounds
 
@@ -250,19 +276,27 @@ Cry:
   stop. Passengers see it read-only. Progress is `heat / configured heat.limit`, bounded to the boss-bar
   range `[0, 1]`; `heat / 100` is only the default-limit example. Updates send only changed values and
   never a remove-then-add pair.
-- Action bar is dirty-checked and limited to every configured four ticks. It shows heat/cooling status.
-  `NETHER · NO COOLING` in red has highest priority.
+- Action bar is dirty-checked and limited to every configured four ticks. Pilot control status has exact
+  priority: if either generated control is absent, show
+  `CONTROL MISSING · DISMOUNT AND REMOUNT`; otherwise, if either is in main inventory rather than a
+  hand-accessible hotbar/offhand location, show `CONTROL IN INVENTORY` or `CONTROLS IN INVENTORY` as
+  appropriate; otherwise show the normal heat/cooling line. Missing wins when one control is absent and
+  the other is merely in inventory. Control warnings are pilot-only and are delivered on the next eligible
+  action-bar update without waiting behind another presentation channel. Passengers retain heat/status
+  presentation. Within normal heat status, `NETHER · NO COOLING` in red has highest priority.
 - Boss color is red when that same bounded normalized progress reaches
   `clamp(hud.warningFromPercent / 100, 0, 1)`—equivalently, when heat reaches the configured
   `heat.limit` multiplied by that fraction. Otherwise it is gold in HOT/NETHER, blue in COLD, and green
   in BASE/END. Warning particles use the same configured normalized threshold (85% by default) and are
   sent only to riders in the ghast's region.
-- The sole tick driver iterates online players, performs one bounded rider/status reconciliation check
-  for each, advances each ridden ghast
-  exactly once through its pilot, then updates HUD for pilot and passengers from the resulting snapshot.
-  With online non-riders it is not an empty loop: it checks attachment/ride status once per player and
-  touches inventory only if a stash requires restoration. There is no loaded-world/entity scan, routine
-  inventory scan, or cleanup pass.
+- The sole tick driver groups ridden players by ghast, performs one bounded rider/status reconciliation
+  check per online player, obtains one bounded `0..35` plus offhand inventory snapshot per active pilot,
+  advances each ridden ghast exactly once through its pilot, and shares the post-transition snapshot with
+  pilot admission and HUD. A ridden group without a controlling pilot has every rider HUD removed that
+  tick. Non-riders receive only the bounded attachment/ride-status check and scoped cleanup when ride
+  identity requires it. There is no loaded-world/entity/container scan, second pilot inventory scan, or
+  global cleanup pass. Input callbacks inspect only the acting player and current ridden ghast; HUD fan-out
+  waits for the normal tick.
 - Presentation never classifies again or mutates heat, cooldown, detonation, or inventory state.
 
 ## Released defects retained as regression evidence
@@ -270,7 +304,8 @@ Cry:
 Tests must prove the rewrite does not restore these released faults:
 
 - lore-substring controls, mutation/loss of player item names or glint, unpersisted duplicate player
-  stores, per-tick 41-slot scans, delayed 10 ms repair queues, and global death-drop scans;
+  stores, destructive stash restoration, fixed-slot locks, copied menu-click prediction, delayed 10 ms
+  repair queues, and global death-drop scans;
 - any-passenger/raw-fire-charge ability bypass, duplicate callbacks causing double fire, and silent
   ordinary rejection;
 - static UUID maps, wall-clock timing, conflicting biome/heat classifiers, fixed 60-tick cooling,
@@ -282,13 +317,16 @@ Tests must prove the rewrite does not restore these released faults:
 ## Manual acceptance boundary
 
 After activation creates runnable exact-candidate bytes, and before release, run the complete controls
-abuse list on that same checksum-matched candidate on Java and Bedrock through Geyser: named/full
-inventory restoration; player and ghast death; logout; hard server kill; dimension change; every slot
-movement/drop route; two-rider pilot authorization plus passenger HUD; creative duplication; plain-item
-denial; live reload to different fire/cry slots during an active ride; and Bedrock mount/fire/dismount
-without ghost items. The active ride must remain locked to and restore from its persisted original indexes;
-the next ride must use the new indexes. Verify vanilla normal-fire `mobGriefing` on/off behavior and real
-`LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat/stash
+abuse list in Migration Plan Phase 8 on that same checksum-matched candidate on Java and Bedrock through
+Geyser. It must cover atomic first-two-free allocation; zero/one-free refusal with no writes; arbitrary
+hotbar and offhand held use; inventory-only and missing-control HUD priority; same-player movement; direct
+Q, cursor/menu `THROW`, creative, ordinary/offhand/equipment death-drop consumption; external-container
+placement, `QUICK_MOVE` empty/merge, number/offhand swap, and `QUICK_CRAFT` consumption at the proven
+post-mutation boundary; inbound `PICKUP_ALL` slot-to-cursor behavior; no same-ride regeneration; dismount/
+remount regeneration without overwrite; scoped cleanup across logout, hard stop, dimension change, and
+ghast removal; two-rider pilot authorization plus passenger HUD; plain-item admission-only behavior; and
+Bedrock mount/fire/dismount without ghost items. Verify vanilla normal-fire `mobGriefing` on/off behavior
+and real `LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat
 and an in-flight vanilla fireball across restart, paused
 cooldown/fuse while stopped, one-time unload catch-up with no
 repeated cooling, single-digit HUD packet updates per rider/second, bounded per-online-player idle work,
@@ -301,8 +339,9 @@ the complete graph is runnable.
 The pinned official-name merged jar used by this checkout establishes the normal-fire boundary:
 
 - `Ghast` initializes its integer `explosionPower` to `1`; its shoot goal calls
-  `new LargeFireball(level, ghast, direction.normalize(), ghast.getExplosionPower())`, then places the
-  projectile four blocks along the view vector at `ghast.getY(0.5) + 0.5`.
+  `new LargeFireball(level, ghast, direction.normalize(), ghast.getExplosionPower())`, then uses a fixed
+  vanilla placement four blocks along the view vector at `ghast.getY(0.5) + 0.5`. Happy Artillery
+  intentionally replaces only that placement with the collision-clear ridden-entity calculation above.
 - `LargeFireball(Level, LivingEntity, Vec3, int)` selects `EntityTypes.FIREBALL`; its superclass
   constructor calls `setOwner` with that `LivingEntity`. `HappyGhast` extends `Animal`, so the ridden
   Happy Ghast is a valid direct owner without a new production entity class.

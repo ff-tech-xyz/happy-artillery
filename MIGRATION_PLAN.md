@@ -2,317 +2,398 @@
 
 ## Checkpoint contract
 
-Build the settled `FEATURES.md` contract into the proposed `ARCHITECTURE.md` tree in the order below.
-Released source is defect evidence, not code to copy. Every slice is delegated to one fresh writer,
-independently reviewed by the coordinator, verified on its final bytes, committed as one coherent GREEN
-checkpoint, and pushed to the existing non-`main` branch before the next slice starts.
+Repair the runnable 1.2.0 candidate at `482a80edcbc3683cb873884c2ced623d3e7bf725` into the settled
+`FEATURES.md` contract and proposed `ARCHITECTURE.md` tree in dependency order. This plan supersedes
+the obsolete Slice 0-14 guarded rebuild: the owner graph, heat/fire/cry/fuse/config/HUD/lifecycle
+implementation already exists, and the remaining work is a subtractive controls migration plus the
+identified release blockers.
 
-The entrypoint must keep throwing the deliberate startup exception and the artifact/Fabric metadata
-must remain visibly non-deployable through Slice 12. Partial gameplay is never registered or deployed.
-Only Slice 13 may remove that guard after every owner is GREEN.
+Each implementation phase uses one writer, strict vertical RED -> GREEN, coordinator review of final
+bytes, focused tests, the full suite, canonical clean build, and one coherent non-`main` commit pushed
+before dependent work begins. For each automatable behavior:
 
-For every automatable behavior, use one vertical RED -> GREEN cycle at a time:
-
-1. add one behavior assertion;
-2. run the focused JUnit test and observe the expected behavior failure, not a compile/setup error;
-3. add the minimum production behavior;
+1. add one assertion that distinguishes the defect from the accepted behavior;
+2. run the focused test and observe the expected behavioral failure, not a compile/setup failure;
+3. implement the smallest complete change in the declared owner while deleting the superseded path;
 4. rerun focused and full tests, then refactor only while GREEN.
 
-Before each commit: inspect status and complete diff; compare source/resource/test paths with
-`ARCHITECTURE.md`; run focused tests, full tests, `./gradlew clean build`, `git diff --check`, and staged
-diff checks; scan for old owners, static maps, wall clocks, duplicate callbacks, global scans, fallback
-effects, silent catches, secrets, and unexpected dependency/toolchain changes. Any changed final byte
-invalidates earlier evidence. Push only after the coordinator verifies the exact commit.
+Before every source commit, inspect status plus tracked, staged, unstaged, and untracked scope; compare
+production/resource/test paths bidirectionally with `ARCHITECTURE.md`; run focused tests, full tests,
+`./gradlew --no-daemon --no-parallel clean build`, `git diff --check`, staged diff checks, residue and
+secret scans, and a fresh independent review of the exact final bytes. Any edit invalidates affected
+evidence. The reviewer must identify the first broken invariant and say whether the diff removes the
+old owner or hides it. Never bypass hooks, change dependencies/toolchain, touch `main`, or deploy dirty
+bytes.
 
-JUnit and Fabric's data-attachment API are accepted build requirements. The build-support slice must
-pin the smallest existing-compatible JUnit dependency, make `test` part of `check`, and add explicit
-compile support for the attachment API from the already-pinned Fabric API line before attachment source
-is written. It may not change Loom, Minecraft, Fabric, mappings, Gradle, or Java versions.
+Groundwork and documentation checkpoints need machine verification but no gameplay stop. The completed
+gameplay change receives one consolidated exact-head manual test in Phase 8. A release PR opens only
+after every phase and release gate is GREEN; Elijah alone merges `main`, and official release/Modrinth
+publication still requires his separate explicit `publish it` instruction.
 
-## Settled assumptions carried into implementation
+## Settled architecture and behavior
 
-- The proposed tree has fourteen production Java files: the eleven declared non-mixin owners plus
-  `DeathDropMixin`, `PlayerDropMixin`, and `SlotGuardMixin`. Minecraft 26.2 has no usable Fabric pre-drop
-  event, so the death mixin wraps `ServerPlayer.die`'s committed `dropAllDeathLoot` invocation. Container
-  mutation and direct Q/drop require separate fail-closed `AbstractContainerMenu` and `ServerPlayer`
-  plumbing; all policy remains in `Controls`.
-- The eight test files are grouped by risk: attachment codecs share `PersistenceTest`; component and
-  mixin risks live in `ControlsTest`; feedback lives in
-  `AbilitiesTest`; only coherent pure/config/model boundaries keep dedicated suites.
-- `GhastState` includes per-ghast cry and pending-fuse timing. `Abilities` solely owns fuse task
-  scheduling and load-time re-establishment. `GhastState` also stores an independent `fireReadyTick`;
-  `Abilities` reads and updates it because shot cooldown is not derived from the heat firing window.
-- All persistent timing uses saved Overworld `gameTime`: heat has a consumed-through anchor and firing
-  window end, while cry and fuse use durable deadlines. Process-local ticks and wall time are forbidden,
-  and every advance consumes elapsed ticks exactly once.
-- Each active RiderState stash persists its original fire/cry slot indexes. Reloaded slots apply only to
-  a later ride; restoration, locking, and active control lookup use the persisted indexes.
-- Passengers receive read-only HUD; only the pilot advances state or abilities. `NOT_PILOT` remains a
-  silent authorization result, not an unreachable passenger-feedback promise.
-- `Components` solely encodes and recognizes fire/cry identity in a namespaced vanilla `CUSTOM_DATA`
-  tag, preserving unrelated custom data. No Happy Artillery data-component type or composition-root
-  registration seam exists, so unmodded clients need no custom synchronized registry entry.
-- Normal fire uses the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, owned by the ridden Happy
-  Ghast. Vanilla `mobGriefing`, hit damage, constructor movement, explosion interaction, and entity
-  persistence remain authoritative; there is no protection-veto adapter or custom projectile owner.
-  Overheat has no claims adapter; `breaksBlocks` is its sole block-mutation toggle. Pre-drop restoration,
-  Java + Bedrock hold behavior, and HUD packet bounds remain mandatory final-candidate gates, not polish.
-- The fail-loud requirement prevents a committed partial server from running. Attachment persistence is
-  first proven automatically by codec/attachment round-trip. A disposable, never-committed compile/API
-  spike may disable the guard only to resolve framework signatures, but the committed checkpoint must
-  restore it and cannot claim integrated gameplay evidence.
-  Exact-head restart persistence remains the first blocking runtime check after final activation.
+- The proposed tree has exactly thirteen production Java files: eleven non-mixin owners plus the
+  reshaped `PlayerDropMixin` and new `ExternalContainerMixin`. `DeathDropMixin` and `SlotGuardMixin`
+  are deleted during Phase 3, after this docs checkpoint precedes those source moves.
+- `RiderState` retains only ridden-ghast identity, `lastHandledTick`, and HUD cache. It persists no
+  ItemStack, slot index, stash, or restoration data.
+- `Components` markers contain control type, owner UUID, and ride UUID inside vanilla `CUSTOM_DATA`.
+- `Controls` solely owns atomic allocation, one bounded active-pilot inventory snapshot over `0..35`
+  plus offhand, held admission, transfer cleanup, ride transitions, and scoped control cleanup.
+- Controls are disposable and movable inside the owning player's hotbar, main inventory, and offhand.
+  There are no fixed slots, locks, exact-slot writes, stashes, restoration, click prediction, global
+  scans, or same-ride regeneration. `allowPlainItems` changes admission only.
+- HUD receives the shared snapshot. Pilot priority is missing control, then inventory-only control,
+  then normal heat/status. Passengers see heat/status only.
+- All unrelated accepted heat, fire, cry, fuse, config transaction, HUD, and lifecycle contracts in
+  `FEATURES.md` remain in force unless a later named release-blocker phase changes one explicitly.
 
-## Dependency-ordered slices
+## Phase 0 — Resolved Minecraft mutation-boundary evidence
 
-### Slice 0 — Accept the settled documents
+**Status:** complete evidence; no production mutation belongs to this phase.
+
+Mapped Minecraft 26.2 bytecode and RED-capable route probes established:
+
+1. `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor
+   drops, menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. A marked returned
+   `ItemEntity` can be discarded without changing ordinary drops.
+2. External chest/container insertion does not reach `ServerPlayer.drop`. One additional narrow
+   post-mutation hook is required at `Slot.setChanged():void` `HEAD`.
+3. At that hook, `Controls` can inspect `Slot.getItem()` and `Slot.container`. It preserves a marked
+   control only for an owner-matching player `Inventory` destination and consumes it from every other
+   container. This covers ordinary pickup/placement, `QUICK_MOVE` empty/merge, number/offhand swaps,
+   and `QUICK_CRAFT` without simulating `AbstractContainerMenu.doClick`.
+4. `PICKUP_ALL` is inbound slot-to-cursor collection, not outbound insertion into a chest. It is not
+   evidence for another external-container route or a reason to copy vanilla click prediction.
+5. `Inventory.dropAll()` reaches the same three-argument drop boundary, so `DeathDropMixin` is
+   unnecessary. The predictive `SlotGuardMixin` is also unnecessary.
+6. The destructive restoration RED was observed against the current owner: replacing the former fixed
+   control slot before dismount caused `Controls.restore` to overwrite the replacement. Phase 3 must
+   recreate and retain that behavioral regression before deleting the stash path.
+
+**Gate:** every outbound route names an observed method/descriptor, the proposed tree is fixed at
+thirteen production Java files, and no future phase may substitute absence detection for actual
+container deletion.
+
+## Phase 1 — Update canonical contract and proposed tree
 
 **Files:** `ARCHITECTURE.md`, `FEATURES.md`, `MIGRATION_PLAN.md` only.
 
-Validate the tree, unique paths/owners, links, Markdown structure, and whitespace. No source, resource,
-build, README, CHANGELOG, test-server, dependency, project-state, commit, or push mutation belongs to the
-worker task. Coordinator checkpoint: `docs(architecture): settle 1.2.0 rebuild design`.
+1. Declare the thirteen-file tree before source moves: retain/reshape `PlayerDropMixin`, add
+   `ExternalContainerMixin`, and omit `DeathDropMixin`/`SlotGuardMixin`.
+2. Replace fixed-slot/stash/lock/restoration language with atomic first-two-free allocation,
+   owner+ride markers, same-player mobility, bounded snapshot sharing, proven outbound consumption,
+   no-overwrite, no same-ride regeneration, scoped cleanup, HUD priority, and passenger behavior.
+3. Remove `fireSlot`, `crySlot`, and `lockControlSlots` from the schema. Document eight groups and
+   36 declared keys; add no compatibility aliases.
+4. Replace obsolete stash/index/lock/prediction test annotations and manual tests with the Phase 3/4
+   automated contract and Phase 8 numbered acceptance.
+5. Run deterministic tree/doc counts, UTF-8, fence, final-newline, contradiction, and whitespace checks.
+   Do not run a source build merely for this worker checkpoint.
 
-### Slice 1 — Realign the fail-loud scaffold
+**Commit proposal:** `docs(architecture): replace locked control slots`
 
-**Prerequisite:** Slice 0 is committed and remotely reachable so the architecture gate precedes moves.
+**Gate:** only these three docs differ; the architecture declares exactly thirteen production Java
+files and eight tests; all three docs express one disposable movable-control model. The docs may
+propose source paths not yet present because this checkpoint must precede their moves; report those
+paths rather than treating the intentional ordering as a failure.
 
-Move the empty production/test shells to the proposed paths; add empty owners/resources only where the
-tree requires them; remove superseded shells. Update package declarations and mixin metadata, but no
-gameplay or callback behavior. Preserve deliberate startup failure and non-deployable names.
+## Phase 2 — Repair configuration schema and lifecycle
 
-**GREEN evidence:** compilation, exact bidirectional architecture/filesystem comparison, runtime and
-sources jar inspection, and isolated `runServer` log proving the declared entrypoint fails with the exact
-deliberate exception. Commit `refactor(scaffold): align settled owner tree` and push. No human test.
+**Owners/files:** `Config.java`, `HappyArtillery.java`, `ConfigTest.java`, and
+`HappyArtilleryIntegrationTest.java`.
 
-### Slice 2 — Config and required build support
+RED/GREEN slices:
 
-Before attachment implementation, add explicit compile support for Fabric's data-attachment API from
-the pinned Fabric API 26.2 line. Implement `Config` and `ConfigTest`; configure the accepted JUnit test
-task without changing the toolchain. Cover the complete nested schema/defaults, preset-before-explicit
-precedence, missing-file creation and missing-key rewrite, unknown-key removal after successful parsing,
-identifier/range/cross-field validation, loud startup failure for every malformed/invalid existing-file
-case, atomic call-time reads, distinct in-range fire/cry slots, and failed-reload retention of the exact
-previous valid value without rewriting the invalid file. Normal-fire `explosionPower` and overheat
-`fireballPower` are strict integers; normal-fire defaults to vanilla power `1`. Remove normal-fire
-`speed`, `spawnDistance`, `breaksBlocks`, and `respectProtection`; no compatibility alias preserves those
-rejected normal-fire promises. Remove `overheat.respectProtection`; no claims adapter is part of 1.2.0.
+1. Reject unknown root and nested keys recursively with full paths; preserve active config and invalid
+   file bytes on startup/reload failure.
+2. Reject removed `controls.fireSlot`, `controls.crySlot`, and `controls.lockControlSlots` with a clear
+   removed-setting error. Do not silently discard them or retain compatibility behavior.
+3. Reduce `Config.Controls` to `fireItem`, `cryItem`, `holdToFire`, and `allowPlainItems`; update the
+   complete-default serialization and presets without changing unrelated defaults.
+4. During parsing, validate item identifier syntax only. Resolve configured registry entries at a later
+   server lifecycle point after mod initializers; missing items abort startup with exact path/id.
+5. Reload on a running server resolves both items before atomic swap and rewrite. Failure preserves the
+   previous object and exact file bytes.
 
-**RED:** focused config assertions fail against the empty owner. **GREEN:** focused config tests, full
-tests, clean build, attachment-API compile-resolution proof, serialized complete-default comparison, and
-single config-I/O owner search. Commit
-`feat(config): define 1.2.0 settings` and push. Remains non-deployable.
+**Commands:**
 
-### Slice 3 — One biome classifier
+```bash
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.ConfigTest
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.HappyArtilleryIntegrationTest
+./gradlew --no-daemon --no-parallel clean build
+```
 
-Implement `BiomeClass` only. Test vanilla dimension-key identity, custom ids containing `nether`/`end`,
-unknown-dimension temperature policy, exact 0.3/1.0 edges, all five profiles, and config reload reads.
+**Commit:** `fix(config): validate controls after mod startup`
 
-**RED:** classifier tests fail against the shell. **GREEN:** focused/full tests, clean build, and search
-proving no other production file classifies dimension or temperature. Commit
-`feat(state): classify artillery biomes` and push. Remains non-deployable.
+**Gate:** the production schema contains no removed slot key, unknown keys never disappear silently,
+and modded control item ids do not depend on initializer order.
 
-### Slice 4 — Persistent ghast and rider attachments
+## Phase 3 — Replace stash and locks atomically
 
-Implement immutable `GhastState` and `RiderState` records/codecs. Each state owner defines/registers its
-persistent attachment type, and the composition root invokes those registration entries without owning
-their definitions or registering gameplay. Include heat/heat-anchor/firing-window and
-independent fire-ready/cry-ready/fuse-deadline Overworld game ticks, the detonating rider UUID paired
-with the fuse deadline, byte-exact two-stack stash with original slot indexes, ridden id, input dedup
-tick, and serializable HUD cache.
+**Owners/files:** `Components.java`, `RiderState.java`, `Controls.java`, `PlayerDropMixin.java`, new
+`ExternalContainerMixin.java`, delete `DeathDropMixin.java` and `SlotGuardMixin.java`, update mixin
+metadata, `PersistenceTest.java`, and `ControlsTest.java`.
 
-**RED:** grouped `PersistenceTest` fresh-state, codec, indexed ItemStack, attachment replacement,
-durable-tick continuity, and encode/decode assertions fail first. **GREEN:** focused/full tests, clean build,
-serialization round-trips, immutable replacement proof, and search proving no static gameplay map,
-process-local persisted tick, or wall clock. If API names need proof, use a disposable
-instrumented run and restore the fail-loud final bytes. Commit `feat(state): persist ghast and rider state`
-and push. A real restart proof is still required at Slice 13 before any gameplay claim.
+Delete in one compile-coherent change before retaining a replacement path:
 
-### Slice 5 — Pure heat integration
+- `RiderState.StashedStack`, fire/cry stash fields, slot indexes, codecs, and copy helpers;
+- fixed-slot mount writes, restoration, overwrite paths, active slot lookup, slot locks, and scoped
+  sweeps whose purpose was restoration;
+- `shouldCancelContainerMutation`, quick-craft snapshots, prediction/access interfaces, pickup/swap/
+  pickup-all/can-quick-move simulation, and obsolete tests;
+- pre-drop restoration access, `DeathDropMixin`, and `SlotGuardMixin`.
 
-Implement `Heat` and `HeatTest` without world/entity access. Take one tracer behavior at a time: each
-biome's sustained curve; exact-limit detonation; firing window; water-before-Nether ordering; and
-non-double-counted per-tick, unload, and restart advances in saved game time.
+RED/GREEN slices:
 
-**RED/GREEN:** every pure transition assertion must be observed failing then passing. Run focused heat
-tests, full tests, clean build, and searches proving `Heat` owns the only limit comparison. Commit
-`feat(state): implement anchored heat` and push.
-Remains non-deployable.
+1. **State shape:** `RiderState` round-trips only optional ride UUID, `lastHandledTick`, and HUD cache.
+2. **Marker identity:** type + owner UUID + ride UUID round-trip in vanilla `CUSTOM_DATA`, preserving
+   unrelated data and requiring no synchronized registry.
+3. **Atomic allocation:** reserve two empty candidates in hotbar `0..8`, then main `9..35`; with zero
+   or one empty, perform zero writes, record that ride, and emit one exact refusal message.
+4. **Bounded snapshot:** inspect only `0..35` and offhand `40`; classify matching, stale/foreign,
+   hand-accessible, main-inventory-only, and missing controls.
+5. **Held admission and mobility:** matching controls work from any held hotbar slot or offhand. Every
+   move among the owner's hotbar/main/offhand remains vanilla.
+6. **Drop consumption:** the reshaped drop mixin at three-argument `ServerPlayer.drop` `RETURN`
+   discards marked direct Q, cursor/menu `THROW`, creative, and death-drop entities; ordinary drops pass.
+7. **External consumption:** the new `Slot.setChanged()` `HEAD` hook delegates to `Controls`, preserving
+   only owner-matching player `Inventory` destinations and consuming marked stacks from every other
+   container after ordinary placement, `QUICK_MOVE` empty/merge, number/offhand swap, and `QUICK_CRAFT`.
+   `PICKUP_ALL` remains inbound slot-to-cursor and must not be mislabeled as chest insertion.
+8. **No search/regeneration:** missing state comes from the bounded snapshot; no menu/world/entity/other-
+   player search locates a token, and the same ride never regenerates it.
+9. **Cleanup/no-overwrite:** dismount, lost pilot status, disconnect recovery, dimension transition,
+   and ghast removal delete only matching owned controls and clear ride identity. Player death relies on
+   vanilla inventory emptying plus drop consumption. No ordinary ItemStack is written or deleted.
+10. **Foreign/stale/plain safety:** stolen/prior-ride controls never authorize. Cleanup is bounded to the
+    owning rider's reconciliation or the current mutation boundary. Plain configured items are admission-
+    only when enabled and are never deleted or counted for HUD presence.
 
-### Slice 6 — Prove the hold-input seam while guarded
+**Commands:**
 
-Confirm the exact 26.2 consumable component API and implement an automated server-observed use-state seam
-while the artifact remains guarded. Tests must prove long-duration use, no animation/sound side effect,
-release cancellation, and tick/cooldown-based intent independent of packet frequency. A disposable API
-spike may resolve mapped signatures, but Java/Bedrock rate evidence is deliberately deferred until the
-complete graph produces runnable exact-candidate bytes in Slice 13.
+```bash
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.PersistenceTest
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.ControlsTest
+./gradlew --no-daemon --no-parallel clean build
+```
 
-Retain the preferred 0.25-second/default-heat contract provisionally. Remove disposable instrumentation;
-run affected controls/config/heat tests, full tests, clean build, fail-loud startup, and exact diff
-checks. Commit `feat(controls): establish hold input seam` and push. Packet-rate heuristics are forbidden.
+**Commit:** `feat(controls): use disposable movable controls`
 
-### Slice 7 — Components, controls, and pre-drop restoration
+**Gate:** production searches for stash/index/lock/predictive owner residue are empty; exactly the two
+proposed mixins remain; every direct inventory mutation routes through `Controls`; same-player movement
+is allowed and every proven outbound destination consumes the marked stack.
 
-Implement `Components`, `Controls`, `DeathDropMixin`, `PlayerDropMixin`, `SlotGuardMixin`, mixin
-metadata, and grouped `ControlsTest`. Cover namespaced vanilla-custom-data marker identity,
-persistence/network round trips without a custom registry entry, fire/cry distinction, fake rejection;
-pilot-only admission; both callbacks/hands; one-input-per-player-tick deduplication; hold/click intent;
-exactly two mount/two restore writes; byte-exact indexed stash; active-ride reload retaining original
-indexes for lookup, locking, and restoration; next-ride adoption of new indexes; scoped creative cleanup;
-pre-drop death restoration; and every click/drop/swap cancellation route.
+## Phase 4 — Share snapshots and repair callback/HUD ownership
 
-**RED/GREEN:** automate owner logic, injection decisions, and pre-drop-before-drop ordering through
-framework seams. A tick backstop alone fails. Run focused/full tests and clean build, commit
-`feat(controls): swap and protect pilot controls`, and push.
+**Owners/files:** `HappyArtillery.java`, `Hud.java`, `Controls.java`,
+`HappyArtilleryIntegrationTest.java`, `HudTest.java`, and affected `ControlsTest.java` sections.
 
-### Slice 8 — Normal fire admission and projectile
+RED/GREEN slices:
 
-Implement only normal fire admission and its one projectile path in `Abilities`, one vertical behavior at
-a time. Group tests in `AbilitiesTest`: pilot/water/cooldown gates, sealed fired/rejected outcomes,
-advance-before-shot anchored heat, independent `fireReadyTick`, exactly-once heat/cooldown mutation,
-real `EntityTypes.FIREBALL` / `LargeFireball` identity, ridden-Happy-Ghast ownership, pilot-view aim,
-vanilla four-block/Y launch placement, constructor movement defaults, integer power `1`, direct-hit
-damage `6.0F`, `mobGriefing`/`ExplosionInteraction.MOB` impact behavior, entity-add failure, and absence
-of eager chunk loading or instant-ray/direct fallback.
+1. Input callbacks inspect only the acting player and current ridden ghast, perform admission/transition,
+   and make zero `onlinePlayers()` calls. HUD fan-out waits for the normal tick.
+2. The tick obtains exactly one `Controls.InventorySnapshot` per active pilot and shares it with held
+   admission and HUD; no second routine inventory scan exists.
+3. Pilot action-bar priority is exact: missing -> singular/plural inventory-only -> heat/status. Missing
+   wins over another token's inventory-only state. Control warnings are pilot-only and do not wait behind
+   particle/boss-bar round-robin work.
+4. Group riders by ghast. A ridden ghast without a controlling pilot has every rider HUD removed that
+   tick; passengers never advance abilities.
+5. Make warning-particle construction require a loaded server ghast/`ServerLevel`; remove the impossible
+   cast failure instead of broadly catching it.
+6. Recover only a named invalid persisted-rider-state result around that player: log once, remove owned
+   controls, reset `RiderState`, and remove that HUD. Unexpected runtime/world/ability failures remain loud.
+7. Remove unreachable `ControlIntent.NONE`, fake ignored intent, unused HUD fan-out/counter helpers, and
+   tests that assert helper counts instead of observable behavior.
 
-**RED/GREEN:** each admission/projectile assertion fails then passes. Prove the vanilla constructor sets
-the Happy Ghast owner and that `Abilities` neither substitutes a rider cause nor intercepts impact.
-Run focused/full tests, clean build, mutation accounting, and alternate-fire/protection-adapter/custom-
-projectile searches. Commit
-`feat(abilities): admit and fire projectiles` and push. Remains non-deployable.
+**Commands:**
 
-### Slice 9 — Cry and rejection feedback
+```bash
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.HappyArtilleryIntegrationTest
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.HudTest
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.ControlsTest
+./gradlew --no-daemon --no-parallel clean build
+```
 
-Implement per-ghast cry admission/effect and `Feedback`, with all feedback risks grouped in
-`AbilitiesTest`. Cover pilot/water/disabled/cooldown gates, saved-game-time `cryReadyTick`,
-accepted-sound commit only, no mechanical side effect, visible `IN_WATER` mapping, and silent
-`ON_COOLDOWN`/`NOT_PILOT` authorization outcomes.
+**Commit:** `fix(integration): bound controls and rider HUD work`
 
-**RED/GREEN:** each gate, deadline, accepted effect, and feedback mapping fails then passes through
-automated seams. Run focused/full tests, clean build, sound/attachment mutation accounting,
-and searches for a second feedback or cry owner. Commit `feat(abilities): add cry and feedback` and push.
-Remains non-deployable.
+**Gate:** callbacks are actor-local; tick work is one online-player pass plus one bounded snapshot per
+active pilot; passengers receive heat/status only; pilotless riders retain no frozen HUD.
 
-### Slice 10 — Overheat, fuse, and rider-owned detonation
+## Phase 5 — Make ability outcomes truthful and launch clear of riders
 
-Implement only overheat crossing, durable pending fuse, and detonation effects in `Abilities`. Cover the
-single limit-comparison result, pending-shot lockout, saved-game-time `detonateAtTick` across unload and
-restart, persisted detonating-rider identity, one best-effort configured effect pass, truthful consumed
-success/failure outcomes, configured counts/geometry, conditional removal when
-`killsGhast=true`, and retained-ghast heat/pending reset when `killsGhast=false`. `Abilities` must be the
-only scheduling owner: every accepted zero or positive fuse submits its persisted pair to `FuseQueue`.
-An already-due submission executes its exact owned task through the same private routine as `runDue` and
-returns the exact detonation outcome; a ghast-load entrypoint in the same owner re-establishes
-an overdue or future task from the attachment; work is keyed by persisted ghast UUID so reload objects
-replace active or rider-deferred references; and execution re-reads the current deadline before acting.
-Dismount leaves the task live. Unload makes execution a no-op while retaining pending state, with entity
-load as its bounded wake-up. An unavailable persisted rider moves the same task to the queue's bounded
-rider index; the player-availability callback reactivates it once. Resolve riders by UUID through the
-server player list. After loaded/due/rider admission, required attachment replacement consumes the pair
-before every world effect and fails loudly before effects if it throws. Any execution exception restores the
-exact task as the queue's one active owner before propagation. A later due run retries a still-pending pair,
-or re-reads an already-consumed empty pair and cleans the task as ignored without replaying effects. Do not
-add a player-tick fuse check,
-parallel poller, loaded-entity scan, or second queue.
+**Owners/files:** `Abilities.java`, `Feedback.java`, `HappyArtillery.java`, `AbilitiesTest.java`,
+`HappyArtilleryIntegrationTest.java`, and `FEATURES.md` for the settled launch and truthful-outcome contract.
 
-**RED/GREEN:** every transition, scheduling, reload wake-up, stale-task, rider-resolution, and effect assertion
-fails then passes. Simulate dismount, unload before deadline, load before/after deadline, duplicate load
-callbacks, and restart reconstruction; each pending fuse must have one effective detonation and bounded
-queued work. Run focused/full tests, clean build, complete effect-mutation accounting, and
-alternate-effect/scheduler searches.
-Commit `feat(abilities): integrate overheat detonation` and push. Remains non-deployable.
+RED/GREEN slices:
 
-### Slice 11 — Read-only pilot and passenger HUD
+1. Make infallible cry and explosion adapters `void`; remove `CryRejection.EFFECT_FAILED` and rejected-
+   attempt accounting for operations whose APIs expose no rejection. Retain truthful failures for
+   `addFreshEntity`, `setBlockAndUpdate`, and ghast removal.
+2. Present water blocking directly through `Feedback.presentWaterBlocked(player)` from fire and cry;
+   never convert one ability's enum into another.
+3. Compute one launch origin beyond the union of ghast/passenger collision bounds along normalized pilot
+   aim, expanding those bounds by the spawned fireball's collision extents plus clearance. Test up, down,
+   horizontal, diagonal, and top/bottom riders; assert the spawned fireball AABB is disjoint from every
+   ghast/passenger AABB and retain an observed no-immediate-self-hit runtime gate.
+4. Preserve vanilla `LargeFireball`, ridden Happy Ghast ownership, configured integer power, one entity-
+   add attempt, success-only event 1016, movement, impact, `mobGriefing`, and persistence. Keep
+   `FEATURES.md` aligned with the intentional collision-clear departure from fixed vanilla placement.
+5. Collapse redundant fire/cry overload ladders and test-only queue counters while preserving one
+   Minecraft adapter and one explicit-access core per behavior.
 
-Implement `Hud` with boss bars, four-tick action-bar throttling, dirty checks, warning particles, Nether
-priority, and bounded handle cleanup. Update pilots and passengers from one post-transition snapshot;
-passengers cannot advance or alter it.
+**Commands:**
 
-**RED:** tests fail for creation/removal counts, no remove-add pair, changed-value updates, colors,
-warning threshold, heat-status text, passenger visibility, and teardown. Include a mutation guard proving
-HUD cannot change state or classify again. **GREEN:** focused/full tests, clean build, and deterministic
-packet-send-count assertions showing the configured throttle cannot exceed single digits per
-rider/second. Real packet capture waits for Slice 13. Commit `feat(hud): show artillery status` and push.
-Remains non-deployable.
+```bash
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.AbilitiesTest
+./gradlew --no-daemon --no-parallel test --tests xyz.pyrehaven.happyartillery.HappyArtilleryIntegrationTest
+./gradlew --no-daemon --no-parallel clean build
+```
 
-### Slice 12 — Wire the complete driver while guarded
+**Commit:** `fix(abilities): report real outcomes and clear riders`
 
-Implement the final `HappyArtillery` owner graph and integration tests behind the deliberate startup
-guard. The designed runtime order is: read saved Overworld game time once; reconcile all players; process
-each ridden ghast once through its pilot using one biome context; then render pilot/passenger HUD from the
-result snapshot. Invoke each callback and attachment owner's registration entry exactly
-once; register the mixin path, death hook, ghast-load callback, player-availability callback, and
-server-stop cleanup exactly once. The load and availability callbacks delegate pending-fuse wake-up to
-`Abilities`; the player driver never polls deferred fuses.
+**Gate:** every failure outcome has an observable production source; every spawned fireball AABB is
+disjoint from all ridden collision bounds for the tested aim/rider cases; and runtime observation shows
+no immediate self-hit.
 
-**RED:** integration tests fail on missing registrations/order. **GREEN:** focused/full tests, clean build,
-registration enumeration, durable clock-context proof, and a no-rider harness proving exactly one bounded
-attachment/ride-status check per online player, no inventory scan unless restoration is required, and no
-world/entity sweep. Profile and report that bounded baseline rather than claiming an empty online-player
-loop. Also prove restart does not reconstruct or duplicate in-flight fireballs: vanilla entity save/load
-is the sole persistence path. Commit `feat(integration): wire guarded artillery` and push. The artifact
-must still fail loudly and remain undeployable.
+## Phase 6 — Finish subtractive seam cleanup
 
-### Slice 13 — Activate and prove the complete candidate
+**Owners/files:** existing `Controls`, `Abilities`, `Hud`, and `HappyArtillery` owners plus tests that
+call removed helpers. No new production file is allowed without a prior architecture-groundwork commit.
 
-Prerequisites: Slices 1-12 are pushed GREEN and independent architecture/behavior reviews find no hidden
-second owner. Integrated Java/Bedrock, packet, restart, and gameplay evidence is intentionally
-not a prerequisite because guarded bytes were not runnable.
+1. Enumerate production methods with no production callers and every overload ladder.
+2. Keep one Minecraft-facing adapter and one explicit settings/access core for use callbacks and held
+   sampling; delete forwarding combinations.
+3. Prefer observable state/effect assertions over helper/count tests. Retain bytecode checks only for real
+   Fabric/Minecraft boundaries that pure tests cannot exercise.
+4. Re-measure after deleting copied click logic. Do not split an owner merely for line count.
+5. Remove dead interfaces, enum members, imports, comments, and test-only helpers made obsolete by
+   Phases 2-5. Run the complete suite after each removal cluster.
 
-**RED:** an integration assertion requires normal startup while the deliberate guard still fails.
-**GREEN:** remove only the guard/non-deployable naming, register the already-complete graph, and retain
-truthful 26.2-only metadata. Add the op-only `/ha reload`; do not add `/happytest`.
+**Commands:**
 
-On the runnable candidate bytes run every focused test, full JUnit suite, `./gradlew clean build`,
-exact-tree/residue and mutation accounting, runtime/sources jar inspection, embedded metadata validation,
-secret scan, and an isolated server startup. Obtain a fresh independent architecture/behavior review of
-those exact machine-green bytes. Resolve every blocker and rerun invalidated gates and review; then commit
-`feat: activate Happy Artillery 1.2.0`, push it to the existing non-`main` branch, and verify the local,
-tracking, and remote head identities. This reviewed, committed, and pushed head is the first activation
-candidate. No uncommitted activation candidate may be deployed.
+```bash
+./gradlew --no-daemon --no-parallel test
+./gradlew --no-daemon --no-parallel clean build
+git diff --check
+```
 
-Build the runtime jar from that exact committed head, deploy it through `pyretest`, record the commit and
-source-tree identity, match built/deployed checksums, and verify startup logs before manual testing. The
-first integrated runtime gate is attachment persistence: set heat, cry cooldown, pending fuse, and indexed
-stash state using controlled test support; unload/reload and hard-stop/restart; prove saved
-Overworld-game-time continuity, no stopped-time advancement, one-time heat catch-up without double cooling,
-exact deadlines, and byte-exact original-slot restoration. Failure stops all later tests. On that same
-exact head, run the full Java + Bedrock abuse list, normal fire, every biome/water curve, per-ghast cry,
-instant/fused overheat including rider dismount and entity unload/reload, `mobGriefing` on/off, real
-`LargeFireball` identity/ownership plus one in-flight save/restart/resume, representative mod
-compatibility, both overheat `breaksBlocks` settings, HUD packet capture, cleanup, and bounded idle-work
-profiler tests. In that session measure the preferred hold
-path at a steady configured four shots/second on both clients without packet-rate dependence.
+**Commit:** `refactor(controls): remove obsolete test seams`
 
-If the preferred hold path fails, add no heuristics. Select click-to-fire at `0.5` seconds; update
-`FEATURES.md`, config/heat/controls code and tests; and double every heat-per-shot default (`1.40`, `2.50`,
-`4.00`, `6.00`, `1.40`). If any gameplay test finds another defect, repair the applicable docs, code,
-and tests instead. In either case, rerun every affected focused test plus the full machine gate and fresh
-independent review, commit and push a replacement candidate, verify its exact remote head, then build,
-deploy, and repeat the required runtime tests on that new exact committed head. Never redeploy dirty or
-uncommitted candidate bytes.
+**Gate:** every retained abstraction has a production reason, no copied vanilla state machine or second
+owner remains, and the implementation still matches the thirteen-file tree.
 
-The final accepted activation candidate is the one exact reviewed, committed, and pushed head whose
-checksum-matched jar passed the complete applicable runtime gate. Record preferred-path success in the
-acceptance evidence without editing that head; fallback selection is already part of its replacement
-candidate contract. A startup pass alone is not gameplay acceptance.
+## Phase 7 — Repair public docs, changelog, and license
 
-### Slice 14 — Ship-ready documentation only
+**Files:** `README.md`, `CHANGELOG.md`, `LICENSE`, optionally `fabric.mod.json` wording; verify
+`gradle.properties`. Load `pyrehaven-mod-release-writing` first.
 
-After gameplay acceptance, update README and CHANGELOG to say Minecraft 26.2 only, describe the chosen
-hold path, controls, presets, `/ha reload`, Geyser support, and observed behavior. Verify README claims
-against the exact jar and tests. This slice opens no release, Modrinth, production, or `main` action;
-those remain separate Elijah-gated release work.
+1. Remove ammo fiction and describe two-free-slot allocation, movable hand-held controls, outbound
+   consumption, missing-control remount behavior, hold-to-fire, and cry accurately.
+2. State Minecraft 26.2 only, Fabric Loader >=0.19.3, Fabric API, Java 21+, server installation, and
+   Java/Bedrock-through-Geyser intent.
+3. Document `/ha reload`, strict unknown/removed-key failure, and only the final 36-key schema.
+4. Add a player/server-owner-facing `1.2.0` changelog against `v1.1.2.2`, not intermediate defects.
+5. Replace `LICENSE` with complete canonical MIT text only after confirming the factual copyright line.
+6. Build and inspect runtime metadata and packaged license; add a dependency-free docs/artifact agreement
+   check if it fits existing verification style.
 
-## Ownership and deletion audit
+**Commands:**
 
-Before activation, parse `ARCHITECTURE.md` and compare declared paths both directions with tracked and
-untracked production/resource/test/build-support paths. Every path and owner must appear once.
+```bash
+./gradlew --no-daemon --no-parallel clean build
+unzip -p build/libs/happy-artillery-1.2.0.jar fabric.mod.json
+unzip -p build/libs/happy-artillery-1.2.0.jar LICENSE_happy-artillery
+git diff --check
+```
 
-Production/resources must contain no released `happy.artillery` package, lore markers, static UUID maps,
-`System.currentTimeMillis`, inventory/world/entity sweep, delayed sync queue, injected player extension,
-old accessor/mixin, `/happytest`, eager chunk load, instant-ray fallback, duplicate classifier, duplicate
-callback effect, broad/sampled catch, routine per-tick logging, or silent placeholder. Enumerate every
-inventory write, discard, projectile spawn, explosion, fire placement, sound, particle, boss/action-bar
-send, attachment mutation, callback registration, and player/world/entity iteration; each must resolve to
-the single owner in the architecture tree.
+**Commit:** `docs: describe Happy Artillery 1.2.0`
+
+**Gate:** README, FEATURES, changelog, schema, Gradle metadata, embedded metadata, and license agree.
+This phase opens no release, Modrinth, production, or `main` action.
+
+## Phase 8 — Final verification, exact-head deployment, and manual acceptance
+
+### Machine/review gate
+
+1. Confirm branch/ownership and reset or prove the disposable `mod:happy-artillery` world has no active
+   old unreleased stash codec before deploying the new `RiderState`.
+2. Run all focused suites, full tests, canonical clean build, `git diff --check`, staged checks, secret/
+   generated-artifact scans, and parse JUnit XML for exact test/failure/error/skip counts.
+3. Compare actual production/resource/test files bidirectionally with `ARCHITECTURE.md`: exactly thirteen
+   production Java files and eight test Java files, with only `PlayerDropMixin` and
+   `ExternalContainerMixin` as mixins.
+4. Search production/docs for stash/index/slot-lock/predictive-click residue, old schema keys, ammo/version
+   fiction, fire-to-cry conversion, wall clock, static gameplay state, world/entity/container scans, and
+   broad catches. Negative tests may name forbidden terms only when clearly asserting rejection.
+5. Obtain fresh independent review on exact staged bytes. It must answer whether any control can escape
+   consumption, ordinary item can be overwritten/deleted, callback inspects another player, failure outcome
+   is impossible, or old owner remains. Record the diff-hashed receipt and let hooks run normally.
+6. Commit and push the final non-`main` checkpoint; verify local, tracking, and fresh remote refs match.
+   Build the runtime jar from that exact commit only.
+
+### Exact-head runtime gate
+
+1. Deploy only the exact committed runtime jar through `pyretest`; compare source/artifact/deployed SHA-256.
+2. Verify one Happy Artillery 1.2.0 jar loads, startup reaches `Done`, registry/config logs are clean, and
+   no unrelated active profile was disturbed.
+3. Run this numbered control acceptance on the checksum-matched Java and Bedrock-through-Geyser candidate:
+   1. two free hotbar slots allocate Fire then Cry into the first two candidates;
+   2. one hotbar plus one main-inventory free slot allocates hotbar first, then main;
+   3. zero/one total free candidate changes no inventory byte and sends one refusal message per ride;
+   4. move controls through every hotbar slot, main inventory, and offhand; each works only when held;
+   5. one/both in main inventory shows correct singular/plural inventory-only HUD;
+   6. discard one while the other is in inventory; missing-control warning wins;
+   7. direct Q, cursor/menu `THROW`, creative drop, and ordinary/offhand/equipment death drops leave no
+      usable marked `ItemEntity`, while ordinary drops remain;
+   8. ordinary chest placement, `QUICK_MOVE` empty and merge, number/offhand swap, and `QUICK_CRAFT`
+      consume the destination control without deleting ordinary items; `PICKUP_ALL` is tested as inbound
+      slot-to-cursor collection, not mislabeled as chest insertion;
+   9. losing a control does not regenerate it until dismount/remount;
+   10. dismount/remount with ordinary replacements in all former slots overwrites nothing and allocates
+       two fresh controls only into current empty candidates;
+   11. full inventory on remount refuses cleanly; player death drops ordinary inventory but no controls;
+   12. logout/reconnect, hard stop/restart, dimension transition, and ghast death leave no duplicate or
+       stranded matching controls;
+   13. another player's/prior-ride control never authorizes; `allowPlainItems=true` permits admission only
+       and never deletes/counts a plain item as a generated control;
+   14. passengers receive heat/status only, and all passenger HUD disappears when the pilot leaves;
+   15. straight-up/down/horizontal/diagonal fire produces a fireball AABB disjoint from every ghast/
+       passenger AABB and does not immediately self-hit;
+   16. modded control item ids resolve after initializer order; missing ids fail at the lifecycle gate;
+   17. typoed/removed config keys fail while active config and file bytes remain unchanged;
+   18. Java and Bedrock hold-to-fire sustain the accepted configured rate without packet heuristics.
+4. On the same exact head, verify the preserved contract: biome/water heat curves, normal fire and real
+   `LargeFireball` identity/ownership/`mobGriefing`, cry cooldown, instant/fused overheat through dismount
+   and unload/reload, both `breaksBlocks` settings, heat/cooldown/fuse restart continuity with stopped-time
+   pause and one-time catch-up, in-flight fireball persistence, HUD packet bounds, cleanup, bounded idle
+   work, log noise, and README/jar agreement.
+5. If any defect appears, repair docs/code/tests in the owning earlier phase, repeat RED/GREEN, machine
+   gate, fresh review, commit/push/ref verification, rebuild, redeploy, and all affected runtime tests.
+   Never deploy an uncommitted replacement.
+6. If the preferred Java/Bedrock hold path fails, add no packet/click-rate heuristic. Select click-to-fire
+   at `0.5` seconds, double every heat-per-shot default (`1.40`, `2.50`, `4.00`, `6.00`, `1.40`) so
+   time to detonation remains unchanged, update FEATURES/config/heat/controls/tests, and produce a newly
+   reviewed, committed, pushed, checksum-matched replacement candidate before repeating runtime tests.
+
+**Release gate:** only one exact reviewed, committed, pushed head whose checksum-matched jar passes the
+complete machine and runtime gates is release-ready. Then reconcile current `origin/main` into the
+non-main branch, rerun all invalidated checks and exact-head deployment, open the release PR to `main`,
+verify final-head CI/review/mergeability, and stop for Elijah. Merging does not deploy production.
+Official GitHub release and Modrinth publication occur only after Elijah merges and explicitly says
+`publish it`; production mutation remains a separate approved control request.
+
+## Definition of done
+
+- No ordinary ItemStack can be overwritten or deleted by mount, dismount, death, reload, or recovery.
+- Two controls allocate atomically only when two valid free candidates exist.
+- Controls move normally inside the owner inventory, work only while held, and carry type+owner+ride identity.
+- Every proven outbound route consumes controls at the real mutation boundary without scans or click prediction.
+- Missing controls do not regenerate during the same ride; cleanup is scoped and bounded.
+- HUD priority, passenger behavior, callback locality, and one-snapshot tick ownership match `FEATURES.md`.
+- Config is strict and lifecycle-safe; unrelated heat/fire/cry/fuse/HUD/lifecycle behavior remains GREEN.
+- Exactly thirteen production Java files and eight tests match the proposed tree.
+- Focused/full tests, canonical build, residue/tree/security checks, fresh review, exact-head deployment,
+  and numbered acceptance pass with exact counts/checksums recorded.
+- Work remains on a non-`main` branch. Release, Modrinth, `main`, and production gates remain intact.
