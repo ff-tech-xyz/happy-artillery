@@ -60,6 +60,16 @@ public final class Abilities {
             double baseTemperature) {
         Config config = Config.current();
         BiomeClass biomeClass = BiomeClass.classify(dimension, baseTemperature, config);
+        return fire(pilot, ghast, state, now, config, biomeClass);
+    }
+
+    static FireOutcome fire(
+            ServerPlayer pilot,
+            HappyGhast ghast,
+            GhastState state,
+            long now,
+            Config config,
+            BiomeClass biomeClass) {
         return fire(pilot, ghast, state, now, config, biomeClass,
                 ServerPlayerFireAccess.INSTANCE, FUSES, ServerPlayerDetonationAccess.INSTANCE);
     }

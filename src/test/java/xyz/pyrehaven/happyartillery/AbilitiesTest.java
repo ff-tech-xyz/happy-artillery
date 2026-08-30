@@ -1025,6 +1025,42 @@ final class AbilitiesTest {
     }
 
     @Test
+    void classifiedProductionFireUsesExistingQueueBackedOverheatPathWithoutReclassification()
+            throws Exception {
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode classified = exactMethod(abilities, "fire",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
+                        + "Lxyz/pyrehaven/happyartillery/GhastState;J"
+                        + "Lxyz/pyrehaven/happyartillery/Config;"
+                        + "Lxyz/pyrehaven/happyartillery/BiomeClass;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;");
+
+        assertEquals(0, callsTo(classified,
+                "xyz/pyrehaven/happyartillery/BiomeClass", "classify").size());
+        assertEquals(List.of(
+                        "ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5", "ALOAD 6",
+                        "GETSTATIC Abilities$ServerPlayerFireAccess.INSTANCE "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerFireAccess;",
+                        "GETSTATIC Abilities.FUSES "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;",
+                        "GETSTATIC Abilities$ServerPlayerDetonationAccess.INSTANCE "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerDetonationAccess;",
+                        "INVOKESTATIC Abilities.fire "
+                                + "(Ljava/lang/Object;Ljava/lang/Object;"
+                                + "Lxyz/pyrehaven/happyartillery/GhastState;J"
+                                + "Lxyz/pyrehaven/happyartillery/Config;"
+                                + "Lxyz/pyrehaven/happyartillery/BiomeClass;"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FireAccess;"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;)"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;",
+                        "ARETURN"),
+                instructionShape(classified));
+    }
+
+    @Test
     void realFireOverloadReadsExactlyOneConfigSnapshotAndGenericSeamReadsNone() throws Exception {
         ClassNode abilities = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities");
@@ -1447,6 +1483,7 @@ final class AbilitiesTest {
     private static String opcodeName(int opcode) {
         return switch (opcode) {
             case Opcodes.ALOAD -> "ALOAD";
+            case Opcodes.LLOAD -> "LLOAD";
             case Opcodes.ASTORE -> "ASTORE";
             case Opcodes.ILOAD -> "ILOAD";
             case Opcodes.FCONST_1 -> "FCONST_1";
@@ -1455,6 +1492,8 @@ final class AbilitiesTest {
             case Opcodes.DUP -> "DUP";
             case Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
             case Opcodes.INVOKESPECIAL -> "INVOKESPECIAL";
+            case Opcodes.INVOKESTATIC -> "INVOKESTATIC";
+            case Opcodes.GETSTATIC -> "GETSTATIC";
             case Opcodes.GETFIELD -> "GETFIELD";
             case Opcodes.LDC -> "LDC";
             case Opcodes.DMUL -> "DMUL";
@@ -1465,6 +1504,7 @@ final class AbilitiesTest {
             case Opcodes.ACONST_NULL -> "ACONST_NULL";
             case Opcodes.SIPUSH -> "SIPUSH";
             case Opcodes.IRETURN -> "IRETURN";
+            case Opcodes.ARETURN -> "ARETURN";
             default -> "OPCODE_" + opcode;
         };
     }
