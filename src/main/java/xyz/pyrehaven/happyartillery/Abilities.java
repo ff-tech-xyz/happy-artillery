@@ -35,8 +35,18 @@ public final class Abilities {
     }
 
     static void onGhastLoad(HappyGhast ghast, long now) {
-        FUSES.onGhastLoad(ghast, ServerPlayerDetonationAccess.INSTANCE.state(ghast), now,
-                ServerPlayerDetonationAccess.INSTANCE);
+        ServerPlayerDetonationAccess access = ServerPlayerDetonationAccess.INSTANCE;
+        onGhastLoad(ghast, access.attachedState(ghast), now, FUSES, access);
+    }
+
+    static <P, G> void onGhastLoad(
+            G ghast,
+            Optional<GhastState> state,
+            long now,
+            FuseQueue<P, G> fuses,
+            DetonationAccess<P, G> access) {
+        Objects.requireNonNull(state, "state").ifPresent(
+                attached -> fuses.onGhastLoad(ghast, attached, now, access));
     }
 
     static int onRiderAvailable(UUID riderId) {
@@ -49,6 +59,10 @@ public final class Abilities {
 
     static int runDueFuses(long now) {
         return FUSES.runDue(now, Config.current(), ServerPlayerDetonationAccess.INSTANCE);
+    }
+
+    static void onServerStop() {
+        FUSES.clear();
     }
 
     static FireOutcome fire(
@@ -401,6 +415,12 @@ public final class Abilities {
             return scheduled.size();
         }
 
+        void clear() {
+            tasks.clear();
+            scheduled.clear();
+            riderDeferred.clear();
+        }
+
         private void removeDeferred(FuseTask<G> task) {
             Set<FuseTask<G>> deferred = riderDeferred.get(task.riderId());
             if (deferred == null) {
@@ -645,6 +665,11 @@ public final class Abilities {
         public ServerPlayer resolveRider(HappyGhast ghast, UUID riderId) {
             ServerLevel level = (ServerLevel) ghast.level();
             return level.getServer().getPlayerList().getPlayer(riderId);
+        }
+
+        Optional<GhastState> attachedState(HappyGhast ghast) {
+            AttachmentTarget target = (AttachmentTarget) (Object) ghast;
+            return Optional.ofNullable(target.getAttached(GhastState.register()));
         }
 
         @Override

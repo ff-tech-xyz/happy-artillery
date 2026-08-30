@@ -525,7 +525,19 @@ public final class Controls {
             InteractionHand hand,
             RiderState state,
             long gameTick) {
-        return handleUseItem(player, hand, state, gameTick, ServerPlayerControlAccess.INSTANCE);
+        Config.Controls settings = Config.current().controls();
+        return handleUseItem(
+                player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static Admission handleUseItem(
+            ServerPlayer player,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings) {
+        return handleUseItem(
+                player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
     }
 
     static <P, G> Admission handleUseItem(
@@ -534,9 +546,19 @@ public final class Controls {
             RiderState state,
             long gameTick,
             ControlAccess<P, G> access) {
+        return handleUseItem(player, hand, state, gameTick, Config.current().controls(), access);
+    }
+
+    static <P, G> Admission handleUseItem(
+            P player,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings,
+            ControlAccess<P, G> access) {
         Objects.requireNonNull(hand, "hand");
         return admit(player, CallbackSource.CALLBACK, hand, access.itemInHand(player, hand),
-                Optional.empty(), state, gameTick, access);
+                Optional.empty(), state, gameTick, settings, access);
     }
 
     static Admission handleUseEntity(
@@ -545,8 +567,20 @@ public final class Controls {
             InteractionHand hand,
             RiderState state,
             long gameTick) {
+        Config.Controls settings = Config.current().controls();
         return handleUseEntity(
-                player, target, hand, state, gameTick, ServerPlayerControlAccess.INSTANCE);
+                player, target, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static Admission handleUseEntity(
+            ServerPlayer player,
+            Entity target,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings) {
+        return handleUseEntity(
+                player, target, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
     }
 
     static <P, G> Admission handleUseEntity(
@@ -556,14 +590,35 @@ public final class Controls {
             RiderState state,
             long gameTick,
             ControlAccess<P, G> access) {
+        return handleUseEntity(
+                player, target, hand, state, gameTick, Config.current().controls(), access);
+    }
+
+    static <P, G> Admission handleUseEntity(
+            P player,
+            Object target,
+            InteractionHand hand,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings,
+            ControlAccess<P, G> access) {
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(hand, "hand");
         return admit(player, CallbackSource.CALLBACK, hand, access.itemInHand(player, hand),
-                Optional.of(target), state, gameTick, access);
+                Optional.of(target), state, gameTick, settings, access);
     }
 
     static Admission sampleHeld(ServerPlayer player, RiderState state, long gameTick) {
-        return sampleHeld(player, state, gameTick, ServerPlayerControlAccess.INSTANCE);
+        Config.Controls settings = Config.current().controls();
+        return sampleHeld(player, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static Admission sampleHeld(
+            ServerPlayer player,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings) {
+        return sampleHeld(player, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
     }
 
     static <P, G> Admission sampleHeld(
@@ -571,10 +626,19 @@ public final class Controls {
             RiderState state,
             long gameTick,
             ControlAccess<P, G> access) {
+        return sampleHeld(player, state, gameTick, Config.current().controls(), access);
+    }
+
+    static <P, G> Admission sampleHeld(
+            P player,
+            RiderState state,
+            long gameTick,
+            Config.Controls settings,
+            ControlAccess<P, G> access) {
         ObservedUse observed = access.observedUse(player);
         ItemStack input = observed.using() ? observed.stack() : ItemStack.EMPTY;
         return admit(player, CallbackSource.SERVER_TICK, observed.hand(), input,
-                Optional.empty(), state, gameTick, access);
+                Optional.empty(), state, gameTick, settings, access);
     }
 
     private static <P, G> Admission admit(
@@ -585,6 +649,7 @@ public final class Controls {
             Optional<Object> clickedTarget,
             RiderState state,
             long gameTick,
+            Config.Controls settings,
             ControlAccess<P, G> access) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(source, "source");
@@ -592,6 +657,7 @@ public final class Controls {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(clickedTarget, "clickedTarget");
         Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(settings, "settings");
         Objects.requireNonNull(access, "access");
 
         Optional<G> ridden = access.riddenHappyGhast(player);
@@ -600,7 +666,7 @@ public final class Controls {
                 || !state.riddenGhastId().equals(Optional.of(access.ghastId(ridden.get())))) {
             return new Ignored(state);
         }
-        ControlIntent intent = classify(player, source, input, state, access);
+        ControlIntent intent = classify(player, source, input, state, settings, access);
         if (intent == ControlIntent.NONE || state.lastHandledTick() == gameTick) {
             return new Ignored(state);
         }
@@ -614,8 +680,9 @@ public final class Controls {
             CallbackSource source,
             ItemStack input,
             RiderState state,
+            Config.Controls settings,
             ControlAccess<P, G> access) {
-        Config.Controls settings = Config.current().controls();
+        Objects.requireNonNull(settings, "settings");
         boolean markedFire = isFireControl(input);
         boolean markedCry = isCryControl(input);
         boolean plainFire = settings.allowPlainItems() && isPlainConfiguredItem(input, settings.fireItem());

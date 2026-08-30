@@ -1293,6 +1293,172 @@ final class ControlsTest {
     }
 
     @Test
+    void explicitAdmissionSettingsOverrideDifferentGlobalForHoldClickAndCry(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        UUID ghastId = UUID.fromString("4ee63053-0f5f-41c2-b65f-b70a29535530");
+        TestGhast ghast = new TestGhast(ghastId);
+        TestRider pilot = new TestRider();
+        ghast.firstPassenger = pilot;
+        ghast.controller = pilot;
+        pilot.vehicle = ghast;
+        pilot.slots[4] = Controls.fireControl();
+        pilot.slots[5] = Controls.cryControl();
+        RiderState active = activeState(ghastId, 100L);
+        Config.Controls supplied = new Config.Controls(
+                4, 5, "minecraft:fire_charge", "minecraft:ghast_tear", false, true, true);
+        try {
+            Files.writeString(file, """
+                    {"controls":{"holdToFire":true,"allowPlainItems":false}}
+                    """);
+            Config.reload(file);
+            assertTrue(Config.current().controls().holdToFire());
+            assertFalse(Config.current().controls().allowPlainItems());
+
+            java.lang.reflect.Method sampleHeld = explicitAdmissionMethod("sampleHeld",
+                    Object.class, RiderState.class, long.class, Config.Controls.class,
+                    Controls.ControlAccess.class);
+            java.lang.reflect.Method handleUseItem = explicitAdmissionMethod("handleUseItem",
+                    Object.class, InteractionHand.class, RiderState.class, long.class,
+                    Config.Controls.class, Controls.ControlAccess.class);
+            java.lang.reflect.Method handleUseEntity = explicitAdmissionMethod("handleUseEntity",
+                    Object.class, Object.class, InteractionHand.class, RiderState.class, long.class,
+                    Config.Controls.class, Controls.ControlAccess.class);
+
+            pilot.observedUse = observe(true, InteractionHand.MAIN_HAND, Controls.fireControl());
+            Controls.Admission held = (Controls.Admission) sampleHeld.invoke(
+                    null, pilot, active, 101L, supplied, TestControlAccess.INSTANCE);
+            pilot.mainHand = Controls.fireControl();
+            Controls.Admission click = (Controls.Admission) handleUseItem.invoke(
+                    null, pilot, InteractionHand.MAIN_HAND, active, 101L, supplied,
+                    TestControlAccess.INSTANCE);
+            pilot.mainHand = new ItemStack(Items.GHAST_TEAR);
+            Controls.Admission cry = (Controls.Admission) handleUseEntity.invoke(
+                    null, pilot, ghast, InteractionHand.MAIN_HAND, active, 102L, supplied,
+                    TestControlAccess.INSTANCE);
+
+            assertEquals(Controls.ControlIntent.NONE, held.intent());
+            assertSame(active, held.state());
+            assertEquals(Controls.ControlIntent.FIRE, click.intent());
+            assertEquals(Controls.ControlIntent.CRY, cry.intent());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void explicitAdmissionPathContainsNoGlobalConfigReadWhileConveniencePathsReadOnce()
+            throws IOException {
+        ClassNode controls = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Controls");
+        String prefix = "xyz/pyrehaven/happyartillery/";
+        String itemExplicitDescriptor =
+                "(Ljava/lang/Object;Lnet/minecraft/world/InteractionHand;L" + prefix
+                        + "RiderState;JL" + prefix + "Config$Controls;L" + prefix
+                        + "Controls$ControlAccess;)L" + prefix + "Controls$Admission;";
+        String entityExplicitDescriptor =
+                "(Ljava/lang/Object;Ljava/lang/Object;Lnet/minecraft/world/InteractionHand;L"
+                        + prefix + "RiderState;JL" + prefix + "Config$Controls;L" + prefix
+                        + "Controls$ControlAccess;)L" + prefix + "Controls$Admission;";
+        String heldExplicitDescriptor =
+                "(Ljava/lang/Object;L" + prefix + "RiderState;JL" + prefix
+                        + "Config$Controls;L" + prefix + "Controls$ControlAccess;)L"
+                        + prefix + "Controls$Admission;";
+        List<MethodNode> explicit = List.of(
+                exactControlMethod(controls, "handleUseItem",
+                        itemExplicitDescriptor),
+                exactControlMethod(controls, "handleUseEntity",
+                        entityExplicitDescriptor),
+                exactControlMethod(controls, "sampleHeld",
+                        heldExplicitDescriptor),
+                exactControlMethod(controls, "admit",
+                        "(Ljava/lang/Object;L" + prefix
+                                + "Controls$CallbackSource;Lnet/minecraft/world/InteractionHand;"
+                                + "Lnet/minecraft/world/item/ItemStack;Ljava/util/Optional;L" + prefix
+                                + "RiderState;JL" + prefix + "Config$Controls;L" + prefix
+                                + "Controls$ControlAccess;)L" + prefix + "Controls$Admission;"),
+                exactControlMethod(controls, "classify",
+                        "(Ljava/lang/Object;L" + prefix
+                                + "Controls$CallbackSource;Lnet/minecraft/world/item/ItemStack;L"
+                                + prefix + "RiderState;L" + prefix + "Config$Controls;L" + prefix
+                                + "Controls$ControlAccess;)L" + prefix + "Controls$ControlIntent;"));
+        for (MethodNode method : explicit) {
+            assertEquals(0, configCurrentCalls(method), method.name + method.desc);
+        }
+
+        List<MethodNode> concreteExplicit = List.of(
+                exactControlMethod(controls, "handleUseItem",
+                        "(Lnet/minecraft/server/level/ServerPlayer;"
+                                + "Lnet/minecraft/world/InteractionHand;L" + prefix
+                                + "RiderState;JL" + prefix + "Config$Controls;)L" + prefix
+                                + "Controls$Admission;"),
+                exactControlMethod(controls, "handleUseEntity",
+                        "(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/entity/Entity;"
+                                + "Lnet/minecraft/world/InteractionHand;L" + prefix
+                                + "RiderState;JL" + prefix + "Config$Controls;)L" + prefix
+                                + "Controls$Admission;"),
+                exactControlMethod(controls, "sampleHeld",
+                        "(Lnet/minecraft/server/level/ServerPlayer;L" + prefix
+                                + "RiderState;JL" + prefix + "Config$Controls;)L" + prefix
+                                + "Controls$Admission;"));
+        assertExactConfigWrapper(concreteExplicit.get(0), false, 5,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5"),
+                "handleUseItem", itemExplicitDescriptor, true);
+        assertExactConfigWrapper(concreteExplicit.get(1), false, 6,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "ALOAD 3", "LLOAD 4", "ALOAD 6"),
+                "handleUseEntity", entityExplicitDescriptor, true);
+        assertExactConfigWrapper(concreteExplicit.get(2), false, 4,
+                List.of("ALOAD 0", "ALOAD 1", "LLOAD 2", "ALOAD 4"),
+                "sampleHeld", heldExplicitDescriptor, true);
+
+        List<MethodNode> convenience = List.of(
+                exactControlMethod(controls, "handleUseItem",
+                        "(Ljava/lang/Object;Lnet/minecraft/world/InteractionHand;L" + prefix
+                                + "RiderState;JL" + prefix + "Controls$ControlAccess;)L" + prefix
+                                + "Controls$Admission;"),
+                exactControlMethod(controls, "handleUseEntity",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Lnet/minecraft/world/InteractionHand;L"
+                                + prefix + "RiderState;JL" + prefix + "Controls$ControlAccess;)L"
+                                + prefix + "Controls$Admission;"),
+                exactControlMethod(controls, "sampleHeld",
+                        "(Ljava/lang/Object;L" + prefix + "RiderState;JL" + prefix
+                                + "Controls$ControlAccess;)L" + prefix + "Controls$Admission;"));
+        assertExactConfigWrapper(convenience.get(0), true, -1,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5"),
+                "handleUseItem", itemExplicitDescriptor, false);
+        assertExactConfigWrapper(convenience.get(1), true, -1,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "ALOAD 3", "LLOAD 4", "ALOAD 6"),
+                "handleUseEntity", entityExplicitDescriptor, false);
+        assertExactConfigWrapper(convenience.get(2), true, -1,
+                List.of("ALOAD 0", "ALOAD 1", "LLOAD 2", "ALOAD 4"),
+                "sampleHeld", heldExplicitDescriptor, false);
+
+        List<MethodNode> concreteConvenience = List.of(
+                exactControlMethod(controls, "handleUseItem",
+                        "(Lnet/minecraft/server/level/ServerPlayer;"
+                                + "Lnet/minecraft/world/InteractionHand;L" + prefix
+                                + "RiderState;J)L" + prefix + "Controls$Admission;"),
+                exactControlMethod(controls, "handleUseEntity",
+                        "(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/entity/Entity;"
+                                + "Lnet/minecraft/world/InteractionHand;L" + prefix
+                                + "RiderState;J)L" + prefix + "Controls$Admission;"),
+                exactControlMethod(controls, "sampleHeld",
+                        "(Lnet/minecraft/server/level/ServerPlayer;L" + prefix
+                                + "RiderState;J)L" + prefix + "Controls$Admission;"));
+        assertExactConfigWrapper(concreteConvenience.get(0), true, 5,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5"),
+                "handleUseItem", itemExplicitDescriptor, true);
+        assertExactConfigWrapper(concreteConvenience.get(1), true, 6,
+                List.of("ALOAD 0", "ALOAD 1", "ALOAD 2", "ALOAD 3", "LLOAD 4", "ALOAD 6"),
+                "handleUseEntity", entityExplicitDescriptor, true);
+        assertExactConfigWrapper(concreteConvenience.get(2), true, 4,
+                List.of("ALOAD 0", "ALOAD 1", "LLOAD 2", "ALOAD 4"),
+                "sampleHeld", heldExplicitDescriptor, true);
+    }
+
+    @Test
     void callbacksHandsHoldSamplingAndTickDedupShareOneAdmissionPath(@TempDir Path directory)
             throws Exception {
         Config original = Config.current();
@@ -1436,6 +1602,101 @@ final class ControlsTest {
         } finally {
             Files.writeString(file, new com.google.gson.Gson().toJson(original));
             Config.reload(file);
+        }
+    }
+
+    private static MethodNode exactControlMethod(
+            ClassNode owner, String name, String descriptor) {
+        List<MethodNode> matches = owner.methods.stream()
+                .filter(method -> method.name.equals(name) && method.desc.equals(descriptor))
+                .toList();
+        assertEquals(1, matches.size(), owner.name + "." + name + descriptor);
+        return matches.getFirst();
+    }
+
+    private static long configCurrentCalls(MethodNode method) {
+        return Stream.iterate(method.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.owner.equals("xyz/pyrehaven/happyartillery/Config")
+                        && call.name.equals("current") && call.desc.equals(
+                                "()Lxyz/pyrehaven/happyartillery/Config;"))
+                .count();
+    }
+
+    private static void assertExactConfigWrapper(
+            MethodNode method,
+            boolean capturesCurrent,
+            int settingsLocal,
+            List<String> argumentLoads,
+            String targetName,
+            String targetDescriptor,
+            boolean productionAccess) {
+        List<String> expected = new ArrayList<>();
+        if (capturesCurrent && settingsLocal >= 0) {
+            expected.add("INVOKESTATIC xyz/pyrehaven/happyartillery/Config.current "
+                    + "()Lxyz/pyrehaven/happyartillery/Config;");
+            expected.add("INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config.controls "
+                    + "()Lxyz/pyrehaven/happyartillery/Config$Controls;");
+            expected.add("ASTORE " + settingsLocal);
+        }
+        expected.addAll(argumentLoads.subList(0, argumentLoads.size() - (capturesCurrent && settingsLocal < 0 ? 1 : 0)));
+        if (capturesCurrent && settingsLocal < 0) {
+            expected.add("INVOKESTATIC xyz/pyrehaven/happyartillery/Config.current "
+                    + "()Lxyz/pyrehaven/happyartillery/Config;");
+            expected.add("INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config.controls "
+                    + "()Lxyz/pyrehaven/happyartillery/Config$Controls;");
+            expected.add(argumentLoads.get(argumentLoads.size() - 1));
+        }
+        if (productionAccess) {
+            expected.add("GETSTATIC xyz/pyrehaven/happyartillery/"
+                    + "Controls$ServerPlayerControlAccess.INSTANCE "
+                    + "Lxyz/pyrehaven/happyartillery/Controls$ServerPlayerControlAccess;");
+        }
+        expected.add("INVOKESTATIC xyz/pyrehaven/happyartillery/Controls."
+                + targetName + " " + targetDescriptor);
+        expected.add("ARETURN");
+        assertEquals(expected, controlInstructionShape(method), method.name + method.desc);
+    }
+
+    private static List<String> controlInstructionShape(MethodNode method) {
+        return Stream.iterate(method.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(instruction -> instruction.getOpcode() >= 0)
+                .map(ControlsTest::controlInstruction)
+                .toList();
+    }
+
+    private static String controlInstruction(org.objectweb.asm.tree.AbstractInsnNode instruction) {
+        String opcode = switch (instruction.getOpcode()) {
+            case org.objectweb.asm.Opcodes.ALOAD -> "ALOAD";
+            case org.objectweb.asm.Opcodes.LLOAD -> "LLOAD";
+            case org.objectweb.asm.Opcodes.ASTORE -> "ASTORE";
+            case org.objectweb.asm.Opcodes.GETSTATIC -> "GETSTATIC";
+            case org.objectweb.asm.Opcodes.INVOKESTATIC -> "INVOKESTATIC";
+            case org.objectweb.asm.Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
+            case org.objectweb.asm.Opcodes.ARETURN -> "ARETURN";
+            default -> "OPCODE_" + instruction.getOpcode();
+        };
+        if (instruction instanceof org.objectweb.asm.tree.VarInsnNode variable) {
+            return opcode + " " + variable.var;
+        }
+        if (instruction instanceof FieldInsnNode field) {
+            return opcode + " " + field.owner + "." + field.name + " " + field.desc;
+        }
+        if (instruction instanceof MethodInsnNode call) {
+            return opcode + " " + call.owner + "." + call.name + " " + call.desc;
+        }
+        return opcode;
+    }
+
+    private static java.lang.reflect.Method explicitAdmissionMethod(
+            String name, Class<?>... parameterTypes) {
+        try {
+            return Controls.class.getDeclaredMethod(name, parameterTypes);
+        } catch (NoSuchMethodException missing) {
+            throw new AssertionError("explicit config admission seam is missing: " + name, missing);
         }
     }
 

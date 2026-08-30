@@ -956,6 +956,55 @@ final class AbilitiesTest {
     }
 
     @Test
+    void clearDropsActiveAndRiderDeferredTasksIdempotentlyWithoutLaterWork() throws Exception {
+        Object activeGhast = new Object();
+        Object deferredGhast = new Object();
+        RecordingDetonationAccess access = new RecordingDetonationAccess();
+        java.util.UUID deferredGhastId =
+                java.util.UUID.fromString("d744e380-44e7-4883-954d-637522221bc7");
+        GhastState active = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(200L), java.util.Optional.of(RIDER_ID));
+        GhastState due = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        access.ghastIds.put(activeGhast, GHAST_ID);
+        access.ghastIds.put(deferredGhast, deferredGhastId);
+        access.states.put(activeGhast, active);
+        access.states.put(deferredGhast, due);
+        access.riderAvailable = false;
+        Config config = configWithOverheat(40, 6.0, 0, 0.4, 2, 0, 8.0,
+                true, true);
+        Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
+        queue.onGhastLoad(activeGhast, active, 120L, access);
+        queue.onGhastLoad(deferredGhast, due, 120L, access);
+        assertEquals(0, queue.runDue(140L, config, access));
+        assertEquals(1, queue.queuedTasks());
+        assertEquals(1, queue.deferredTasks());
+        assertEquals(2, queue.ownedTasks());
+        int readsBeforeClear = access.stateReads;
+        int resolutionsBeforeClear = access.riderResolutions;
+        java.lang.reflect.Method clear;
+        try {
+            clear = Abilities.FuseQueue.class.getDeclaredMethod("clear");
+        } catch (NoSuchMethodException missing) {
+            throw new AssertionError("fuse queue clear operation is missing", missing);
+        }
+
+        clear.invoke(queue);
+        clear.invoke(queue);
+
+        assertEquals(0, queue.queuedTasks());
+        assertEquals(0, queue.deferredTasks());
+        assertEquals(0, queue.ownedTasks());
+        access.riderAvailable = true;
+        assertEquals(0, queue.onRiderAvailable(RIDER_ID));
+        assertEquals(0, queue.runDue(500L, config, access));
+        assertEquals(readsBeforeClear, access.stateReads);
+        assertEquals(resolutionsBeforeClear, access.riderResolutions);
+        assertEquals(0, access.explosions + access.directions.size()
+                + access.fireOffsets.size() + access.removals);
+    }
+
+    @Test
     void consumedEffectFailureNeverReplaysOnLaterRunsOrLoadCallbacks() {
         Object ghast = new Object();
         RecordingDetonationAccess access = new RecordingDetonationAccess();
@@ -978,6 +1027,89 @@ final class AbilitiesTest {
         assertEquals(1, access.fireOffsets.size());
         assertEquals(1, access.removals);
         assertEquals(0, queue.queuedTasks() + queue.deferredTasks());
+    }
+
+    @Test
+    void freshGhastLoadWithoutAttachmentSchedulesNothingWhilePresentStateDelegatesOnce() throws Exception {
+        Object ghast = new Object();
+        RecordingDetonationAccess access = new RecordingDetonationAccess();
+        Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
+        GhastState pending = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        java.lang.reflect.Method load;
+        try {
+            load = Abilities.class.getDeclaredMethod("onGhastLoad", Object.class,
+                    java.util.Optional.class, long.class, Abilities.FuseQueue.class,
+                    Abilities.DetonationAccess.class);
+        } catch (NoSuchMethodException missing) {
+            throw new AssertionError("optional ghast-load seam is missing", missing);
+        }
+
+        load.invoke(null, ghast, java.util.Optional.empty(), 120L, queue, access);
+
+        assertEquals(0, access.ghastIdReads);
+        assertEquals(0, queue.ownedTasks());
+        load.invoke(null, ghast, java.util.Optional.of(pending), 120L, queue, access);
+        assertEquals(1, access.ghastIdReads);
+        assertEquals(1, queue.ownedTasks());
+    }
+
+    @Test
+    void productionGhastLoadReadsOptionalAttachmentAndUsesTheSoleFuseQueue() throws Exception {
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode load = exactMethod(abilities, "onGhastLoad",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;J)V");
+        assertEquals(List.of(
+                        "GETSTATIC xyz/pyrehaven/happyartillery/"
+                                + "Abilities$ServerPlayerDetonationAccess.INSTANCE "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerDetonationAccess;",
+                        "ASTORE 3", "ALOAD 0", "ALOAD 3", "ALOAD 0",
+                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/"
+                                + "Abilities$ServerPlayerDetonationAccess.attachedState "
+                                + "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)"
+                                + "Ljava/util/Optional;",
+                        "LLOAD 1",
+                        "GETSTATIC xyz/pyrehaven/happyartillery/Abilities.FUSES "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;",
+                        "ALOAD 3",
+                        "INVOKESTATIC xyz/pyrehaven/happyartillery/Abilities.onGhastLoad "
+                                + "(Ljava/lang/Object;Ljava/util/Optional;J"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;"
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;)V",
+                        "RETURN"),
+                exactOwnerInstructionShape(load));
+
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
+        MethodNode attachedState = exactMethod(adapter, "attachedState",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)Ljava/util/Optional;");
+        assertEquals(1, callsTo(attachedState,
+                "net/fabricmc/fabric/api/attachment/v1/AttachmentTarget", "getAttached").size());
+        assertEquals(1, callsTo(attachedState, "java/util/Optional", "ofNullable").size());
+        assertEquals(0, callsTo(attachedState, "java/util/Objects", "requireNonNull").size());
+    }
+
+    @Test
+    void abilitiesOwnsOnePackageVisibleServerStopClearForTheSoleFuseQueue() throws Exception {
+        java.lang.reflect.Method stop;
+        try {
+            stop = Abilities.class.getDeclaredMethod("onServerStop");
+        } catch (NoSuchMethodException missing) {
+            throw new AssertionError("Abilities server-stop clear entry is missing", missing);
+        }
+        assertEquals(0, stop.getModifiers() & (java.lang.reflect.Modifier.PUBLIC
+                | java.lang.reflect.Modifier.PROTECTED | java.lang.reflect.Modifier.PRIVATE));
+
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode bytecode = exactMethod(abilities, "onServerStop", "()V");
+        assertEquals(List.of(
+                        "GETSTATIC xyz/pyrehaven/happyartillery/Abilities.FUSES "
+                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;",
+                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Abilities$FuseQueue.clear ()V",
+                        "RETURN"),
+                exactOwnerInstructionShape(bytecode));
     }
 
     @Test
@@ -1313,6 +1445,7 @@ final class AbilitiesTest {
         private RuntimeException stateFailure;
         private RuntimeException loadedFailure;
         private int stateReads;
+        private int ghastIdReads;
         private int riderResolutions;
         private int explosions;
         private boolean explosionBreaksBlocks;
@@ -1332,6 +1465,7 @@ final class AbilitiesTest {
 
         @Override
         public java.util.UUID ghastId(Object ghast) {
+            ghastIdReads++;
             return ghastIds.getOrDefault(ghast, GHAST_ID);
         }
 
@@ -1431,6 +1565,14 @@ final class AbilitiesTest {
     }
 
     private static List<String> instructionShape(MethodNode method) {
+        return instructionShape(method, false);
+    }
+
+    private static List<String> exactOwnerInstructionShape(MethodNode method) {
+        return instructionShape(method, true);
+    }
+
+    private static List<String> instructionShape(MethodNode method, boolean exactOwners) {
         List<AbstractInsnNode> semantic = instructions(method);
         Map<LabelNode, Integer> targets = new HashMap<>();
         List<LabelNode> pendingLabels = new ArrayList<>();
@@ -1447,10 +1589,15 @@ final class AbilitiesTest {
                 semanticIndex++;
             }
         }
-        return semantic.stream().map(instruction -> render(instruction, targets)).toList();
+        return semantic.stream()
+                .map(instruction -> render(instruction, targets, exactOwners))
+                .toList();
     }
 
-    private static String render(AbstractInsnNode instruction, Map<LabelNode, Integer> targets) {
+    private static String render(
+            AbstractInsnNode instruction,
+            Map<LabelNode, Integer> targets,
+            boolean exactOwners) {
         String opcode = opcodeName(instruction.getOpcode());
         if (instruction instanceof VarInsnNode variable) {
             return opcode + " " + variable.var;
@@ -1459,10 +1606,12 @@ final class AbilitiesTest {
             return opcode + " " + type.desc;
         }
         if (instruction instanceof MethodInsnNode method) {
-            return opcode + " " + simpleOwner(method.owner) + "." + method.name + " " + method.desc;
+            String owner = exactOwners ? method.owner : simpleOwner(method.owner);
+            return opcode + " " + owner + "." + method.name + " " + method.desc;
         }
         if (instruction instanceof FieldInsnNode field) {
-            return opcode + " " + simpleOwner(field.owner) + "." + field.name + " " + field.desc;
+            String owner = exactOwners ? field.owner : simpleOwner(field.owner);
+            return opcode + " " + owner + "." + field.name + " " + field.desc;
         }
         if (instruction instanceof LdcInsnNode constant) {
             return opcode + " " + constant.cst;
@@ -1505,6 +1654,7 @@ final class AbilitiesTest {
             case Opcodes.SIPUSH -> "SIPUSH";
             case Opcodes.IRETURN -> "IRETURN";
             case Opcodes.ARETURN -> "ARETURN";
+            case Opcodes.RETURN -> "RETURN";
             default -> "OPCODE_" + opcode;
         };
     }
