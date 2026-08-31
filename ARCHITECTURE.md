@@ -1,9 +1,7 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-The annotated tree below is the complete proposed source-controlled shape. It contains thirteen
-production Java files and eight risk-grouped test files. This proposed tree precedes the source
-moves: `DeathDropMixin` and `SlotGuardMixin` are absent; the reshaped `PlayerDropMixin` and new
-`ExternalContainerMixin` are the only mixins.
+The annotated tree is the complete proposed source-controlled shape: thirteen production Java files
+and eight risk-grouped test files.
 
 ```text
 happy-artillery/
@@ -11,12 +9,12 @@ happy-artillery/
 │   ├── main/
 │   │   ├── java/xyz/pyrehaven/happyartillery/
 │   │   │   ├── HappyArtillery.java
-│   │   │   │   # Composition root that invokes each owner's registration, op-only reload command,
-│   │   │   │   # durable Overworld-game-time context, sole player tick driver, ghast-load callback,
-│   │   │   │   # and bounded player-availability wake-up; no gameplay policy or second fuse poller.
+│   │   │   │   # Composition root that invokes each owner's registration, reload command, durable
+│   │   │   │   # Overworld-game-time context, sole player tick driver, UUID-resolution access,
+│   │   │   │   # ghast-load callback, and bounded player-availability wake-up; no gameplay policy.
 │   │   │   ├── Config.java
-│   │   │   │   # Sole config schema/codec, defaults, presets, validation, atomic live value, load,
-│   │   │   │   # rewrite, and reload owner.
+│   │   │   │   # Sole config schema/codec, defaults, individual overrides, validation, atomic live
+│   │   │   │   # value, load, complete-schema rewrite, and reload owner; removed settings fail.
 │   │   │   ├── BiomeClass.java
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
@@ -35,12 +33,12 @@ happy-artillery/
 │   │   │   │   # Sole control owner: atomic free-slot allocation, one bounded active-pilot inventory
 │   │   │   │   # snapshot, held admission, owner/ride cleanup, transfer cleanup, and ride transitions.
 │   │   │   ├── Abilities.java
-│   │   │   │   # Sole fire/cry/detonation gate, effect, and fuse-scheduling owner, including active and
-│   │   │   │   # bounded rider-deferred task states keyed by persisted ghast UUID, load/player wake-ups,
-│   │   │   │   # durable pre-effect consumption, vanilla LargeFireball spawning, effects, sound, and removal.
+│   │   │   │   # Sole fire/cry/detonation gate, truthful effect/removal outcome, collision-clear launch,
+│   │   │   │   # and UUID-only fuse-task owner; resolves entities at execution, isolates due tasks,
+│   │   │   │   # consumes pending state durably, and owns vanilla fireballs, effects, sound, and removal.
 │   │   │   ├── Hud.java
-│   │   │   │   # Sole boss/action-bar and warning-particle owner for pilots and read-only passengers;
-│   │   │   │   # consumes the shared control snapshot and owns bounded process-local display handles.
+│   │   │   │   # Sole typed boss/action-bar/warning presentation path for pilots and read-only passengers;
+│   │   │   │   # consumes shared control/effective-cooling context and owns bounded display handles.
 │   │   │   ├── Feedback.java
 │   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
@@ -48,8 +46,8 @@ happy-artillery/
 │   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
 │   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
 │   │   │       └── ExternalContainerMixin.java
-│   │   │           # Observes Slot.setChanged() at HEAD after menu mutation and delegates removal of
-│   │   │           # marked controls from non-owner container destinations to Controls.
+│   │   │           # Observes Slot.setChanged() at HEAD after menu mutation and delegates cheap marker
+│   │   │           # preflight plus external-destination removal through Slot.set(ItemStack.EMPTY).
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.
@@ -60,7 +58,8 @@ happy-artillery/
 │   └── test/
 │       └── java/xyz/pyrehaven/happyartillery/
 │           ├── ConfigTest.java
-│           │   # Config defaults, presets, removed/unknown-key rejection, validation, round-trip,
+│           │   # Config defaults, individual overrides, removed/unknown-key rejection, validation,
+│           │   # cooling-theme thresholds/colors, round-trip,
 │           │   # rewrite, registry-lifecycle resolution, and reload-failure contract.
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.
@@ -74,11 +73,11 @@ happy-artillery/
 │           │   # Owner/ride marker identity, atomic allocation, bounded snapshot, held admission,
 │           │   # same-player mobility, outbound consumption, cleanup, no-overwrite, and dedup tests.
 │           ├── AbilitiesTest.java
-│           │   # Fire/cry gates, sealed outcomes, vanilla LargeFireball identity/ownership/defaults,
-│           │   # feedback/effects, server-queue fuse scheduling/load wake-up, and detonation tests.
+│           │   # Fire/cry gates, truthful outcomes, vanilla fireballs, shared collision clearance,
+│           │   # UUID-only failure-isolated fuse scheduling/resolution, wake-up, and detonation tests.
 │           ├── HudTest.java
-│           │   # Pilot/passenger visibility, control-warning priority, dirty checks, throttling,
-│           │   # particles, snapshot sharing, and teardown tests.
+│           │   # Typed pilot/passenger presentation, effective-rate text/colors, control-warning
+│           │   # priority, dirty checks, throttling, particles, snapshot sharing, and teardown tests.
 │           └── HappyArtilleryIntegrationTest.java
 │               # Registration uniqueness, one-driver ordering, actor-local callbacks, one snapshot per
 │               # active pilot, pilotless-rider cleanup, no world/container/entity scan, and complete wiring.
@@ -89,7 +88,7 @@ happy-artillery/
 ├── FEATURES.md
 │   # Settled 1.2.0 behavior and compatibility/regression contract.
 ├── MIGRATION_PLAN.md
-│   # Dependency-ordered RED/GREEN, manual, commit, push, and activation checkpoints.
+│   # Historical rebuild record and pointer to the current audit-repair execution intake.
 ├── README.md
 │   # Installation, controls, configuration, Geyser support, and supported-version documentation.
 ├── CHANGELOG.md
