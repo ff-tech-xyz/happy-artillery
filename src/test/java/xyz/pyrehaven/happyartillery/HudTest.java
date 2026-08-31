@@ -880,7 +880,9 @@ final class HudTest {
         Config defaults = Config.defaults();
         return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
-                new Config.Hud(bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent()));
+                new Config.Hud(
+                        bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent(),
+                        defaults.hud().cooling()));
     }
 
     private static Config configWithWarningThreshold(int warningFromPercent) {
@@ -888,7 +890,8 @@ final class HudTest {
         return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(defaults.hud().bossBar(), defaults.hud().actionBar(),
-                        defaults.hud().refreshTicks(), warningFromPercent));
+                        defaults.hud().refreshTicks(), warningFromPercent,
+                        defaults.hud().cooling()));
     }
 
     private static Controls.InventorySnapshot controlSnapshot(

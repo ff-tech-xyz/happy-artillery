@@ -256,7 +256,7 @@ public record Config(
                 || expectedPrimitive.isString() && actualPrimitive.isString();
     }
 
-    private static void validate(Config config) {
+    static void validate(Config config) {
         Objects.requireNonNull(config, "config");
         Controls controls = Objects.requireNonNull(config.controls(), "controls");
         Fire fire = Objects.requireNonNull(config.fire(), "fire");
@@ -303,6 +303,28 @@ public record Config(
         requireNonNegative("cry.cooldownSeconds", cry.cooldownSeconds());
         requireRange("hud.refreshTicks", hud.refreshTicks(), 4, Integer.MAX_VALUE);
         requireRange("hud.warningFromPercent", hud.warningFromPercent(), 0, 100);
+        validateCooling(hud.cooling());
+    }
+
+    private static void validateCooling(Cooling cooling) {
+        requirePresent("hud.cooling", cooling);
+        requirePresent("hud.cooling.noCoolingText", cooling.noCoolingText());
+        requirePresent("hud.cooling.noCoolingColor", cooling.noCoolingColor());
+        requireNonNegative("hud.cooling.slowMaxPerSecond", cooling.slowMaxPerSecond());
+        requirePresent("hud.cooling.slowColor", cooling.slowColor());
+        requireNonNegative("hud.cooling.normalMaxPerSecond", cooling.normalMaxPerSecond());
+        requirePresent("hud.cooling.normalColor", cooling.normalColor());
+        requirePresent("hud.cooling.fastColor", cooling.fastColor());
+        if (cooling.slowMaxPerSecond() >= cooling.normalMaxPerSecond()) {
+            throw new IllegalArgumentException(
+                    "hud.cooling.slowMaxPerSecond must be less than hud.cooling.normalMaxPerSecond");
+        }
+    }
+
+    private static void requirePresent(String name, Object value) {
+        if (value == null) {
+            throw new IllegalArgumentException(name + " must not be null");
+        }
     }
 
     private static void validateProfile(String name, HeatProfile profile) {
@@ -376,7 +398,12 @@ public record Config(
                 new Water(5.0, 0.0, true),
                 new Overheat(0, 6.0, 24, 0.4, 2, 24, 8.0, true, true),
                 new Cry(true, 10.0, 10.0),
-                new Hud(true, true, 4, 85));
+                new Hud(true, true, 4, 85,
+                        new Cooling(
+                                "NO COOLING", Color.RED,
+                                0.5, Color.GOLD,
+                                1.0, Color.GREEN,
+                                Color.BLUE)));
     }
 
     public record Controls(
@@ -429,7 +456,25 @@ public record Config(
             boolean bossBar,
             boolean actionBar,
             int refreshTicks,
-            int warningFromPercent) {
+            int warningFromPercent,
+            Cooling cooling) {
+    }
+
+    public record Cooling(
+            String noCoolingText,
+            Color noCoolingColor,
+            double slowMaxPerSecond,
+            Color slowColor,
+            double normalMaxPerSecond,
+            Color normalColor,
+            Color fastColor) {
+    }
+
+    public enum Color {
+        RED,
+        GOLD,
+        GREEN,
+        BLUE
     }
 }
 

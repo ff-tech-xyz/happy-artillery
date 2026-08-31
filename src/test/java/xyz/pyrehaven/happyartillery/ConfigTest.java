@@ -77,6 +77,38 @@ final class ConfigTest {
     }
 
     @Test
+    void hudCoolingSchemaIsTypedAndHasNoCompatibilityPath() {
+        assertEquals(List.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
+                Stream.of(Config.Hud.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertEquals(List.of(
+                        "noCoolingText", "noCoolingColor", "slowMaxPerSecond", "slowColor",
+                        "normalMaxPerSecond", "normalColor", "fastColor"),
+                Stream.of(Config.Cooling.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertEquals(List.of("RED", "GOLD", "GREEN", "BLUE"),
+                Stream.of(Config.Color.values()).map(Enum::name).toList());
+        assertEquals(1, Config.Hud.class.getDeclaredConstructors().length);
+        assertEquals(1, Config.Cooling.class.getDeclaredConstructors().length);
+    }
+
+    @Test
+    void directValidationRejectsNullCoolingWithExactPath() {
+        Config defaults = Config.defaults();
+        Config invalid = new Config(
+                defaults.controls(), defaults.fire(), defaults.heat(), defaults.water(),
+                defaults.overheat(), defaults.cry(),
+                new Config.Hud(
+                        defaults.hud().bossBar(), defaults.hud().actionBar(),
+                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(), null));
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.validate(invalid));
+
+        assertEquals("hud.cooling must not be null", failure.getMessage());
+    }
+
+    @Test
     void defaultsContainTheCompleteSchema() throws ReflectiveOperationException {
         Object defaults = Config.class.getMethod("defaults").invoke(null);
 
@@ -104,7 +136,12 @@ final class ConfigTest {
                         Map.entry("breaksBlocks", true)),
                 "cry", Map.of("enabled", true, "volume", 10.0, "cooldownSeconds", 10.0),
                 "hud", Map.of("bossBar", true, "actionBar", true,
-                        "refreshTicks", 4, "warningFromPercent", 85)),
+                        "refreshTicks", 4, "warningFromPercent", 85,
+                        "cooling", Map.of(
+                                "noCoolingText", "NO COOLING", "noCoolingColor", Config.Color.RED,
+                                "slowMaxPerSecond", 0.5, "slowColor", Config.Color.GOLD,
+                                "normalMaxPerSecond", 1.0, "normalColor", Config.Color.GREEN,
+                                "fastColor", Config.Color.BLUE))),
                 recordValues(defaults));
     }
 
@@ -174,6 +211,60 @@ final class ConfigTest {
     }
 
     @Test
+    void everyCoolingLeafOverridesIndividuallyAndRewritesUppercaseEnums(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file, """
+                {"hud":{"cooling":{
+                  "noCoolingText":"STILL",
+                  "noCoolingColor":"BLUE",
+                  "slowMaxPerSecond":0.25,
+                  "slowColor":"GREEN",
+                  "normalMaxPerSecond":2.5,
+                  "normalColor":"GOLD",
+                  "fastColor":"RED"
+                }}}
+                """);
+
+        Config loaded = Config.load(file);
+        JsonObject rewritten = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        JsonObject cooling = rewritten.getAsJsonObject("hud").getAsJsonObject("cooling");
+
+        assertEquals(new Config.Cooling(
+                        "STILL", Config.Color.BLUE, 0.25, Config.Color.GREEN,
+                        2.5, Config.Color.GOLD, Config.Color.RED),
+                loaded.hud().cooling());
+        assertEquals(Config.defaults().hud().bossBar(), loaded.hud().bossBar());
+        assertEquals(Config.defaults().controls(), loaded.controls());
+        assertEquals(Set.of(
+                        "noCoolingText", "noCoolingColor", "slowMaxPerSecond", "slowColor",
+                        "normalMaxPerSecond", "normalColor", "fastColor"),
+                cooling.keySet());
+        assertEquals("BLUE", cooling.get("noCoolingColor").getAsString());
+        assertEquals("GREEN", cooling.get("slowColor").getAsString());
+        assertEquals("GOLD", cooling.get("normalColor").getAsString());
+        assertEquals("RED", cooling.get("fastColor").getAsString());
+        assertEquals(new Gson().toJsonTree(loaded), rewritten);
+    }
+
+    @ParameterizedTest(name = "hud.cooling.{0} overrides independently")
+    @MethodSource("individualCoolingOverrides")
+    void eachCoolingLeafOverridesWithoutChangingSiblingDefaults(
+            String key, String rawValue, Config.Cooling expected, @TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file,
+                "{\"hud\":{\"cooling\":{\"" + key + "\":" + rawValue + "}}}");
+
+        Config loaded = Config.load(file);
+
+        assertEquals(expected, loaded.hud().cooling());
+        assertEquals(Config.defaults().controls(), loaded.controls());
+        assertEquals(new Gson().toJsonTree(loaded),
+                JsonParser.parseString(Files.readString(file)));
+    }
+
+    @Test
     void missingFileIsCreatedFromValidatedDefaults(@TempDir Path directory) throws Exception {
         Path file = directory.resolve("happy-artillery.json");
 
@@ -218,6 +309,23 @@ final class ConfigTest {
         assertArrayEquals(invalid, Files.readAllBytes(file));
     }
 
+    @Test
+    void unknownCoolingKeyFailsWithFullPathWithoutChangingStateOrBytes(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = "{\"hud\":{\"cooling\":{\"preset\":\"cold\"}}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Unknown config key: hud.cooling.preset", failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
     @ParameterizedTest(name = "removed controls.{0} is rejected")
     @MethodSource("removedControlSettings")
     void removedControlSettingFailsClearlyWithoutChangingStateOrBytes(
@@ -247,8 +355,25 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(7, serialized.size());
-        assertEquals(35, declaredKeyCount(serialized));
-        assertEquals(40, nestedLeafCount(serialized));
+        assertEquals(36, declaredKeyCount(serialized));
+        assertEquals(47, nestedLeafCount(serialized));
+        assertEquals(Set.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
+                serialized.getAsJsonObject("hud").keySet());
+        assertEquals(Set.of(
+                        "noCoolingText", "noCoolingColor", "slowMaxPerSecond", "slowColor",
+                        "normalMaxPerSecond", "normalColor", "fastColor"),
+                serialized.getAsJsonObject("hud").getAsJsonObject("cooling").keySet());
+        assertEquals(JsonParser.parseString("""
+                {
+                  "noCoolingText":"NO COOLING",
+                  "noCoolingColor":"RED",
+                  "slowMaxPerSecond":0.5,
+                  "slowColor":"GOLD",
+                  "normalMaxPerSecond":1.0,
+                  "normalColor":"GREEN",
+                  "fastColor":"BLUE"
+                }
+                """), serialized.getAsJsonObject("hud").get("cooling"));
         assertEquals(serialized, JsonParser.parseString(Files.readString(file)));
     }
 
@@ -267,7 +392,11 @@ final class ConfigTest {
                     "fireRadius": 0
                   },
                   "cry": {"volume": 0, "cooldownSeconds": 0},
-                  "hud": {"refreshTicks": 4, "warningFromPercent": 0}
+                  "hud": {
+                    "refreshTicks": 4,
+                    "warningFromPercent": 0,
+                    "cooling": {"slowMaxPerSecond": 0, "normalMaxPerSecond": 0.1}
+                  }
                 }
                 """);
 
@@ -277,6 +406,46 @@ final class ConfigTest {
 
         Files.writeString(file, "{\"hud\":{\"warningFromPercent\":100}}");
         assertEquals(100, Config.reload(file).hud().warningFromPercent());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidCoolingThresholds")
+    void coolingThresholdsRejectInvalidOrderingAndNonFiniteOrNegativeValuesTransactionally(
+            String description, String invalidJson, String expectedMessage,
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = invalidJson.getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file), description);
+
+        assertEquals(expectedMessage, failure.getMessage(), description);
+        assertSame(previous, Config.current(), description);
+        assertArrayEquals(invalid, Files.readAllBytes(file), description);
+    }
+
+    @ParameterizedTest(name = "hud.cooling.{0} rejects {1}")
+    @MethodSource("invalidCoolingColors")
+    void everyCoolingColorRejectsInvalidNamesTypesAndNullTransactionally(
+            String key, String description, String rawValue, @TempDir Path directory)
+            throws Exception {
+        assertRejectedWithoutMutation(directory,
+                "{\"hud\":{\"cooling\":{\"" + key + "\":" + rawValue + "}}}",
+                key + " accepted " + description);
+    }
+
+    @Test
+    void noCoolingTextAcceptsBlankButRejectsNullTransactionally(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("blank.json");
+        Files.writeString(file, "{\"hud\":{\"cooling\":{\"noCoolingText\":\"\"}}}");
+        assertEquals("", Config.load(file).hud().cooling().noCoolingText());
+
+        assertRejectedWithoutMutation(directory,
+                "{\"hud\":{\"cooling\":{\"noCoolingText\":null}}}",
+                "null noCoolingText");
     }
 
     @Test
@@ -352,7 +521,10 @@ final class ConfigTest {
             assertEquals(file, target);
             JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
                     .getAsJsonObject();
-            assertEquals(35, declaredKeyCount(serialized));
+            assertEquals(36, declaredKeyCount(serialized));
+            assertEquals(47, nestedLeafCount(serialized));
+            assertEquals(new Gson().toJsonTree(Config.defaults().hud().cooling()),
+                    serialized.getAsJsonObject("hud").get("cooling"));
             assertEquals(false, serialized.getAsJsonObject("controls")
                     .get("holdToFire").getAsBoolean());
             throw replacementFailure;
@@ -457,6 +629,80 @@ final class ConfigTest {
                 Arguments.of("lockControlSlots", "false"));
     }
 
+    private static Stream<Arguments> individualCoolingOverrides() {
+        Config.Cooling defaults = Config.defaults().hud().cooling();
+        return Stream.of(
+                Arguments.of("noCoolingText", "\"STILL\"", new Config.Cooling(
+                        "STILL", defaults.noCoolingColor(), defaults.slowMaxPerSecond(),
+                        defaults.slowColor(), defaults.normalMaxPerSecond(),
+                        defaults.normalColor(), defaults.fastColor())),
+                Arguments.of("noCoolingColor", "\"BLUE\"", new Config.Cooling(
+                        defaults.noCoolingText(), Config.Color.BLUE, defaults.slowMaxPerSecond(),
+                        defaults.slowColor(), defaults.normalMaxPerSecond(),
+                        defaults.normalColor(), defaults.fastColor())),
+                Arguments.of("slowMaxPerSecond", "0.25", new Config.Cooling(
+                        defaults.noCoolingText(), defaults.noCoolingColor(), 0.25,
+                        defaults.slowColor(), defaults.normalMaxPerSecond(),
+                        defaults.normalColor(), defaults.fastColor())),
+                Arguments.of("slowColor", "\"GREEN\"", new Config.Cooling(
+                        defaults.noCoolingText(), defaults.noCoolingColor(),
+                        defaults.slowMaxPerSecond(), Config.Color.GREEN,
+                        defaults.normalMaxPerSecond(), defaults.normalColor(), defaults.fastColor())),
+                Arguments.of("normalMaxPerSecond", "2.5", new Config.Cooling(
+                        defaults.noCoolingText(), defaults.noCoolingColor(),
+                        defaults.slowMaxPerSecond(), defaults.slowColor(), 2.5,
+                        defaults.normalColor(), defaults.fastColor())),
+                Arguments.of("normalColor", "\"GOLD\"", new Config.Cooling(
+                        defaults.noCoolingText(), defaults.noCoolingColor(),
+                        defaults.slowMaxPerSecond(), defaults.slowColor(),
+                        defaults.normalMaxPerSecond(), Config.Color.GOLD, defaults.fastColor())),
+                Arguments.of("fastColor", "\"RED\"", new Config.Cooling(
+                        defaults.noCoolingText(), defaults.noCoolingColor(),
+                        defaults.slowMaxPerSecond(), defaults.slowColor(),
+                        defaults.normalMaxPerSecond(), defaults.normalColor(), Config.Color.RED)));
+    }
+
+    private static Stream<Arguments> invalidCoolingThresholds() {
+        String orderMessage =
+                "hud.cooling.slowMaxPerSecond must be less than hud.cooling.normalMaxPerSecond";
+        return Stream.of(
+                Arguments.of("negative slow threshold",
+                        "{\"hud\":{\"cooling\":{\"slowMaxPerSecond\":-0.1}}}",
+                        "hud.cooling.slowMaxPerSecond must not be negative"),
+                Arguments.of("negative normal threshold",
+                        "{\"hud\":{\"cooling\":{\"normalMaxPerSecond\":-0.1}}}",
+                        "hud.cooling.normalMaxPerSecond must not be negative"),
+                Arguments.of("non-finite slow threshold",
+                        "{\"hud\":{\"cooling\":{\"slowMaxPerSecond\":1e309}}}",
+                        "hud.cooling.slowMaxPerSecond must be finite"),
+                Arguments.of("non-finite normal threshold",
+                        "{\"hud\":{\"cooling\":{\"normalMaxPerSecond\":1e309}}}",
+                        "hud.cooling.normalMaxPerSecond must be finite"),
+                Arguments.of("equal thresholds",
+                        "{\"hud\":{\"cooling\":{\"slowMaxPerSecond\":1,\"normalMaxPerSecond\":1}}}",
+                        orderMessage),
+                Arguments.of("crossed thresholds",
+                        "{\"hud\":{\"cooling\":{\"slowMaxPerSecond\":2,\"normalMaxPerSecond\":1}}}",
+                        orderMessage));
+    }
+
+    private static Stream<Arguments> invalidCoolingColors() {
+        String[] keys = {"noCoolingColor", "slowColor", "normalColor", "fastColor"};
+        Arguments[] invalidValues = {
+                Arguments.of("lowercase name", "\"red\""),
+                Arguments.of("vanilla alias", "\"YELLOW\""),
+                Arguments.of("unknown name", "\"PURPLE\""),
+                Arguments.of("wrong scalar type", "1"),
+                Arguments.of("object", "{}"),
+                Arguments.of("array", "[]"),
+                Arguments.of("boolean", "true"),
+                Arguments.of("null", "null")
+        };
+        return Stream.of(keys).flatMap(key -> Stream.of(invalidValues)
+                .map(value -> Arguments.of(
+                        key, value.get()[0], value.get()[1])));
+    }
+
     private static Stream<Arguments> invalidExistingFiles() {
         return Stream.of(
                 Arguments.of("malformed JSON", "{"),
@@ -511,6 +757,8 @@ final class ConfigTest {
                         "{\"controls\":{\"holdToFire\":true,\"holdToFire\":false}}"),
                 Arguments.of("duplicate nested heat-profile known key",
                         "{\"heat\":{\"cold\":{\"heatPerShot\":0.7,\"heatPerShot\":0.8}}}"),
+                Arguments.of("duplicate nested cooling known key",
+                        "{\"hud\":{\"cooling\":{\"slowColor\":\"RED\",\"slowColor\":\"BLUE\"}}}"),
                 Arguments.of("duplicate unknown key",
                         "{\"unknownGroup\":{\"discarded\":true,\"discarded\":false}}"));
     }
