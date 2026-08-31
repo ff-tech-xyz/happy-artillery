@@ -3,6 +3,40 @@ plugins {
 	id 'maven-publish'
 }
 
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+
+abstract class MinecraftMetadataServer implements BuildService<BuildServiceParameters.None>, AutoCloseable {
+	private com.sun.net.httpserver.HttpServer server
+
+	synchronized String url(File metadataFile) {
+		if (server == null) {
+			server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress('127.0.0.1', 0), 0)
+			server.createContext('/26.2-custom.json') { exchange ->
+				try {
+					byte[] body = metadataFile.bytes
+					exchange.responseHeaders.add('Content-Type', 'application/json')
+					exchange.sendResponseHeaders(200, body.length)
+					exchange.responseBody.write(body)
+				} finally {
+					exchange.close()
+				}
+			}
+			server.start()
+		}
+
+		return "http://127.0.0.1:${server.address.port}/26.2-custom.json"
+	}
+
+	@Override
+	synchronized void close() {
+		if (server != null) {
+			server.stop(0)
+			server = null
+		}
+	}
+}
+
 version = project.mod_version
 group = project.maven_group
 
@@ -14,24 +48,18 @@ repositories {
 	mavenCentral()
 }
 
-def localMinecraftMetadataServer = {
-	def metadataDir = file("gradle/minecraft")
-	def server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0)
-	server.createContext("/26.2-custom.json") { exchange ->
-		byte[] body = new File(metadataDir, "26.2-custom.json").bytes
-		exchange.responseHeaders.add("Content-Type", "application/json")
-		exchange.sendResponseHeaders(200, body.length)
-		exchange.responseBody.write(body)
-		exchange.close()
-	}
-	server.start()
-	gradle.buildFinished { server.stop(0) }
-	return "http://127.0.0.1:${server.address.port}/26.2-custom.json"
-}.call()
+def minecraftMetadataServer = gradle.sharedServices.registerIfAbsent(
+	'minecraftMetadataServer',
+	MinecraftMetadataServer
+)
+def minecraftMetadataFile = file('gradle/minecraft/26.2-custom.json')
+def minecraftMetadataUrl = minecraftMetadataServer.map {
+	it.url(minecraftMetadataFile)
+}
 
 loom {
 	noIntermediateMappings()
-	customMinecraftMetadata.set(localMinecraftMetadataServer)
+	customMinecraftMetadata.set(minecraftMetadataUrl)
 	createRemapConfigurations(sourceSets.test)
 
 	mods {
@@ -61,11 +89,12 @@ dependencies {
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
+def resourceVersion = project.version
 processResources {
-	inputs.property "version", project.version
+	inputs.property "version", resourceVersion
 
 	filesMatching("fabric.mod.json") {
-		expand "version": inputs.properties.version
+		expand "version": resourceVersion
 	}
 }
 
@@ -88,11 +117,12 @@ java {
 	targetCompatibility = JavaVersion.VERSION_21
 }
 
+def licenseArchiveSuffix = project.archives_base_name
 jar {
 	inputs.property "archivesName", project.base.archivesName
 
 	from("LICENSE") {
-		rename { "${it}_${project.archives_base_name}"}
+		rename { "${it}_${licenseArchiveSuffix}"}
 	}
 
 	manifest {
