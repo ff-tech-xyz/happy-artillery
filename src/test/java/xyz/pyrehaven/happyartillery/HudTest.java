@@ -174,6 +174,74 @@ final class HudTest {
     }
 
     @Test
+    void pilotControlWarningsUseExactPriorityWordingAndNeverLeakToPassengers() {
+        List<Controls.InventorySnapshot> controls = List.of(
+                controlSnapshot(Controls.ControlLocation.MISSING,
+                        Controls.ControlLocation.MAIN_INVENTORY_ONLY),
+                controlSnapshot(Controls.ControlLocation.HAND_ACCESSIBLE,
+                        Controls.ControlLocation.MAIN_INVENTORY_ONLY),
+                controlSnapshot(Controls.ControlLocation.MAIN_INVENTORY_ONLY,
+                        Controls.ControlLocation.MAIN_INVENTORY_ONLY),
+                controlSnapshot(Controls.ControlLocation.HAND_ACCESSIBLE,
+                        Controls.ControlLocation.HAND_ACCESSIBLE));
+        List<String> expected = List.of(
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:GOLD:CONTROL IN INVENTORY",
+                "action:GOLD:CONTROLS IN INVENTORY",
+                "action:GREEN:HEAT 25% · COOLING");
+
+        for (int index = 0; index < controls.size(); index++) {
+            Hud hud = new Hud();
+            RecordingAccess access = new RecordingAccess();
+            RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                    new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                            java.util.Optional.of(controls.get(index))),
+                    Config.defaults(), access);
+            assertEquals(index < 3 ? List.of(expected.get(index)) : List.of(),
+                    access.actionEvents(), "fresh case " + index);
+            hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                    new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                            java.util.Optional.of(controls.get(index))),
+                    Config.defaults(), access);
+            assertEquals(List.of(expected.get(index)), access.actionEvents(), "repeat case " + index);
+        }
+
+        Hud passengerHud = new Hud();
+        RecordingAccess passengerAccess = new RecordingAccess();
+        RiderState passenger = passengerHud.update(RIDER_ID, RIDER_ID, GHAST_ID,
+                RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), passengerAccess);
+        passengerHud.update(RIDER_ID, RIDER_ID, GHAST_ID, passenger, 4L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), passengerAccess);
+        assertEquals(List.of("action:GREEN:HEAT 25% · COOLING"), passengerAccess.actionEvents());
+    }
+
+    @Test
+    void controlWarningExecutesBeforeIndependentParticleBudget() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING,
+                        java.util.Optional.of(controlSnapshot(
+                                Controls.ControlLocation.HAND_ACCESSIBLE,
+                                Controls.ControlLocation.HAND_ACCESSIBLE))),
+                Config.defaults(), access);
+        access.events.clear();
+
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                new Hud.Snapshot(90.0, BiomeClass.HOT, Hud.Status.FIRING,
+                        java.util.Optional.of(controlSnapshot(
+                                Controls.ControlLocation.MISSING,
+                                Controls.ControlLocation.HAND_ACCESSIBLE))),
+                Config.defaults(), access);
+
+        assertEquals(List.of("action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT", "particle"),
+                access.presentationEvents());
+    }
+
+    @Test
     void warningParticlesSendOnlyOnConfiguredThresholdEntry() {
         Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
@@ -396,7 +464,6 @@ final class HudTest {
 
         assertEquals(List.of("particle", "progress:0.4", "color:GOLD",
                 "action:GOLD:HEAT 40% · FIRING"), access.events);
-        assertEquals(1, hud.handleCount());
     }
 
     @Test
@@ -461,7 +528,6 @@ final class HudTest {
 
         assertEquals(List.of("create:0.1:GREEN", "add", "remove", "create:0.1:GREEN", "add"),
                 access.bossEvents());
-        assertEquals(1, hud.handleCount());
     }
 
     @Test
@@ -504,7 +570,6 @@ final class HudTest {
 
         assertEquals(List.of("create:0.1:GREEN", "add", "remove", "create:0.2:GOLD", "add"),
                 access.bossEvents());
-        assertEquals(1, hud.handleCount());
     }
 
     @Test
@@ -528,7 +593,6 @@ final class HudTest {
                 Config.defaults(), access);
 
         assertEquals(List.of("remove:first", "add:replacement", "action:replacement"), access.events);
-        assertEquals(1, hud.handleCount());
     }
 
     @Test
@@ -547,8 +611,7 @@ final class HudTest {
         hud.remove(RIDER_ID, RIDER_ID, access);
         hud.clear(access);
 
-        assertEquals(new TeardownObservation(List.of("remove", "remove"), 0),
-                new TeardownObservation(access.bossEvents(), hud.handleCount()));
+        assertEquals(List.of("remove", "remove"), access.bossEvents());
     }
 
     @Test
@@ -561,7 +624,8 @@ final class HudTest {
 
     @Test
     void minecraft262AdapterOwnsExactBossActionAndTargetedParticleBindings() throws Exception {
-        Hud.class.getDeclaredMethod("update", ServerPlayer.class, HappyGhast.class,
+        Hud.class.getDeclaredMethod("update", ServerPlayer.class,
+                net.minecraft.server.level.ServerLevel.class, HappyGhast.class,
                 RiderState.class, long.class, Hud.Snapshot.class, Config.class);
         Hud.class.getDeclaredMethod("remove", ServerPlayer.class);
         Hud.class.getDeclaredMethod("clear");
@@ -630,10 +694,10 @@ final class HudTest {
         UUID passenger = UUID.fromString("7aaeb02c-60ca-4497-b666-b60ee7a044e8");
         Hud.Snapshot snapshot = new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING);
 
-        List<Hud.RiderView<UUID>> updated = hud.updateAll(GHAST_ID, List.of(
-                        new Hud.RiderView<>(RIDER_ID, RIDER_ID, RiderState.fresh()),
-                        new Hud.RiderView<>(passenger, passenger, RiderState.fresh())),
-                20L, snapshot, Config.defaults(), access);
+        RiderState pilotState = hud.update(RIDER_ID, RIDER_ID, GHAST_ID,
+                RiderState.fresh(), 20L, snapshot, Config.defaults(), access);
+        RiderState passengerState = hud.update(passenger, passenger, GHAST_ID,
+                RiderState.fresh(), 20L, snapshot, Config.defaults(), access);
 
         assertEquals(new PassengerObservation(
                         2, 0, List.of(
@@ -642,7 +706,8 @@ final class HudTest {
                 new PassengerObservation(
                         access.bossEvents().stream().filter(event -> event.equals("add")).toList().size(),
                         access.actionEvents().size(),
-                        updated.stream().map(view -> view.state().hudCache().orElseThrow()).toList()));
+                        List.of(pilotState.hudCache().orElseThrow(),
+                                passengerState.hudCache().orElseThrow())));
     }
 
     private static Config configWithHud(boolean bossBar, boolean actionBar, int refreshTicks) {
@@ -652,11 +717,14 @@ final class HudTest {
                 new Config.Hud(bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent()));
     }
 
+    private static Controls.InventorySnapshot controlSnapshot(
+            Controls.ControlLocation fire, Controls.ControlLocation cry) {
+        return new Controls.InventorySnapshot(fire, cry, 0);
+    }
+
     private record PassengerObservation(int bossAdds, int actions, List<RiderState.HudCache> caches) {
     }
 
-    private record TeardownObservation(List<String> events, int handles) {
-    }
 
     private record ActionObservation(List<String> events, RiderState.HudCache cache) {
     }

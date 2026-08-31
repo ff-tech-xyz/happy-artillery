@@ -11,6 +11,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -55,6 +56,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -142,7 +144,7 @@ final class ControlsTest {
         Controls.Admission admission = Controls.handleUseItem(
                 pilot, InteractionHand.MAIN_HAND, state, 11L, plainEnabled, pilot);
 
-        assertEquals(Controls.ControlIntent.NONE, admission.intent(), shape);
+        assertInstanceOf(Controls.Ignored.class, admission, shape);
         assertSame(state, admission.state(), shape);
     }
 
@@ -260,6 +262,79 @@ final class ControlsTest {
     }
 
     @Test
+    void invalidPersistedHudCacheUsesNamedOwnerFailureWithRideIdentity() {
+        RecordingInventory inventory = RecordingInventory.empty();
+        RiderState invalid = new RiderState(Optional.of(RIDE), 10L,
+                Optional.of(new RiderState.HudCache(Double.NaN, "PURPLE", "bad", 9L)));
+
+        Controls.InvalidRiderState failure = assertThrows(
+                Controls.InvalidRiderState.class,
+                () -> Controls.reconcile(inventory, invalid, Optional.of(RIDE), inventory));
+
+        assertEquals(Optional.of(RIDE), failure.rideId());
+        assertEquals("invalid persisted HUD cache", failure.getMessage());
+        assertTrue(inventory.writeSlots().isEmpty());
+    }
+
+    @Test
+    void invalidStateRecoveryWithoutTrustedRideRemovesEveryValidOwnedControlInOneBoundedScan()
+            throws Exception {
+        UUID otherRide = UUID.fromString("33333333-3333-4333-8333-333333333333");
+        UUID foreignOwner = UUID.fromString("44444444-4444-4444-8444-444444444444");
+        TestServerPlayer player = allocate(TestServerPlayer.class);
+        player.id = OWNER;
+        player.inventory = new RecordingPlayerInventory(player);
+        ItemStack plainConfigured = new ItemStack(Items.FIRE_CHARGE);
+        CompoundTag unrelated = new CompoundTag();
+        unrelated.putString("another-mod:owner", "kept");
+        plainConfigured.set(DataComponents.CUSTOM_DATA, CustomData.of(unrelated));
+        ItemStack malformed = configuredAttempt(Items.GHAST_TEAR,
+                markerData("cry", OWNER.toString(), null));
+        ItemStack foreign = Controls.fireControl(foreignOwner, RIDE);
+        player.inventory.setItem(4, Controls.fireControl(OWNER, RIDE));
+        player.inventory.setItem(40, Controls.cryControl(OWNER, otherRide));
+        player.inventory.setItem(9, plainConfigured);
+        player.inventory.setItem(10, malformed);
+        player.inventory.setItem(11, foreign);
+        player.inventory.clearObservations();
+        ItemStack plainBefore = plainConfigured.copy();
+        ItemStack malformedBefore = malformed.copy();
+        ItemStack foreignBefore = foreign.copy();
+
+        RiderState recovered = Controls.recoverInvalidState(
+                player, new Controls.InvalidRiderState(Optional.empty(), "invalid persisted state"));
+
+        assertEquals(RiderState.fresh(), recovered);
+        assertTrue(player.inventory.peek(4).isEmpty());
+        assertTrue(player.inventory.peek(40).isEmpty());
+        assertSame(plainConfigured, player.inventory.peek(9));
+        assertSame(malformed, player.inventory.peek(10));
+        assertSame(foreign, player.inventory.peek(11));
+        assertTrue(ItemStack.matches(plainBefore, plainConfigured));
+        assertTrue(ItemStack.matches(malformedBefore, malformed));
+        assertTrue(ItemStack.matches(foreignBefore, foreign));
+        assertEquals(Stream.concat(java.util.stream.IntStream.rangeClosed(0, 35).boxed(), Stream.of(40)).toList(),
+                player.inventory.readSlots());
+        assertEquals(List.of(4, 40), player.inventory.writeSlots());
+    }
+
+    @Test
+    void heldAdmissionConsumesTheSharedSnapshotAndCannotAcceptMissingGeneratedControl() {
+        TestPilot pilot = TestPilot.riding();
+        ItemStack fire = Controls.fireControl(OWNER, RIDE);
+        pilot.observed = new Controls.ObservedUse(true, InteractionHand.MAIN_HAND, fire);
+        RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+        Controls.InventorySnapshot missing = new Controls.InventorySnapshot(
+                Controls.ControlLocation.MISSING,
+                Controls.ControlLocation.HAND_ACCESSIBLE, 0);
+
+        Controls.Admission admission = Controls.sampleHeld(pilot, state, 11L, missing, pilot);
+
+        assertInstanceOf(Controls.Ignored.class, admission);
+        assertSame(state, admission.state());
+    }
+
+    @Test
     void replacingGeneratedControlBeforeDismountIsNeverOverwrittenOrDeleted() {
         RecordingInventory inventory = RecordingInventory.filled();
         inventory.seed(4, ItemStack.EMPTY);
@@ -332,8 +407,10 @@ final class ControlsTest {
         Controls.Admission offhandAccepted = Controls.handleUseItem(
                 pilot, InteractionHand.OFF_HAND, state, 12L, pilot);
 
-        assertEquals(Controls.ControlIntent.CRY, mainAccepted.intent());
-        assertEquals(Controls.ControlIntent.CRY, offhandAccepted.intent());
+        assertEquals(Controls.ControlIntent.CRY,
+                assertInstanceOf(Controls.Accepted.class, mainAccepted).intent());
+        assertEquals(Controls.ControlIntent.CRY,
+                assertInstanceOf(Controls.Accepted.class, offhandAccepted).intent());
         assertEquals(11L, mainAccepted.state().lastHandledTick());
         assertEquals(12L, offhandAccepted.state().lastHandledTick());
     }
@@ -358,11 +435,12 @@ final class ControlsTest {
                 pilot, RIDE, InteractionHand.MAIN_HAND, state, 21L, pilot);
 
         for (Controls.Admission denied : List.of(noRider, nonPilot, wrongTarget)) {
-            assertEquals(Controls.ControlIntent.NONE, denied.intent());
+            assertInstanceOf(Controls.Ignored.class, denied);
             assertSame(state, denied.state());
             assertEquals(20L, denied.state().lastHandledTick());
         }
-        assertEquals(Controls.ControlIntent.CRY, accepted.intent());
+        assertEquals(Controls.ControlIntent.CRY,
+                assertInstanceOf(Controls.Accepted.class, accepted).intent());
         assertEquals(21L, accepted.state().lastHandledTick());
     }
 
@@ -374,15 +452,21 @@ final class ControlsTest {
         pilot.main = Controls.cryControl(OWNER, RIDE);
         RiderState state = new RiderState(Optional.of(RIDE), 30L, Optional.empty());
 
-        Controls.Admission held = Controls.sampleHeld(pilot, state, 31L, pilot);
+        Controls.InventorySnapshot present = new Controls.InventorySnapshot(
+                Controls.ControlLocation.HAND_ACCESSIBLE,
+                Controls.ControlLocation.HAND_ACCESSIBLE, 0);
+        Controls.Admission held = Controls.sampleHeld(pilot, state, 31L, present, pilot);
         Controls.Admission callbackSameTick = Controls.handleUseItem(
                 pilot, InteractionHand.MAIN_HAND, held.state(), 31L, pilot);
-        Controls.Admission heldNextTick = Controls.sampleHeld(pilot, held.state(), 32L, pilot);
+        Controls.Admission heldNextTick = Controls.sampleHeld(
+                pilot, held.state(), 32L, present, pilot);
 
-        assertEquals(Controls.ControlIntent.FIRE, held.intent());
-        assertEquals(Controls.ControlIntent.NONE, callbackSameTick.intent());
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Accepted.class, held).intent());
+        assertInstanceOf(Controls.Ignored.class, callbackSameTick);
         assertSame(held.state(), callbackSameTick.state());
-        assertEquals(Controls.ControlIntent.FIRE, heldNextTick.intent());
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Accepted.class, heldNextTick).intent());
     }
 
     @Test
@@ -393,8 +477,8 @@ final class ControlsTest {
                 Controls.cryControl(UUID.randomUUID(), RIDE),
                 Controls.cryControl(OWNER, UUID.randomUUID()))) {
             pilot.main = denied;
-            assertEquals(Controls.ControlIntent.NONE, Controls.handleUseItem(
-                    pilot, InteractionHand.MAIN_HAND, state, 11L, pilot).intent());
+            assertInstanceOf(Controls.Ignored.class, Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND, state, 11L, pilot));
         }
     }
 
@@ -405,8 +489,9 @@ final class ControlsTest {
         RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
         Config.Controls enabled = new Config.Controls(
                 "minecraft:fire_charge", "minecraft:ghast_tear", true, true);
-        assertEquals(Controls.ControlIntent.CRY, Controls.handleUseItem(
-                pilot, InteractionHand.MAIN_HAND, state, 11L, enabled, pilot).intent());
+        assertEquals(Controls.ControlIntent.CRY, assertInstanceOf(Controls.Accepted.class,
+                Controls.handleUseItem(
+                        pilot, InteractionHand.MAIN_HAND, state, 11L, enabled, pilot)).intent());
 
         RecordingInventory inventory = RecordingInventory.empty();
         inventory.seed(2, pilot.main);
@@ -667,6 +752,38 @@ final class ControlsTest {
         private TestPlayer() { super(null, new GameProfile(UUID.randomUUID(), "unused")); }
         @Override public UUID getUUID() { return id; }
         @Override public GameType gameMode() { return GameType.SURVIVAL; }
+    }
+
+    private static final class TestServerPlayer extends ServerPlayer {
+        private UUID id;
+        private RecordingPlayerInventory inventory;
+        private TestServerPlayer() {
+            super(null, null, new GameProfile(UUID.randomUUID(), "unused"),
+                    ClientInformation.createDefault());
+        }
+        @Override public UUID getUUID() { return id; }
+        @Override public Inventory getInventory() { return inventory; }
+    }
+
+    private static final class RecordingPlayerInventory extends Inventory {
+        private final List<Integer> reads = new ArrayList<>();
+        private final List<Integer> writes = new ArrayList<>();
+
+        private RecordingPlayerInventory(Player player) {
+            super(player, new EntityEquipment());
+        }
+        void clearObservations() { reads.clear(); writes.clear(); }
+        ItemStack peek(int slot) { return super.getItem(slot); }
+        List<Integer> readSlots() { return List.copyOf(reads); }
+        List<Integer> writeSlots() { return List.copyOf(writes); }
+        @Override public ItemStack getItem(int slot) {
+            reads.add(slot);
+            return super.getItem(slot);
+        }
+        @Override public void setItem(int slot, ItemStack stack) {
+            writes.add(slot);
+            super.setItem(slot, stack);
+        }
     }
 
     private static AnnotationNode annotation(List<AnnotationNode> annotations, String descriptor) {

@@ -271,12 +271,53 @@ final class HappyArtilleryIntegrationTest {
 
         HappyArtillery.tick(access);
 
+        assertEquals(1, access.snapshotCalls);
         assertEquals(1, access.configReads);
         assertEquals(1, access.classifications);
         assertEquals(2, access.ghastProcesses);
         assertEquals(1, access.fireCalls);
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
         assertEquals(true, access.order.indexOf("fuses") > access.order.lastIndexOf("hud:passenger"));
+    }
+
+    @Test
+    void callbackTouchesOnlyTheActorAndDefersSnapshotAndHudUntilTick() {
+        RecordingDriver access = RecordingDriver.ridden();
+        access.onlinePlayersForbidden = true;
+
+        HappyArtillery.handleCallback(access, "pilot", null, InteractionHand.MAIN_HAND);
+
+        assertEquals(1, access.playerChecks.get("pilot"));
+        assertEquals(1, access.fireCalls);
+        assertEquals(0, access.snapshotCalls);
+        assertEquals(List.of(), access.hudSnapshots);
+    }
+
+    @Test
+    void pilotlessRiddenGroupRemovesEveryRiderHudWithoutAdvancingAbilities() {
+        RecordingDriver access = RecordingDriver.pilotless();
+
+        HappyArtillery.tick(access);
+
+        assertEquals(List.of("one", "two"), access.removedHud);
+        assertEquals(0, access.snapshotCalls);
+        assertEquals(0, access.ghastProcesses);
+        assertEquals(0, access.fireCalls);
+        assertEquals(0, access.cryCalls);
+    }
+
+    @Test
+    void namedInvalidRiderStateRecoversOnlyThatPlayerWhileUnexpectedFailuresPropagate() {
+        RecordingDriver invalid = RecordingDriver.invalid("one");
+        HappyArtillery.tick(invalid);
+        assertEquals(List.of("one"), invalid.recovered);
+        assertEquals(List.of("one", "two", "three"), new ArrayList<>(invalid.playerChecks.keySet()));
+
+        RecordingDriver unexpected = RecordingDriver.unexpected("two");
+        RuntimeException failure = assertThrows(RuntimeException.class,
+                () -> HappyArtillery.tick(unexpected));
+        assertEquals("unexpected world failure", failure.getMessage());
+        assertEquals(List.of(), unexpected.recovered);
     }
 
     @Test
@@ -287,7 +328,8 @@ final class HappyArtilleryIntegrationTest {
         Config config = access.config();
 
         HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
-                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()));
+                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
+                access.snapshot("pilot", "ghast"));
 
         assertEquals(1, access.configReads);
         assertEquals(1, access.fireCalls);
@@ -302,7 +344,8 @@ final class HappyArtilleryIntegrationTest {
         Config config = access.config();
 
         HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
-                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()));
+                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
+                access.snapshot("pilot", "ghast"));
 
         assertEquals(2, access.ghastProcesses);
         assertEquals(List.of("pilot:0.0", "passenger:0.0"), access.hudSnapshots);
@@ -314,10 +357,12 @@ final class HappyArtilleryIntegrationTest {
         HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
         HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
         Config config = access.config();
-        Controls.Admission accepted = access.controls("pilot", pilot.state(), 41L, config);
+        Controls.Admission accepted = access.controls(
+                "pilot", pilot.state(), 41L, config, access.snapshot("pilot", "ghast"));
 
         HappyArtillery.processPilot(
-                access, List.of(pilot, passenger), pilot, 41L, config, accepted);
+                access, List.of(pilot, passenger), pilot, 41L, config, accepted,
+                access.snapshot("pilot", "ghast"));
 
         RiderState persisted = access.riderStates.get("pilot");
         assertEquals(41L, persisted.lastHandledTick());
@@ -331,33 +376,20 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void productionCallbackCollectsBoundedOnlineViewsAndUsesExplicitControlConfig() throws IOException {
+    void productionCallbackIsActorLocalAndDefersHudFanOut() throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
         MethodNode callback = method(root, "handleCallback",
                 "(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/entity/Entity;"
                         + "Lnet/minecraft/world/InteractionHand;)V");
-        List<MethodInsnNode> calls = Stream.iterate(
-                        callback.instructions.getFirst(), java.util.Objects::nonNull,
-                        instruction -> instruction.getNext())
-                .filter(MethodInsnNode.class::isInstance)
-                .map(MethodInsnNode.class::cast)
-                .toList();
+        List<MethodInsnNode> calls = methodCalls(callback);
 
-        assertEquals(1, calls.stream().filter(call -> call.name.equals("onlinePlayers")).count());
-        assertEquals(1, calls.stream().filter(call -> call.name.equals("inspectPlayer")).count());
-        assertEquals(0, calls.stream().filter(call ->
-                call.owner.equals("java/util/List") && call.name.equals("of")).count());
-        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
-                "xyz/pyrehaven/happyartillery/Config") && call.name.equals("controls")).count());
-        assertEquals(2, calls.stream().filter(call -> call.owner.equals(
-                "xyz/pyrehaven/happyartillery/Controls")
-                && (call.name.equals("handleUseItem") || call.name.equals("handleUseEntity"))
-                && call.desc.contains("Lxyz/pyrehaven/happyartillery/Config$Controls;")).count());
-        assertEquals(1, calls.stream().filter(call -> call.name.equals("processPilot")).count());
+        assertEquals(0, calls.stream().filter(call -> call.name.equals("onlinePlayers")).count());
+        assertEquals(1, calls.stream().filter(call -> call.name.equals("handleCallback")).count());
+        assertEquals(0, calls.stream().filter(call -> call.name.equals("render")).count());
     }
 
     @Test
-    void productionInspectionReconcilesOnceAndRoutesDismountHudCleanupToHud() throws IOException {
+    void productionInspectionReconcilesOnceWithoutOwningHudFanOut() throws IOException {
         ClassNode access = BytecodeTestSupport.classNode(
                 HappyArtillery.class.getName() + "$MinecraftDriverAccess");
         MethodNode inspect = method(access, "inspectPlayer",
@@ -371,7 +403,7 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals(1, calls.stream().filter(call -> call.owner.equals(
                 "xyz/pyrehaven/happyartillery/Controls") && call.name.equals("reconcile")).count());
-        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+        assertEquals(0, calls.stream().filter(call -> call.owner.equals(
                 "xyz/pyrehaven/happyartillery/Hud") && call.name.equals("remove")).count());
         assertEquals(0, calls.stream().filter(call -> call.owner.equals(
                 "net/minecraft/world/entity/player/Inventory")).count());
@@ -513,13 +545,20 @@ final class HappyArtilleryIntegrationTest {
                 .map(call -> call.name).toList());
         List<MethodInsnNode> controlsCalls = methodCalls(method(access, "controls",
                 "(Lnet/minecraft/server/level/ServerPlayer;L" + PACKAGE
-                        + "RiderState;JL" + PACKAGE + "Config;)L" + PACKAGE
+                        + "RiderState;JL" + PACKAGE + "Config;L" + PACKAGE
+                        + "Controls$InventorySnapshot;)L" + PACKAGE
                         + "Controls$Admission;"));
         assertEquals(1, controlsCalls.stream().filter(call -> call.owner.equals(
                 "xyz/pyrehaven/happyartillery/Controls") && call.name.equals("sampleHeld")
                 && call.desc.contains("Lxyz/pyrehaven/happyartillery/Config$Controls;")).count());
         assertEquals(0, controlsCalls.stream().filter(call -> call.owner.equals(
                 "xyz/pyrehaven/happyartillery/Config") && call.name.equals("current")).count());
+        List<MethodInsnNode> snapshotCalls = methodCalls(method(access, "snapshot",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)L"
+                        + PACKAGE + "Controls$InventorySnapshot;"));
+        assertEquals(1, snapshotCalls.stream().filter(call -> call.owner.equals(
+                "xyz/pyrehaven/happyartillery/Controls") && call.name.equals("snapshot")).count());
     }
 
     @Test
@@ -579,16 +618,26 @@ final class HappyArtilleryIntegrationTest {
 
         private int configReads;
         private int classifications;
+        private int snapshotCalls;
         private int ghastProcesses;
         private int fireCalls;
         private int cryCalls;
         private Config expectedConfig;
         private final boolean consumedFailure;
         private final boolean dedupRegression;
+        private boolean pilotless;
+        private String invalidPlayer;
+        private String unexpectedPlayer;
+        private boolean onlinePlayersForbidden;
         private GhastState authoritativeState;
         private final List<String> hudSnapshots = new ArrayList<>();
+        private final List<String> removedHud = new ArrayList<>();
+        private final List<String> recovered = new ArrayList<>();
         private final Map<String, RiderState> riderStates = new LinkedHashMap<>();
         private final Hud hud = new Hud();
+        private final Controls.InventorySnapshot inventorySnapshot = new Controls.InventorySnapshot(
+                Controls.ControlLocation.HAND_ACCESSIBLE,
+                Controls.ControlLocation.HAND_ACCESSIBLE, 0);
 
         private RecordingDriver(List<String> players) {
             this(players, false, false);
@@ -623,11 +672,43 @@ final class HappyArtilleryIntegrationTest {
             return new RecordingDriver(List.of("pilot", "passenger"), false, true);
         }
 
+        private static RecordingDriver pilotless() {
+            RecordingDriver access = new RecordingDriver(List.of("one", "two"));
+            access.pilotless = true;
+            return access;
+        }
+
+        private static RecordingDriver invalid(String player) {
+            RecordingDriver access = new RecordingDriver(List.of("one", "two", "three"));
+            access.invalidPlayer = player;
+            return access;
+        }
+
+        private static RecordingDriver unexpected(String player) {
+            RecordingDriver access = new RecordingDriver(List.of("one", "two", "three"));
+            access.unexpectedPlayer = player;
+            return access;
+        }
+
         @Override public long gameTime() { clockReads++; order.add("clock"); return 41L; }
-        @Override public List<String> onlinePlayers() { order.add("players"); return players; }
+        @Override public List<String> onlinePlayers() {
+            if (onlinePlayersForbidden) throw new AssertionError("callback scanned online players");
+            order.add("players");
+            return players;
+        }
         @Override public HappyArtillery.PlayerView<String, String> inspectPlayer(String player) {
             playerChecks.merge(player, 1, Integer::sum);
             order.add("check:" + player);
+            if (player.equals(invalidPlayer)) {
+                throw new Controls.InvalidRiderState(Optional.empty(), "invalid test state");
+            }
+            if (player.equals(unexpectedPlayer)) {
+                throw new RuntimeException("unexpected world failure");
+            }
+            if (pilotless) {
+                return new HappyArtillery.PlayerView<>(
+                        player, RiderState.fresh(), Optional.of("ghast"), false);
+            }
             if (players.size() == 2) {
                 return new HappyArtillery.PlayerView<>(player,
                         riderStates.getOrDefault(player, RiderState.fresh()),
@@ -660,9 +741,15 @@ final class HappyArtilleryIntegrationTest {
             return new GhastState(5.0, now, now, 0L, 0L,
                     java.util.OptionalLong.empty(), Optional.empty());
         }
+        @Override public Controls.InventorySnapshot snapshot(String pilot, String ghast) {
+            snapshotCalls++;
+            return inventorySnapshot;
+        }
         @Override public Controls.Admission controls(
-                String pilot, RiderState state, long now, Config config) {
+                String pilot, RiderState state, long now, Config config,
+                Controls.InventorySnapshot snapshot) {
             assertSame(expectedConfig, config);
+            assertSame(inventorySnapshot, snapshot);
             if (dedupRegression) {
                 return Controls.handleUseItem(
                         pilot, InteractionHand.MAIN_HAND, state, now,
@@ -670,6 +757,19 @@ final class HappyArtilleryIntegrationTest {
             }
             return new Controls.Accepted(Controls.ControlIntent.FIRE, state);
         }
+        @Override public Controls.Admission callbackControls(
+                String pilot, Object target, InteractionHand hand,
+                RiderState state, long now, Config config) {
+            assertSame(expectedConfig, config);
+            return new Controls.Accepted(Controls.ControlIntent.FIRE, state.withLastHandledTick(now));
+        }
+        @Override public void recoverInvalidRiderState(
+                String player, Controls.InvalidRiderState failure) {
+            riderStates.put(player, RiderState.fresh());
+            recovered.add(player);
+            removedHud.add(player);
+        }
+        @Override public void removeHud(String player) { removedHud.add(player); }
         @Override public void replaceRiderState(String player, RiderState state) {
             if (dedupRegression) {
                 riderStates.put(player, state);
@@ -701,8 +801,14 @@ final class HappyArtilleryIntegrationTest {
 
         @Override public void render(
                 HappyArtillery.PlayerView<String, String> rider, String ghast,
-                GhastState state, long now, Config config, BiomeClass biomeClass) {
+                GhastState state, long now, Config config, BiomeClass biomeClass,
+                Optional<Controls.InventorySnapshot> pilotSnapshot) {
             assertSame(expectedConfig, config);
+            if (rider.pilot()) {
+                assertSame(inventorySnapshot, pilotSnapshot.orElseThrow());
+            } else {
+                assertEquals(Optional.empty(), pilotSnapshot);
+            }
             hudSnapshots.add(rider.player() + ":" + state.heat());
             order.add("hud:" + rider.player());
             if (dedupRegression) {

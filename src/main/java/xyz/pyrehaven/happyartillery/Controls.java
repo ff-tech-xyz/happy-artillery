@@ -66,6 +66,7 @@ public final class Controls {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(pilotRideId, "pilotRideId");
         Objects.requireNonNull(access, "access");
+        validatePersistedState(state);
         UUID ownerId = access.ownerId(inventory);
         Optional<UUID> previousRide = state.riddenGhastId();
         if (pilotRideId.equals(previousRide)) {
@@ -99,6 +100,38 @@ public final class Controls {
         access.write(inventory, first, fire);
         access.write(inventory, second, cry);
         return mounted;
+    }
+
+    private static void validatePersistedState(RiderState state) {
+        state.hudCache().ifPresent(cache -> {
+            boolean validProgress = Double.isFinite(cache.bossProgress())
+                    && cache.bossProgress() >= -1.0 && cache.bossProgress() <= 1.0;
+            boolean validColor = cache.bossColor().isEmpty()
+                    || cache.bossColor().equals("RED") || cache.bossColor().equals("GOLD")
+                    || cache.bossColor().equals("BLUE") || cache.bossColor().equals("GREEN");
+            if (!validProgress || !validColor) {
+                throw new InvalidRiderState(state.riddenGhastId(), "invalid persisted HUD cache");
+            }
+        });
+    }
+
+    static RiderState recoverInvalidState(ServerPlayer player, InvalidRiderState failure) {
+        Objects.requireNonNull(failure, "failure");
+        removeOwned(player, player.getUUID(), ServerPlayerInventoryAccess.INSTANCE);
+        return RiderState.fresh();
+    }
+
+    private static <T> void removeOwned(T inventory, UUID ownerId, InventoryAccess<T> access) {
+        for (int slot = 0; slot <= MAIN_END; slot++) {
+            Components.Marker marker = Components.marker(access.read(inventory, slot)).marker().orElse(null);
+            if (marker != null && marker.ownerId().equals(ownerId)) {
+                access.write(inventory, slot, ItemStack.EMPTY);
+            }
+        }
+        Components.Marker offhand = Components.marker(access.read(inventory, OFFHAND)).marker().orElse(null);
+        if (offhand != null && offhand.ownerId().equals(ownerId)) {
+            access.write(inventory, OFFHAND, ItemStack.EMPTY);
+        }
     }
 
     static <T> InventorySnapshot snapshot(
@@ -239,32 +272,44 @@ public final class Controls {
     }
 
     static Admission sampleHeld(ServerPlayer player, RiderState state, long gameTick) {
-        return sampleHeld(player, state, gameTick, Config.current().controls(),
+        UUID rideId = state.riddenGhastId().orElseThrow();
+        return sampleHeld(player, state, gameTick, Config.current().controls(), snapshot(player, rideId),
                 ServerPlayerControlAccess.INSTANCE);
     }
 
     static Admission sampleHeld(
-            ServerPlayer player, RiderState state, long gameTick, Config.Controls settings) {
-        return sampleHeld(player, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+            ServerPlayer player, RiderState state, long gameTick, Config.Controls settings,
+            InventorySnapshot snapshot) {
+        return sampleHeld(player, state, gameTick, settings, snapshot,
+                ServerPlayerControlAccess.INSTANCE);
     }
 
     static <P, G> Admission sampleHeld(
-            P player, RiderState state, long gameTick, ControlAccess<P, G> access) {
-        return sampleHeld(player, state, gameTick, Config.current().controls(), access);
+            P player, RiderState state, long gameTick, InventorySnapshot snapshot,
+            ControlAccess<P, G> access) {
+        return sampleHeld(player, state, gameTick, Config.current().controls(), snapshot, access);
     }
 
     static <P, G> Admission sampleHeld(
             P player, RiderState state, long gameTick, Config.Controls settings,
-            ControlAccess<P, G> access) {
+            InventorySnapshot snapshot, ControlAccess<P, G> access) {
         ObservedUse observed = access.observedUse(player);
         ItemStack input = observed.using() ? observed.stack() : ItemStack.EMPTY;
         return admit(player, CallbackSource.SERVER_TICK, input, Optional.empty(), state, gameTick,
-                settings, access);
+                settings, Optional.of(snapshot), access);
     }
 
     private static <P, G> Admission admit(
             P player, CallbackSource source, ItemStack input, Optional<Object> clickedTarget,
             RiderState state, long gameTick, Config.Controls settings, ControlAccess<P, G> access) {
+        return admit(player, source, input, clickedTarget, state, gameTick, settings,
+                Optional.empty(), access);
+    }
+
+    private static <P, G> Admission admit(
+            P player, CallbackSource source, ItemStack input, Optional<Object> clickedTarget,
+            RiderState state, long gameTick, Config.Controls settings,
+            Optional<InventorySnapshot> snapshot, ControlAccess<P, G> access) {
         Optional<G> ridden = access.riddenHappyGhast(player);
         if (ridden.isEmpty() || clickedTarget.filter(target -> target != ridden.get()).isPresent()
                 || !access.isControllingFirstPassenger(player, ridden.get())) {
@@ -274,16 +319,18 @@ public final class Controls {
         if (!state.riddenGhastId().equals(Optional.of(rideId))) {
             return new Ignored(state);
         }
-        ControlIntent intent = classify(player, source, input, rideId, settings, access);
-        if (intent == ControlIntent.NONE || state.lastHandledTick() == gameTick) {
+        Optional<ControlIntent> intent = classify(
+                player, source, input, rideId, settings, snapshot, access);
+        if (intent.isEmpty() || state.lastHandledTick() == gameTick) {
             return new Ignored(state);
         }
-        return new Accepted(intent, state.withLastHandledTick(gameTick));
+        return new Accepted(intent.orElseThrow(), state.withLastHandledTick(gameTick));
     }
 
-    private static <P, G> ControlIntent classify(
+    private static <P, G> Optional<ControlIntent> classify(
             P player, CallbackSource source, ItemStack input, UUID rideId,
-            Config.Controls settings, ControlAccess<P, G> access) {
+            Config.Controls settings, Optional<InventorySnapshot> snapshot,
+            ControlAccess<P, G> access) {
         UUID ownerId = access.playerId(player);
         Components.MarkerRead markerRead = Components.marker(input);
         Optional<Components.Marker> marker = markerRead.marker();
@@ -300,14 +347,16 @@ public final class Controls {
             plainCry = false;
         }
         if (source == CallbackSource.SERVER_TICK) {
-            return settings.holdToFire() && (markedFire || plainFire)
-                    ? ControlIntent.FIRE : ControlIntent.NONE;
+            boolean generatedPresent = !markedFire
+                    || snapshot.orElseThrow().fire() != ControlLocation.MISSING;
+            return settings.holdToFire() && (markedFire && generatedPresent || plainFire)
+                    ? Optional.of(ControlIntent.FIRE) : Optional.empty();
         }
         if (markedCry || plainCry) {
-            return ControlIntent.CRY;
+            return Optional.of(ControlIntent.CRY);
         }
         return !settings.holdToFire() && (markedFire || plainFire)
-                ? ControlIntent.FIRE : ControlIntent.NONE;
+                ? Optional.of(ControlIntent.FIRE) : Optional.empty();
     }
 
     private static boolean isConfiguredItem(ItemStack stack, String itemId) {
@@ -339,10 +388,9 @@ public final class Controls {
     }
 
     enum CallbackSource { CALLBACK, SERVER_TICK }
-    enum ControlIntent { FIRE, CRY, NONE }
+    enum ControlIntent { FIRE, CRY }
 
     sealed interface Admission permits Accepted, Ignored {
-        ControlIntent intent();
         RiderState state();
     }
 
@@ -350,13 +398,24 @@ public final class Controls {
         Accepted {
             Objects.requireNonNull(intent, "intent");
             Objects.requireNonNull(state, "state");
-            if (intent == ControlIntent.NONE) throw new IllegalArgumentException("intent required");
         }
     }
 
     record Ignored(RiderState state) implements Admission {
         Ignored { Objects.requireNonNull(state, "state"); }
-        @Override public ControlIntent intent() { return ControlIntent.NONE; }
+    }
+
+    static final class InvalidRiderState extends RuntimeException {
+        private final Optional<UUID> rideId;
+
+        InvalidRiderState(Optional<UUID> rideId, String message) {
+            super(message);
+            this.rideId = Objects.requireNonNull(rideId, "rideId");
+        }
+
+        Optional<UUID> rideId() {
+            return rideId;
+        }
     }
 
     record ObservedUse(boolean using, InteractionHand hand, ItemStack stack) {

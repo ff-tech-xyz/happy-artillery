@@ -23,19 +23,22 @@ import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.EntityHitResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 /** Composition root for the guarded owner graph. */
 public final class HappyArtillery implements ModInitializer {
+    private static final Logger LOGGER = LoggerFactory.getLogger("happy-artillery");
     private static final Hud HUD = new Hud();
 
     @Override
@@ -80,52 +83,66 @@ public final class HappyArtillery implements ModInitializer {
     static <P, G> void tick(DriverAccess<P, G> access) {
         Objects.requireNonNull(access, "access");
         long now = access.gameTime();
-        List<PlayerView<P, G>> players = new ArrayList<>();
+        Map<Object, List<PlayerView<P, G>>> groups = new LinkedHashMap<>();
         for (P player : access.onlinePlayers()) {
-            players.add(access.inspectPlayer(player));
+            PlayerView<P, G> view;
+            try {
+                view = access.inspectPlayer(player);
+            } catch (Controls.InvalidRiderState failure) {
+                access.recoverInvalidRiderState(player, failure);
+                continue;
+            }
+            if (view.riddenGhast().isEmpty()) {
+                access.removeHud(player);
+                continue;
+            }
+            G ghast = view.riddenGhast().orElseThrow();
+            groups.computeIfAbsent(access.ghastId(ghast), ignored -> new java.util.ArrayList<>())
+                    .add(view);
         }
-        LinkedHashSet<Object> processed = new LinkedHashSet<>();
-        for (PlayerView<P, G> pilot : players) {
-            if (!pilot.pilot()) {
+        for (List<PlayerView<P, G>> riders : groups.values()) {
+            PlayerView<P, G> pilot = riders.stream().filter(PlayerView::pilot).findFirst().orElse(null);
+            if (pilot == null) {
+                riders.forEach(rider -> access.removeHud(rider.player()));
                 continue;
             }
             G ghast = pilot.riddenGhast().orElseThrow();
-            Object ghastId = access.ghastId(ghast);
-            if (!processed.add(ghastId)) {
-                continue;
-            }
-            processPilot(access, players, pilot, now);
+            Controls.InventorySnapshot snapshot = access.snapshot(pilot.player(), ghast);
+            processPilot(access, riders, pilot, now, snapshot);
         }
         access.runDueFuses(now);
     }
 
     private static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
-            PlayerView<P, G> pilot, long now) {
+            PlayerView<P, G> pilot, long now, Controls.InventorySnapshot snapshot) {
         G ghast = pilot.riddenGhast().orElseThrow();
         Config config = access.config();
         BiomeClass biomeClass = access.classify(ghast, config);
         GhastState state = access.ghastState(ghast);
         GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
-        Controls.Admission admission = access.controls(pilot.player(), pilot.state(), now, config);
-        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission);
+        Controls.Admission admission = access.controls(
+                pilot.player(), pilot.state(), now, config, snapshot);
+        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission, snapshot);
     }
 
     static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
-            PlayerView<P, G> pilot, long now, Config config, Controls.Admission admission) {
+            PlayerView<P, G> pilot, long now, Config config, Controls.Admission admission,
+            Controls.InventorySnapshot snapshot) {
         G ghast = pilot.riddenGhast().orElseThrow();
         Objects.requireNonNull(config, "config");
         BiomeClass biomeClass = access.classify(ghast, config);
         GhastState state = access.ghastState(ghast);
         GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
-        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission);
+        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission, snapshot);
     }
 
     private static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
             PlayerView<P, G> pilot, long now, Config config, BiomeClass biomeClass,
-            GhastState state, GhastState advanced, Controls.Admission admission) {
+            GhastState state, GhastState advanced, Controls.Admission admission,
+            Controls.InventorySnapshot snapshot) {
         G ghast = pilot.riddenGhast().orElseThrow();
         Object ghastId = access.ghastId(ghast);
         if (!advanced.equals(state)) {
@@ -139,7 +156,6 @@ public final class HappyArtillery implements ModInitializer {
             switch (accepted.intent()) {
                 case FIRE -> access.fire(pilot.player(), ghast, advanced, now, config, biomeClass);
                 case CRY -> access.cry(pilot.player(), ghast, advanced, now, config);
-                case NONE -> throw new IllegalStateException("Accepted control intent cannot be NONE");
             }
             post = access.ghastState(ghast);
         }
@@ -150,7 +166,8 @@ public final class HappyArtillery implements ModInitializer {
                         ? new PlayerView<>(
                                 rider.player(), acceptedPilotState, rider.riddenGhast(), rider.pilot())
                         : rider;
-                access.render(renderView, ghast, post, now, config, biomeClass);
+                access.render(renderView, ghast, post, now, config, biomeClass,
+                        rider == pilot ? Optional.of(snapshot) : Optional.empty());
             }
         }
     }
@@ -165,7 +182,15 @@ public final class HappyArtillery implements ModInitializer {
         BiomeClass classify(G ghast, Config config);
         GhastState ghastState(G ghast);
         GhastState advance(G ghast, GhastState state, long now, Config config, BiomeClass biomeClass);
-        Controls.Admission controls(P pilot, RiderState state, long now, Config config);
+        Controls.InventorySnapshot snapshot(P pilot, G ghast);
+        Controls.Admission controls(
+                P pilot, RiderState state, long now, Config config,
+                Controls.InventorySnapshot snapshot);
+        Controls.Admission callbackControls(
+                P pilot, Object target, InteractionHand hand,
+                RiderState state, long now, Config config);
+        void recoverInvalidRiderState(P player, Controls.InvalidRiderState failure);
+        void removeHud(P player);
         void replaceRiderState(P player, RiderState state);
         void replaceGhastState(G ghast, GhastState state);
         Abilities.FireOutcome fire(
@@ -173,7 +198,8 @@ public final class HappyArtillery implements ModInitializer {
         Abilities.CryOutcome cry(P pilot, G ghast, GhastState state, long now, Config config);
         void render(
                 PlayerView<P, G> rider, G ghast, GhastState state, long now,
-                Config config, BiomeClass biomeClass);
+                Config config, BiomeClass biomeClass,
+                Optional<Controls.InventorySnapshot> pilotSnapshot);
     }
 
     record PlayerView<P, G>(P player, RiderState state, Optional<G> riddenGhast, boolean pilot) {
@@ -341,30 +367,45 @@ public final class HappyArtillery implements ModInitializer {
 
     private static void handleCallback(ServerPlayer player, Entity target, InteractionHand hand) {
         MinecraftDriverAccess access = new MinecraftDriverAccess(player.level().getServer());
+        handleCallback(access, player, target, hand);
+    }
+
+    static <P, G> void handleCallback(
+            DriverAccess<P, G> access, P player, Object target, InteractionHand hand) {
         long now = access.gameTime();
         Config config = access.config();
-        List<PlayerView<ServerPlayer, HappyGhast>> players = new ArrayList<>();
-        PlayerView<ServerPlayer, HappyGhast> view = null;
-        for (ServerPlayer online : access.onlinePlayers()) {
-            PlayerView<ServerPlayer, HappyGhast> inspected = access.inspectPlayer(online);
-            players.add(inspected);
-            if (online == player) {
-                view = inspected;
-            }
-        }
-        if (view == null) {
+        PlayerView<P, G> view;
+        try {
+            view = access.inspectPlayer(player);
+        } catch (Controls.InvalidRiderState failure) {
+            access.recoverInvalidRiderState(player, failure);
             return;
         }
         if (!view.pilot()) {
             return;
         }
-        Config.Controls controls = config.controls();
-        Controls.Admission admission = target == null
-                ? Controls.handleUseItem(player, hand, view.state(), now, controls)
-                : Controls.handleUseEntity(
-                        player, target, hand, view.state(), now, controls);
-        if (admission instanceof Controls.Accepted) {
-            processPilot(access, players, view, now, config, admission);
+        Controls.Admission admission = access.callbackControls(
+                player, target, hand, view.state(), now, config);
+        processActorInput(access, view, now, config, admission);
+    }
+
+    private static <P, G> void processActorInput(
+            DriverAccess<P, G> access, PlayerView<P, G> pilot, long now,
+            Config config, Controls.Admission admission) {
+        if (!(admission instanceof Controls.Accepted accepted)) {
+            return;
+        }
+        G ghast = pilot.riddenGhast().orElseThrow();
+        BiomeClass biomeClass = access.classify(ghast, config);
+        GhastState state = access.ghastState(ghast);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
+        if (!advanced.equals(state)) {
+            access.replaceGhastState(ghast, advanced);
+        }
+        access.replaceRiderState(pilot.player(), accepted.state());
+        switch (accepted.intent()) {
+            case FIRE -> access.fire(pilot.player(), ghast, advanced, now, config, biomeClass);
+            case CRY -> access.cry(pilot.player(), ghast, advanced, now, config);
         }
     }
 
@@ -402,9 +443,6 @@ public final class HappyArtillery implements ModInitializer {
             RiderState reconciled = Controls.reconcile(player, state, pilotGhastId);
             if (reconciled != state) {
                 RiderState.replace(target, reconciled);
-            }
-            if (ridden.isEmpty()) {
-                HUD.remove(player);
             }
             return new PlayerView<>(player, reconciled, ridden, pilot);
         }
@@ -451,9 +489,41 @@ public final class HappyArtillery implements ModInitializer {
         }
 
         @Override
+        public Controls.InventorySnapshot snapshot(ServerPlayer pilot, HappyGhast ghast) {
+            return Controls.snapshot(pilot, ghast.getUUID());
+        }
+
+        @Override
         public Controls.Admission controls(
-                ServerPlayer pilot, RiderState state, long now, Config config) {
-            return Controls.sampleHeld(pilot, state, now, config.controls());
+                ServerPlayer pilot, RiderState state, long now, Config config,
+                Controls.InventorySnapshot snapshot) {
+            return Controls.sampleHeld(pilot, state, now, config.controls(), snapshot);
+        }
+
+        @Override
+        public Controls.Admission callbackControls(
+                ServerPlayer pilot, Object target, InteractionHand hand,
+                RiderState state, long now, Config config) {
+            return target == null
+                    ? Controls.handleUseItem(pilot, hand, state, now, config.controls())
+                    : Controls.handleUseEntity(
+                            pilot, target, hand, state, now, config.controls(),
+                            Controls.ServerPlayerControlAccess.INSTANCE);
+        }
+
+        @Override
+        public void recoverInvalidRiderState(
+                ServerPlayer player, Controls.InvalidRiderState failure) {
+            LOGGER.warn("Resetting invalid persisted rider state for {}: {}",
+                    player.getUUID(), failure.getMessage());
+            RiderState.replace((AttachmentTarget) (Object) player,
+                    Controls.recoverInvalidState(player, failure));
+            HUD.remove(player);
+        }
+
+        @Override
+        public void removeHud(ServerPlayer player) {
+            HUD.remove(player);
         }
 
         @Override
@@ -494,13 +564,17 @@ public final class HappyArtillery implements ModInitializer {
         @Override
         public void render(
                 PlayerView<ServerPlayer, HappyGhast> rider, HappyGhast ghast,
-                GhastState state, long now, Config config, BiomeClass biomeClass) {
+                GhastState state, long now, Config config, BiomeClass biomeClass,
+                Optional<Controls.InventorySnapshot> pilotSnapshot) {
             Hud.Status status = biomeClass == BiomeClass.NETHER
                     ? Hud.Status.NO_COOLING
                     : now <= state.firingWindowEndTick() ? Hud.Status.FIRING : Hud.Status.COOLING;
+            if (!(ghast.level() instanceof net.minecraft.server.level.ServerLevel level)) {
+                throw new IllegalArgumentException("HUD requires a loaded server Happy Ghast");
+            }
             RiderState updated = HUD.update(
-                    rider.player(), ghast, rider.state(), now,
-                    new Hud.Snapshot(state.heat(), biomeClass, status), config);
+                    rider.player(), level, ghast, rider.state(), now,
+                    new Hud.Snapshot(state.heat(), biomeClass, status, pilotSnapshot), config);
             if (!updated.equals(rider.state())) {
                 replaceRiderState(rider.player(), updated);
             }

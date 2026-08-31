@@ -9,9 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -106,11 +104,23 @@ public final class Hud {
             attachmentDelivered = true;
         }
 
+        String actionText = actionText(progress, snapshot);
+        boolean controlWarning = snapshot.pilotControls().isPresent()
+                && !normalControlStatus(snapshot.pilotControls().orElseThrow());
+        boolean actionDelivered = false;
+        if (controlWarning && session.actionEnabled
+                && !actionText.equals(cache.actionBarText())) {
+            Color warningColor = missingControl(snapshot.pilotControls().orElseThrow())
+                    ? Color.RED : Color.GOLD;
+            access.actionBar(rider, actionText, warningColor);
+            cache = new RiderState.HudCache(
+                    cache.bossProgress(), cache.bossColor(), actionText, now);
+            actionDelivered = true;
+        }
         if (attachmentDelivered) {
             session.lastRefreshTick = now;
             session.refreshed = true;
         } else if (refreshDue) {
-            String actionText = actionText(progress, snapshot);
             for (int offset = 0; offset < 4; offset++) {
                 int channel = (session.nextChannel + offset) % 4;
                 boolean delivered = false;
@@ -136,7 +146,7 @@ public final class Hud {
                             cache.bossProgress(), color.name(),
                             cache.actionBarText(), cache.lastActionBarTick());
                     delivered = true;
-                } else if (channel == 3
+                } else if (channel == 3 && !actionDelivered
                         && session.actionEnabled
                         && !actionText.equals(cache.actionBarText())) {
                     access.actionBar(rider, actionText,
@@ -161,38 +171,34 @@ public final class Hud {
 
     RiderState update(
             ServerPlayer rider,
+            ServerLevel level,
             HappyGhast ghast,
             RiderState riderState,
             long now,
             Snapshot snapshot,
             Config config) {
         Objects.requireNonNull(ghast, "ghast");
-        return update(rider.getUUID(), rider, ghast.getUUID(), riderState, now, snapshot, config,
-                new MinecraftPresentationAccess(ghast));
-    }
-
-    <R, H> List<RiderView<R>> updateAll(
-            Object ghastId,
-            List<RiderView<R>> riders,
-            long now,
-            Snapshot snapshot,
-            Config config,
-            PresentationAccess<R, H> access) {
-        Objects.requireNonNull(riders, "riders");
-        List<RiderView<R>> updated = new ArrayList<>(riders.size());
-        for (RiderView<R> view : riders) {
-            updated.add(new RiderView<>(view.riderId(), view.rider(),
-                    update(view.riderId(), view.rider(), ghastId, view.state(), now, snapshot, config, access)));
+        if (ghast.level() != Objects.requireNonNull(level, "level")) {
+            throw new IllegalArgumentException("HUD ghast must be loaded in the rider's server level");
         }
-        return List.copyOf(updated);
+        return update(rider.getUUID(), rider, ghast.getUUID(), riderState, now, snapshot, config,
+                new MinecraftPresentationAccess(level, ghast));
     }
 
     void remove(ServerPlayer rider) {
-        remove(rider.getUUID(), rider, new MinecraftPresentationAccess(null));
+        Session session = sessions.remove(rider.getUUID());
+        if (session != null && session.display != null) {
+            ((ServerBossEvent) session.display.handle()).removePlayer(rider);
+        }
     }
 
     void clear() {
-        clear(new MinecraftPresentationAccess(null));
+        for (Session session : sessions.values()) {
+            if (session.display != null) {
+                ((ServerBossEvent) session.display.handle()).removePlayer((ServerPlayer) session.viewer);
+            }
+        }
+        sessions.clear();
     }
 
     <R, H> void remove(Object riderId, R rider, PresentationAccess<R, H> access) {
@@ -224,19 +230,41 @@ public final class Hud {
         sessions.clear();
     }
 
-    int handleCount() {
-        return (int) sessions.values().stream().filter(session -> session.display != null).count();
-    }
 
     static Component bossBarName(Component customName) {
         return customName != null ? customName : Component.literal("HappyGhast");
     }
 
     private static String actionText(double progress, Snapshot snapshot) {
+        if (snapshot.pilotControls().isPresent()) {
+            Controls.InventorySnapshot controls = snapshot.pilotControls().orElseThrow();
+            if (missingControl(controls)) {
+                return "CONTROL MISSING · DISMOUNT AND REMOUNT";
+            }
+            int inventoryOnly = (controls.fire() == Controls.ControlLocation.MAIN_INVENTORY_ONLY ? 1 : 0)
+                    + (controls.cry() == Controls.ControlLocation.MAIN_INVENTORY_ONLY ? 1 : 0);
+            if (inventoryOnly == 1) {
+                return "CONTROL IN INVENTORY";
+            }
+            if (inventoryOnly == 2) {
+                return "CONTROLS IN INVENTORY";
+            }
+        }
         if (snapshot.biomeClass() == BiomeClass.NETHER) {
             return "NETHER · NO COOLING";
         }
         return "HEAT " + Math.round(progress * 100.0) + "% · " + snapshot.status().label;
+    }
+
+    private static boolean missingControl(Controls.InventorySnapshot controls) {
+        return controls.fire() == Controls.ControlLocation.MISSING
+                || controls.cry() == Controls.ControlLocation.MISSING;
+    }
+
+    private static boolean normalControlStatus(Controls.InventorySnapshot controls) {
+        return !missingControl(controls)
+                && controls.fire() != Controls.ControlLocation.MAIN_INVENTORY_ONLY
+                && controls.cry() != Controls.ControlLocation.MAIN_INVENTORY_ONLY;
     }
 
     private static double normalized(double heat, double limit) {
@@ -271,18 +299,17 @@ public final class Hud {
         return new RiderState.HudCache(-1.0, "", "", Long.MIN_VALUE);
     }
 
-    public record RiderView<R>(Object riderId, R rider, RiderState state) {
-        public RiderView {
-            Objects.requireNonNull(riderId, "riderId");
-            Objects.requireNonNull(rider, "rider");
-            Objects.requireNonNull(state, "state");
+    public record Snapshot(
+            double heat, BiomeClass biomeClass, Status status,
+            Optional<Controls.InventorySnapshot> pilotControls) {
+        public Snapshot(double heat, BiomeClass biomeClass, Status status) {
+            this(heat, biomeClass, status, Optional.empty());
         }
-    }
 
-    public record Snapshot(double heat, BiomeClass biomeClass, Status status) {
         public Snapshot {
             Objects.requireNonNull(biomeClass, "biomeClass");
             Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(pilotControls, "pilotControls");
         }
     }
 
@@ -323,10 +350,12 @@ public final class Hud {
 
     private static final class MinecraftPresentationAccess
             implements PresentationAccess<ServerPlayer, ServerBossEvent> {
+        private final ServerLevel level;
         private final HappyGhast ghast;
 
-        private MinecraftPresentationAccess(HappyGhast ghast) {
-            this.ghast = ghast;
+        private MinecraftPresentationAccess(ServerLevel level, HappyGhast ghast) {
+            this.level = Objects.requireNonNull(level, "level");
+            this.ghast = Objects.requireNonNull(ghast, "ghast");
         }
 
         @Override
@@ -365,9 +394,6 @@ public final class Hud {
 
         @Override
         public void warningParticle(ServerPlayer rider) {
-            if (ghast == null || !(ghast.level() instanceof ServerLevel level)) {
-                throw new IllegalStateException("Warning particles require the ridden server ghast");
-            }
             level.sendParticles(rider, ParticleTypes.FLAME, false, false,
                     ghast.getX(), ghast.getY(0.5) + 0.5, ghast.getZ(),
                     8, 0.5, 0.5, 0.5, 0.01);
