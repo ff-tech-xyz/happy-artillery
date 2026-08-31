@@ -287,6 +287,13 @@ public final class Abilities {
         return Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
     }
 
+    private static AABB occupiedBounds(HappyGhast ghast) {
+        return ghast.getSelfAndPassengers()
+                .map(Entity::getBoundingBox)
+                .reduce(AABB::minmax)
+                .orElseThrow();
+    }
+
     record Launch(Vec3 origin, Vec3 direction) {
         Launch {
             Objects.requireNonNull(origin, "origin");
@@ -740,12 +747,8 @@ public final class Abilities {
         @Override
         public boolean addProjectile(ServerPlayer pilot, HappyGhast ghast, int explosionPower) {
             ServerLevel level = (ServerLevel) ghast.level();
-            AABB occupied = ghast.getSelfAndPassengers()
-                    .map(Entity::getBoundingBox)
-                    .reduce(AABB::minmax)
-                    .orElseThrow();
             Launch launch = launch(
-                    pilot.getEyePosition(), pilot.getViewVector(1.0F), occupied,
+                    pilot.getEyePosition(), pilot.getViewVector(1.0F), occupiedBounds(ghast),
                     EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
             LargeFireball projectile = new LargeFireball(
                     level, ghast, launch.direction(), explosionPower);
@@ -825,15 +828,18 @@ public final class Abilities {
                 ServerPlayer pilot, HappyGhast ghast, double power, boolean breaksBlocks) {
             Level level = ghast.level();
             level.explode(pilot, ghast.getX(), ghast.getY(), ghast.getZ(), (float) power,
-                    breaksBlocks ? Level.ExplosionInteraction.BLOCK : Level.ExplosionInteraction.NONE);
+                    breaksBlocks ? Level.ExplosionInteraction.MOB : Level.ExplosionInteraction.NONE);
         }
 
         @Override
         public boolean spawnFireball(HappyGhast ghast, Vec3 direction, double speed, int power) {
             ServerLevel level = (ServerLevel) ghast.level();
-            LargeFireball fireball = new LargeFireball(level, ghast, direction, power);
-            fireball.setPos(ghast.getX(), ghast.getY(0.5), ghast.getZ());
-            fireball.setDeltaMovement(direction.scale(speed));
+            Launch launch = launch(
+                    ghast.getBoundingBox().getCenter(), direction, occupiedBounds(ghast),
+                    EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
+            LargeFireball fireball = new LargeFireball(level, ghast, launch.direction(), power);
+            fireball.setPos(launch.origin());
+            fireball.setDeltaMovement(launch.direction().scale(speed));
             return level.addFreshEntity(fireball);
         }
 

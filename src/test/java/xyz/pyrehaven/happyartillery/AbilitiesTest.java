@@ -510,6 +510,30 @@ final class AbilitiesTest {
     }
 
     @Test
+    void terrainDisabledSkipsConfiguredFireWithoutCountingItAsRejected() {
+        RecordingDetonationAccess access = new RecordingDetonationAccess();
+        access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        access.fireballAccepted = false;
+        Config config = configWithOverheat(0, 6.0, 2, 0.4, 2, 5, 8.0,
+                false, false);
+
+        Abilities.DetonationOutcome outcome = Abilities.executeDetonation(
+                new Object(), 140L, config, access);
+
+        assertEquals(new Abilities.DetonationConsumedWithFailures(2), outcome);
+        assertEquals(List.of("replace", "explode:6.0:false", "fireball", "fireball"),
+                access.events);
+        assertEquals(1, access.explosions);
+        assertFalse(access.explosionBreaksBlocks);
+        assertEquals(2, access.directions.size());
+        assertEquals(0, access.fireOffsets.size());
+        assertEquals(0, access.removals);
+        assertEquals(java.util.OptionalLong.empty(), access.state.detonateAtTick());
+        assertEquals(java.util.Optional.empty(), access.state.detonatingRiderId());
+    }
+
+    @Test
     void rejectedEffectsStillRunOneCompletePassAfterConsumptionThenAttemptRemoval() {
         RecordingDetonationAccess access = new RecordingDetonationAccess();
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
@@ -937,6 +961,26 @@ final class AbilitiesTest {
         assertEquals(0, callsTo(fire,
                 "xyz/pyrehaven/happyartillery/Abilities", "executeDetonation").size());
 
+    }
+
+    @Test
+    void productionExplosionUsesNoneOrMobAndNeverOwnsBlockDestruction() throws Exception {
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
+        MethodNode explode = exactMethod(adapter, "explode",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;DZ)V");
+        List<String> interactions = instructions(explode).stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals(
+                        "net/minecraft/world/level/Level$ExplosionInteraction"))
+                .map(field -> field.name)
+                .toList();
+
+        assertEquals(List.of("MOB", "NONE"), interactions);
+        assertFalse(interactions.contains("BLOCK"));
+        assertEquals(1, callsTo(explode, "net/minecraft/world/level/Level", "explode").size());
     }
 
     @Test
@@ -1382,18 +1426,10 @@ final class AbilitiesTest {
                 .map(MethodInsnNode.class::cast)
                 .toList();
         assertEquals(1, callsTo(method,
+                "xyz/pyrehaven/happyartillery/Abilities", "occupiedBounds").size());
+        assertEquals(0, callsTo(method,
                 "net/minecraft/world/entity/animal/happyghast/HappyGhast",
                 "getSelfAndPassengers").size());
-        Set<String> streamTargets = instructions(method).stream()
-                .filter(InvokeDynamicInsnNode.class::isInstance)
-                .map(InvokeDynamicInsnNode.class::cast)
-                .flatMap(dynamic -> java.util.Arrays.stream(dynamic.bsmArgs))
-                .filter(Handle.class::isInstance)
-                .map(Handle.class::cast)
-                .map(handle -> handle.getOwner() + "." + handle.getName())
-                .collect(Collectors.toSet());
-        assertTrue(streamTargets.contains("net/minecraft/world/entity/Entity.getBoundingBox"));
-        assertTrue(streamTargets.contains("net/minecraft/world/phys/AABB.minmax"));
         assertEquals(1, callsTo(method, "net/minecraft/world/entity/EntityType", "getSpawnAABB").size());
         assertEquals(1, callsTo(method, "xyz/pyrehaven/happyartillery/Abilities", "launch").size());
         assertEquals(1, callsTo(method,
@@ -1418,23 +1454,90 @@ final class AbilitiesTest {
                 + "Lnet/minecraft/world/phys/Vec3;I)V");
         assertEquals(List.of(
                 "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
-                "ALOAD 4", "ALOAD 2", "ALOAD 6",
+                "ALOAD 4", "ALOAD 2", "ALOAD 5",
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "ILOAD 3"), shape.subList(constructor - 7, constructor));
         int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
                 + "(Lnet/minecraft/world/phys/Vec3;)V");
         assertEquals(List.of(
-                "ALOAD 7", "ALOAD 6",
+                "ALOAD 6", "ALOAD 5",
                 "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(setPosition - 3, setPosition));
 
         ClassNode abilities = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode occupiedBounds = exactMethod(abilities, "occupiedBounds",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)"
+                        + "Lnet/minecraft/world/phys/AABB;");
+        assertEquals(1, callsTo(occupiedBounds,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast",
+                "getSelfAndPassengers").size());
+        Set<String> streamTargets = instructions(occupiedBounds).stream()
+                .filter(InvokeDynamicInsnNode.class::isInstance)
+                .map(InvokeDynamicInsnNode.class::cast)
+                .flatMap(dynamic -> java.util.Arrays.stream(dynamic.bsmArgs))
+                .filter(Handle.class::isInstance)
+                .map(Handle.class::cast)
+                .map(handle -> handle.getOwner() + "." + handle.getName())
+                .collect(Collectors.toSet());
+        assertTrue(streamTargets.contains("net/minecraft/world/entity/Entity.getBoundingBox"));
+        assertTrue(streamTargets.contains("net/minecraft/world/phys/AABB.minmax"));
         MethodNode launch = exactMethod(abilities, "launch",
                 "(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;"
                         + "Lnet/minecraft/world/phys/AABB;Lnet/minecraft/world/phys/AABB;)"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$Launch;");
         assertEquals(1, callsTo(launch, "net/minecraft/world/phys/AABB", "inflate").size());
+    }
+
+    @Test
+    void productionOverheatFireballUsesSharedLaunchForConstructorPositionAndSpeed()
+            throws Exception {
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
+        MethodNode method = exactMethod(adapter, "spawnFireball",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
+                        + "Lnet/minecraft/world/phys/Vec3;DI)Z");
+        assertEquals(1, callsTo(method,
+                "xyz/pyrehaven/happyartillery/Abilities", "occupiedBounds").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast",
+                "getBoundingBox").size());
+        assertEquals(1, callsTo(method, "net/minecraft/world/phys/AABB", "getCenter").size());
+        assertEquals(1, callsTo(method, "net/minecraft/world/entity/EntityType", "getSpawnAABB").size());
+        assertEquals(1, callsTo(method,
+                "xyz/pyrehaven/happyartillery/Abilities", "launch").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "<init>").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "setPos").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball",
+                "setDeltaMovement").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/server/level/ServerLevel", "addFreshEntity").size());
+
+        List<String> shape = instructionShape(method);
+        int constructor = shape.indexOf("INVOKESPECIAL LargeFireball.<init> "
+                + "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;"
+                + "Lnet/minecraft/world/phys/Vec3;I)V");
+        assertEquals(List.of(
+                "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
+                "ALOAD 6", "ALOAD 1", "ALOAD 7",
+                "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
+                "ILOAD 5"), shape.subList(constructor - 7, constructor));
+        int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
+                + "(Lnet/minecraft/world/phys/Vec3;)V");
+        assertEquals(List.of(
+                "ALOAD 8", "ALOAD 7",
+                "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
+                shape.subList(setPosition - 3, setPosition));
+        int movement = shape.indexOf("INVOKEVIRTUAL LargeFireball.setDeltaMovement "
+                + "(Lnet/minecraft/world/phys/Vec3;)V");
+        assertEquals(List.of(
+                "ALOAD 8", "ALOAD 7",
+                "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
+                "OPCODE_24 3", "INVOKEVIRTUAL Vec3.scale (D)Lnet/minecraft/world/phys/Vec3;"),
+                shape.subList(movement - 5, movement));
     }
 
     @Test
@@ -1469,6 +1572,103 @@ final class AbilitiesTest {
                 assertFalse(spawned.intersects(ridden), launchCase + " intersects " + ridden);
             }
         }
+    }
+
+    @Test
+    void allTwentyFourSphereLaunchesAreDistinctUnitAndClearCompleteRiddenBounds()
+            throws Exception {
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
+        net.minecraft.world.phys.AABB ghast = new net.minecraft.world.phys.AABB(
+                -2.0, 0.0, -2.0, 2.0, 4.0, 2.0);
+        net.minecraft.world.phys.AABB topRider = new net.minecraft.world.phys.AABB(
+                -0.4, 4.0, -0.4, 0.4, 6.0, 0.4);
+        net.minecraft.world.phys.AABB bottomRider = new net.minecraft.world.phys.AABB(
+                -0.4, -2.0, -0.4, 0.4, 0.0, 0.4);
+        net.minecraft.world.phys.AABB sideRider = new net.minecraft.world.phys.AABB(
+                2.0, 1.0, -0.5, 5.0, 3.0, 0.5);
+        List<net.minecraft.world.phys.AABB> riddenBounds =
+                List.of(ghast, topRider, bottomRider, sideRider);
+        net.minecraft.world.phys.AABB union = ghast.minmax(topRider)
+                .minmax(bottomRider).minmax(sideRider);
+        net.minecraft.world.phys.AABB projectileAtOrigin =
+                net.minecraft.world.entity.EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0);
+        Vec3 start = ghast.getCenter();
+        java.lang.reflect.Method sphereDirection = Abilities.class.getDeclaredMethod(
+                "sphereDirection", int.class, int.class);
+        sphereDirection.setAccessible(true);
+        Set<Vec3> directions = new java.util.HashSet<>();
+        Set<Vec3> origins = new java.util.HashSet<>();
+        Set<net.minecraft.world.phys.AABB> spawnedBounds = new java.util.HashSet<>();
+
+        for (int index = 0; index < 24; index++) {
+            Vec3 direction = (Vec3) sphereDirection.invoke(null, index, 24);
+            Abilities.Launch launch = Abilities.launch(
+                    start, direction, union, projectileAtOrigin);
+            net.minecraft.world.phys.AABB spawned = projectileAtOrigin.move(launch.origin());
+
+            assertTrue(Math.abs(direction.length() - 1.0) < 1.0E-12);
+            assertTrue(launch.direction().distanceTo(direction) < 1.0E-12);
+            for (net.minecraft.world.phys.AABB ridden : riddenBounds) {
+                assertFalse(spawned.intersects(ridden), index + " intersects " + ridden);
+            }
+            directions.add(direction);
+            origins.add(launch.origin());
+            spawnedBounds.add(spawned);
+        }
+
+        assertEquals(24, directions.size());
+        assertEquals(24, origins.size());
+        assertEquals(24, spawnedBounds.size());
+    }
+
+    @Test
+    void genericDetonationConstructsAndHandsOffEachSphereDirectionOnce() throws Exception {
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode effectLoop = exactMethod(abilities, "executeDetonation",
+                "(Ljava/lang/Object;JLjava/util/UUID;J"
+                        + "Lxyz/pyrehaven/happyartillery/Config;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$ExecutionEvidence;"
+                        + "Ljava/util/Optional;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationOutcome;");
+        String sphereDescriptor = "(II)Lnet/minecraft/world/phys/Vec3;";
+        String spawnDescriptor = "(Ljava/lang/Object;Lnet/minecraft/world/phys/Vec3;DI)Z";
+        List<MethodInsnNode> sphereCalls = callsTo(effectLoop,
+                "xyz/pyrehaven/happyartillery/Abilities", "sphereDirection");
+        List<MethodInsnNode> spawnCalls = callsTo(effectLoop,
+                "xyz/pyrehaven/happyartillery/Abilities$DetonationAccess", "spawnFireball");
+
+        assertEquals(1, sphereCalls.size());
+        assertEquals(sphereDescriptor, sphereCalls.getFirst().desc);
+        assertEquals(1, spawnCalls.size());
+        assertEquals(spawnDescriptor, spawnCalls.getFirst().desc);
+        List<String> shape = exactOwnerInstructionShape(effectLoop);
+        int spawn = shape.indexOf("INVOKEINTERFACE "
+                + "xyz/pyrehaven/happyartillery/Abilities$DetonationAccess.spawnFireball "
+                + spawnDescriptor);
+        assertEquals(List.of(
+                "ALOAD 7",
+                "ALOAD 0",
+                "ILOAD 15",
+                "ALOAD 12",
+                "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballCount ()I",
+                "INVOKESTATIC xyz/pyrehaven/happyartillery/Abilities.sphereDirection "
+                        + sphereDescriptor,
+                "ALOAD 12",
+                "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballSpeed ()D",
+                "ALOAD 12",
+                "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballPower ()I",
+                "INVOKEINTERFACE "
+                        + "xyz/pyrehaven/happyartillery/Abilities$DetonationAccess.spawnFireball "
+                        + spawnDescriptor),
+                shape.subList(spawn - 10, spawn + 1));
+        assertEquals(0, callsTo(effectLoop,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball",
+                "setPos").size());
+        assertEquals(0, callsTo(effectLoop,
+                "net/minecraft/server/level/ServerLevel", "addFreshEntity").size());
     }
 
     @Test
@@ -1919,6 +2119,7 @@ final class AbilitiesTest {
             case Opcodes.CHECKCAST -> "CHECKCAST";
             case Opcodes.DUP -> "DUP";
             case Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
+            case Opcodes.INVOKEINTERFACE -> "INVOKEINTERFACE";
             case Opcodes.INVOKESPECIAL -> "INVOKESPECIAL";
             case Opcodes.INVOKESTATIC -> "INVOKESTATIC";
             case Opcodes.GETSTATIC -> "GETSTATIC";
