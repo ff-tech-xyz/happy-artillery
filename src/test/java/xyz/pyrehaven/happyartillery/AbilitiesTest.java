@@ -321,6 +321,23 @@ final class AbilitiesTest {
     }
 
     @Test
+    void productionGeometryRejectionUsesTheFireEffectBoundaryWithoutStateMutationOrFallback() {
+        RecordingAccess access = new RecordingAccess();
+        access.addSucceeds = false;
+        GhastState original = new GhastState(20.0, 50L, 50L, 0L, 300L,
+                java.util.OptionalLong.empty());
+
+        Abilities.FireOutcome outcome = fire(original, 100L, access);
+
+        assertEquals(new Abilities.Rejected(Abilities.FireRejection.EFFECT_FAILED), outcome);
+        assertEquals(List.of("add"), access.events);
+        assertEquals(1, access.adds);
+        assertEquals(0, access.replacements);
+        assertEquals(20.0, original.heat());
+        assertEquals(0L, original.fireReadyTick());
+    }
+
+    @Test
     void pendingDetonationLocksOutFurtherShotsBeforeHeatOrProjectileSpend() {
         RecordingAccess access = new RecordingAccess();
         GhastState pending = new GhastState(99.0, 100L, 120L, 0L, 300L,
@@ -505,6 +522,10 @@ final class AbilitiesTest {
                 Math.abs(direction.length() - 1.0) < 1.0E-9));
         assertTrue(access.fireOffsets.stream().allMatch(offset -> offset.length() <= 8.0));
         assertEquals(0.0, access.replacedState.heat());
+        assertEquals(140L, access.replacedState.heatAnchorTick());
+        assertEquals(140L, access.replacedState.firingWindowEndTick());
+        assertEquals(140L, access.replacedState.fireReadyTick());
+        assertEquals(300L, access.replacedState.cryReadyTick());
         assertEquals(java.util.OptionalLong.empty(), access.replacedState.detonateAtTick());
         assertEquals(0, access.removals);
     }
@@ -534,6 +555,26 @@ final class AbilitiesTest {
     }
 
     @Test
+    void oneRejectedFireballCountsOnceAndDoesNotAbortRemainingConfiguredAttempts() {
+        RecordingDetonationAccess access = new RecordingDetonationAccess();
+        access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        access.fireballResults.addAll(List.of(false, true, true));
+        Config config = configWithOverheat(0, 6.0, 3, 0.4, 2, 0, 8.0,
+                false, true);
+
+        Abilities.DetonationOutcome outcome = Abilities.executeDetonation(
+                new Object(), 140L, config, access);
+
+        assertEquals(new Abilities.DetonationConsumedWithFailures(1), outcome);
+        assertEquals(List.of("replace", "explode:6.0:true", "fireball", "fireball", "fireball"),
+                access.events);
+        assertEquals(3, access.directions.size());
+        assertEquals(java.util.OptionalLong.empty(), access.state.detonateAtTick());
+        assertEquals(java.util.Optional.empty(), access.state.detonatingRiderId());
+    }
+
+    @Test
     void rejectedEffectsStillRunOneCompletePassAfterConsumptionThenAttemptRemoval() {
         RecordingDetonationAccess access = new RecordingDetonationAccess();
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
@@ -542,14 +583,13 @@ final class AbilitiesTest {
         access.fireAttempts.addAll(List.of(
                 Abilities.FireAttempt.SKIPPED,
                 Abilities.FireAttempt.REJECTED));
-        access.removalAccepted = false;
         Config config = configWithOverheat(0, 6.0, 2, 0.4, 2, 2, 8.0,
                 true, true);
 
         Abilities.DetonationOutcome outcome = Abilities.executeDetonation(
                 new Object(), 140L, config, access);
 
-        assertEquals(new Abilities.DetonationConsumedWithFailures(4), outcome);
+        assertEquals(new Abilities.DetonationConsumedWithFailures(3), outcome);
         assertEquals(List.of("replace", "explode:6.0:true", "fireball", "fireball", "fire", "fire",
                 "remove"), access.events);
         assertEquals(java.util.OptionalLong.empty(), access.state.detonateAtTick());
@@ -560,6 +600,13 @@ final class AbilitiesTest {
         assertEquals(2, access.directions.size());
         assertEquals(2, access.fireOffsets.size());
         assertEquals(1, access.removals);
+        assertEquals(101.0, access.stateAtRemoval.heat());
+        assertEquals(100L, access.stateAtRemoval.heatAnchorTick());
+        assertEquals(120L, access.stateAtRemoval.firingWindowEndTick());
+        assertEquals(105L, access.stateAtRemoval.fireReadyTick());
+        assertEquals(300L, access.stateAtRemoval.cryReadyTick());
+        assertEquals(java.util.OptionalLong.empty(), access.stateAtRemoval.detonateAtTick());
+        assertEquals("remove", access.events.getLast());
     }
 
     @Test
@@ -939,8 +986,35 @@ final class AbilitiesTest {
                 "net/minecraft/server/players/PlayerList.getPlayer"));
         assertTrue(detonationCalls.stream().noneMatch(call -> call.endsWith("MinecraftServer.schedule")));
 
+        Class<?> access = Class.forName(
+                "xyz.pyrehaven.happyartillery.Abilities$DetonationAccess");
+        assertEquals(void.class, access.getDeclaredMethod("remove", Object.class).getReturnType());
+        MethodNode remove = exactMethod(detonation, "remove",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)V");
+        assertEquals(List.of(
+                        "ALOAD 1",
+                        "INVOKEVIRTUAL net/minecraft/world/entity/animal/happyghast/HappyGhast.discard ()V",
+                        "RETURN"),
+                exactOwnerInstructionShape(remove));
+        assertEquals(1, callsTo(remove,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "discard").size());
+        assertEquals(0, callsTo(remove,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "isRemoved").size());
+        assertEquals(0, instructions(remove).stream().filter(JumpInsnNode.class::isInstance).count());
+
         ClassNode abilities = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode effects = exactMethod(abilities, "executeDetonation",
+                "(Ljava/lang/Object;JLjava/util/UUID;J"
+                        + "Lxyz/pyrehaven/happyartillery/Config;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$ExecutionEvidence;"
+                        + "Ljava/util/Optional;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationOutcome;");
+        List<MethodInsnNode> removals = callsTo(effects,
+                "xyz/pyrehaven/happyartillery/Abilities$DetonationAccess", "remove");
+        assertEquals(1, removals.size());
+        assertEquals("(Ljava/lang/Object;)V", removals.getFirst().desc);
         assertEquals(1, abilities.methods.stream()
                 .flatMap(method -> instructions(method).stream())
                 .filter(MethodInsnNode.class::isInstance)
@@ -1432,6 +1506,9 @@ final class AbilitiesTest {
                 "getSelfAndPassengers").size());
         assertEquals(1, callsTo(method, "net/minecraft/world/entity/EntityType", "getSpawnAABB").size());
         assertEquals(1, callsTo(method, "xyz/pyrehaven/happyartillery/Abilities", "launch").size());
+        assertEquals(1, callsTo(method, "java/util/Optional", "isEmpty").size());
+        assertEquals(1, callsTo(method, "java/util/Optional", "get").size());
+        assertEquals(0, callsTo(method, "java/util/Optional", "orElseThrow").size());
         assertEquals(1, callsTo(method,
                 "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "<init>").size());
         assertEquals(1, callsTo(method,
@@ -1448,19 +1525,20 @@ final class AbilitiesTest {
                 .filter(IntInsnNode.class::isInstance).map(IntInsnNode.class::cast)
                 .filter(instruction -> instruction.operand == 1016).count());
         assertTrue(calls.stream().noneMatch(call -> call.name.equals("setDeltaMovement")));
+        assertOptionalLaunchBranch(method, 5, Opcodes.IFEQ);
         List<String> shape = instructionShape(method);
         int constructor = shape.indexOf("INVOKESPECIAL LargeFireball.<init> "
                 + "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;"
                 + "Lnet/minecraft/world/phys/Vec3;I)V");
         assertEquals(List.of(
                 "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
-                "ALOAD 4", "ALOAD 2", "ALOAD 5",
+                "ALOAD 4", "ALOAD 2", "ALOAD 6",
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "ILOAD 3"), shape.subList(constructor - 7, constructor));
         int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
                 + "(Lnet/minecraft/world/phys/Vec3;)V");
         assertEquals(List.of(
-                "ALOAD 6", "ALOAD 5",
+                "ALOAD 7", "ALOAD 6",
                 "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(setPosition - 3, setPosition));
 
@@ -1485,7 +1563,7 @@ final class AbilitiesTest {
         MethodNode launch = exactMethod(abilities, "launch",
                 "(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;"
                         + "Lnet/minecraft/world/phys/AABB;Lnet/minecraft/world/phys/AABB;)"
-                        + "Lxyz/pyrehaven/happyartillery/Abilities$Launch;");
+                        + "Ljava/util/Optional;");
         assertEquals(1, callsTo(launch, "net/minecraft/world/phys/AABB", "inflate").size());
     }
 
@@ -1497,6 +1575,7 @@ final class AbilitiesTest {
         MethodNode method = exactMethod(adapter, "spawnFireball",
                 "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
                         + "Lnet/minecraft/world/phys/Vec3;DI)Z");
+        assertEquals(0, method.access & Opcodes.ACC_BRIDGE);
         assertEquals(1, callsTo(method,
                 "xyz/pyrehaven/happyartillery/Abilities", "occupiedBounds").size());
         assertEquals(1, callsTo(method,
@@ -1506,6 +1585,9 @@ final class AbilitiesTest {
         assertEquals(1, callsTo(method, "net/minecraft/world/entity/EntityType", "getSpawnAABB").size());
         assertEquals(1, callsTo(method,
                 "xyz/pyrehaven/happyartillery/Abilities", "launch").size());
+        assertEquals(1, callsTo(method, "java/util/Optional", "isEmpty").size());
+        assertEquals(1, callsTo(method, "java/util/Optional", "get").size());
+        assertEquals(0, callsTo(method, "java/util/Optional", "orElseThrow").size());
         assertEquals(1, callsTo(method,
                 "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "<init>").size());
         assertEquals(1, callsTo(method,
@@ -1516,25 +1598,26 @@ final class AbilitiesTest {
         assertEquals(1, callsTo(method,
                 "net/minecraft/server/level/ServerLevel", "addFreshEntity").size());
 
+        assertOptionalLaunchBranch(method, 7, Opcodes.IFEQ);
         List<String> shape = instructionShape(method);
         int constructor = shape.indexOf("INVOKESPECIAL LargeFireball.<init> "
                 + "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;"
                 + "Lnet/minecraft/world/phys/Vec3;I)V");
         assertEquals(List.of(
                 "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
-                "ALOAD 6", "ALOAD 1", "ALOAD 7",
+                "ALOAD 6", "ALOAD 1", "ALOAD 8",
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "ILOAD 5"), shape.subList(constructor - 7, constructor));
         int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
                 + "(Lnet/minecraft/world/phys/Vec3;)V");
         assertEquals(List.of(
-                "ALOAD 8", "ALOAD 7",
+                "ALOAD 9", "ALOAD 8",
                 "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(setPosition - 3, setPosition));
         int movement = shape.indexOf("INVOKEVIRTUAL LargeFireball.setDeltaMovement "
                 + "(Lnet/minecraft/world/phys/Vec3;)V");
         assertEquals(List.of(
-                "ALOAD 8", "ALOAD 7",
+                "ALOAD 9", "ALOAD 8",
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "OPCODE_24 3", "INVOKEVIRTUAL Vec3.scale (D)Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(movement - 5, movement));
@@ -1562,8 +1645,9 @@ final class AbilitiesTest {
                 List.of(new Vec3(0.0, 2.0, 0.0), new Vec3(1.0, 1.0, 1.0)));
 
         for (List<Vec3> launchCase : cases) {
-            Object launch = launchMethod.invoke(
-                    null, launchCase.get(0), launchCase.get(1), union, projectileAtOrigin);
+            Object launch = ((java.util.Optional<?>) launchMethod.invoke(
+                    null, launchCase.get(0), launchCase.get(1), union, projectileAtOrigin))
+                    .orElseThrow();
             Vec3 origin = (Vec3) launch.getClass().getDeclaredMethod("origin").invoke(launch);
             Vec3 direction = (Vec3) launch.getClass().getDeclaredMethod("direction").invoke(launch);
             assertEquals(launchCase.get(1).normalize(), direction);
@@ -1604,7 +1688,7 @@ final class AbilitiesTest {
         for (int index = 0; index < 24; index++) {
             Vec3 direction = (Vec3) sphereDirection.invoke(null, index, 24);
             Abilities.Launch launch = Abilities.launch(
-                    start, direction, union, projectileAtOrigin);
+                    start, direction, union, projectileAtOrigin).orElseThrow();
             net.minecraft.world.phys.AABB spawned = projectileAtOrigin.move(launch.origin());
 
             assertTrue(Math.abs(direction.length() - 1.0) < 1.0E-12);
@@ -1672,14 +1756,22 @@ final class AbilitiesTest {
     }
 
     @Test
-    void launchRejectsInvalidAimAndStartLoudly() {
+    void launchReturnsEmptyForFiniteGameplayGeometryRejectionsButKeepsImpossibleDataLoud() {
         net.minecraft.world.phys.AABB occupied = new net.minecraft.world.phys.AABB(
                 -2.0, -2.0, -2.0, 2.0, 2.0, 2.0);
         net.minecraft.world.phys.AABB projectile = new net.minecraft.world.phys.AABB(
                 -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
 
-        assertThrows(IllegalArgumentException.class,
-                () -> Abilities.launch(Vec3.ZERO, Vec3.ZERO, occupied, projectile));
+        assertEquals(java.util.Optional.empty(),
+                Abilities.launch(Vec3.ZERO, Vec3.ZERO, occupied, projectile));
+        assertEquals(java.util.Optional.empty(), Abilities.launch(Vec3.ZERO,
+                new Vec3(1.0E-7, 0.0, 0.0), occupied, projectile));
+        assertEquals(java.util.Optional.empty(), Abilities.launch(new Vec3(20.0, 0.0, 0.0),
+                new Vec3(1.0, 0.0, 0.0), occupied, projectile));
+        assertEquals(java.util.Optional.empty(), Abilities.launch(
+                new Vec3(-Double.MAX_VALUE, 0.0, 0.0), new Vec3(1.0, 0.0, 0.0),
+                new net.minecraft.world.phys.AABB(
+                        -Double.MAX_VALUE, -1.0, -1.0, Double.MAX_VALUE, 1.0, 1.0), projectile));
         assertThrows(IllegalArgumentException.class,
                 () -> Abilities.launch(Vec3.ZERO,
                         new Vec3(Double.NaN, 0.0, 0.0), occupied, projectile));
@@ -1687,8 +1779,21 @@ final class AbilitiesTest {
                 () -> Abilities.launch(new Vec3(Double.POSITIVE_INFINITY, 0.0, 0.0),
                         new Vec3(1.0, 0.0, 0.0), occupied, projectile));
         assertThrows(IllegalArgumentException.class,
-                () -> Abilities.launch(new Vec3(20.0, 0.0, 0.0),
-                        new Vec3(1.0, 0.0, 0.0), occupied, projectile));
+                () -> Abilities.launch(Vec3.ZERO, new Vec3(1.0, 0.0, 0.0),
+                        new net.minecraft.world.phys.AABB(
+                                Double.NaN, 0.0, 0.0, 1.0, 1.0, 1.0), projectile));
+        assertThrows(IllegalArgumentException.class,
+                () -> Abilities.launch(Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), occupied,
+                        new net.minecraft.world.phys.AABB(
+                                0.0, 0.0, 0.0, Double.POSITIVE_INFINITY, 1.0, 1.0)));
+        assertThrows(NullPointerException.class,
+                () -> Abilities.launch(null, Vec3.ZERO, occupied, projectile));
+        assertThrows(NullPointerException.class,
+                () -> Abilities.launch(Vec3.ZERO, null, occupied, projectile));
+        assertThrows(NullPointerException.class,
+                () -> Abilities.launch(Vec3.ZERO, Vec3.ZERO, null, projectile));
+        assertThrows(NullPointerException.class,
+                () -> Abilities.launch(Vec3.ZERO, Vec3.ZERO, occupied, null));
     }
 
     @Test
@@ -1883,10 +1988,12 @@ final class AbilitiesTest {
             implements Abilities.DetonationAccess<Object, Object> {
         private GhastState state = GhastState.fresh();
         private GhastState replacedState;
+        private GhastState stateAtRemoval;
         private boolean loaded = true;
         private boolean riderAvailable = true;
         private boolean fireballAccepted = true;
-        private boolean removalAccepted = true;
+        private final List<Boolean> fireballResults = new ArrayList<>();
+
         private boolean attachmentPresent = true;
         private RuntimeException replacementFailure;
         private RuntimeException explosionFailure;
@@ -1991,7 +2098,7 @@ final class AbilitiesTest {
                 double speed, int power) {
             directions.add(direction);
             events.add("fireball");
-            return fireballAccepted;
+            return fireballResults.isEmpty() ? fireballAccepted : fireballResults.removeFirst();
         }
 
         @Override
@@ -2005,10 +2112,10 @@ final class AbilitiesTest {
         }
 
         @Override
-        public boolean remove(Object ghast) {
+        public void remove(Object ghast) {
             removals++;
+            stateAtRemoval = states.getOrDefault(ghast, state);
             events.add("remove");
-            return removalAccepted;
         }
     }
 
@@ -2034,6 +2141,86 @@ final class AbilitiesTest {
                 .map(MethodInsnNode.class::cast)
                 .filter(call -> call.owner.equals(owner) && call.name.equals(name))
                 .toList();
+    }
+
+    private static void assertOptionalLaunchBranch(
+            MethodNode method, int candidateLocal, int expectedOpcode) {
+        String launchDescriptor = "(Lnet/minecraft/world/phys/Vec3;"
+                + "Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;"
+                + "Lnet/minecraft/world/phys/AABB;)Ljava/util/Optional;";
+        List<AbstractInsnNode> semantic = instructions(method);
+        List<MethodInsnNode> launchCalls = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.owner.equals("xyz/pyrehaven/happyartillery/Abilities")
+                        && call.name.equals("launch") && call.desc.equals(launchDescriptor))
+                .toList();
+        assertEquals(1, launchCalls.size());
+        int launchIndex = semantic.indexOf(launchCalls.getFirst());
+        assertTrue(semantic.get(launchIndex + 1) instanceof VarInsnNode);
+        VarInsnNode candidateStore = (VarInsnNode) semantic.get(launchIndex + 1);
+        assertEquals(Opcodes.ASTORE, candidateStore.getOpcode());
+        assertEquals(candidateLocal, candidateStore.var);
+        assertEquals(1, semantic.stream()
+                .filter(VarInsnNode.class::isInstance)
+                .map(VarInsnNode.class::cast)
+                .filter(instruction -> instruction.getOpcode() == Opcodes.ASTORE
+                        && instruction.var == candidateLocal)
+                .count());
+
+        List<MethodInsnNode> emptyCalls = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.owner.equals("java/util/Optional")
+                        && call.name.equals("isEmpty") && call.desc.equals("()Z"))
+                .toList();
+        assertEquals(1, emptyCalls.size());
+        int emptyCallIndex = semantic.indexOf(emptyCalls.getFirst());
+        assertTrue(semantic.get(emptyCallIndex - 1) instanceof VarInsnNode);
+        VarInsnNode emptyReceiver = (VarInsnNode) semantic.get(emptyCallIndex - 1);
+        assertEquals(Opcodes.ALOAD, emptyReceiver.getOpcode());
+        assertEquals(candidateLocal, emptyReceiver.var);
+        assertTrue(semantic.get(emptyCallIndex + 1) instanceof JumpInsnNode);
+        JumpInsnNode branch = (JumpInsnNode) semantic.get(emptyCallIndex + 1);
+        assertEquals(expectedOpcode, branch.getOpcode());
+
+        AbstractInsnNode target = branch.label;
+        while (target != null && target.getOpcode() < 0) {
+            target = target.getNext();
+        }
+        int targetIndex = semantic.indexOf(target);
+        assertTrue(targetIndex >= 0);
+        int fallthroughIndex = emptyCallIndex + 2;
+        int emptyIndex = expectedOpcode == Opcodes.IFEQ ? fallthroughIndex : targetIndex;
+        int nonEmptyIndex = expectedOpcode == Opcodes.IFEQ ? targetIndex : fallthroughIndex;
+        assertEquals(Opcodes.ICONST_0, semantic.get(emptyIndex).getOpcode());
+        assertEquals(Opcodes.IRETURN, semantic.get(emptyIndex + 1).getOpcode());
+
+        assertTrue(semantic.get(nonEmptyIndex) instanceof VarInsnNode);
+        VarInsnNode getReceiver = (VarInsnNode) semantic.get(nonEmptyIndex);
+        assertEquals(Opcodes.ALOAD, getReceiver.getOpcode());
+        assertEquals(candidateLocal, getReceiver.var);
+        assertTrue(semantic.get(nonEmptyIndex + 1) instanceof MethodInsnNode);
+        MethodInsnNode get = (MethodInsnNode) semantic.get(nonEmptyIndex + 1);
+        assertEquals("java/util/Optional", get.owner);
+        assertEquals("get", get.name);
+        assertEquals("()Ljava/lang/Object;", get.desc);
+        assertEquals(1, semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.owner.equals("java/util/Optional")
+                        && call.name.equals("get")
+                        && call.desc.equals("()Ljava/lang/Object;"))
+                .count());
+        List<TypeInsnNode> constructions = semantic.stream()
+                .filter(TypeInsnNode.class::isInstance)
+                .map(TypeInsnNode.class::cast)
+                .filter(instruction -> instruction.getOpcode() == Opcodes.NEW
+                        && instruction.desc.equals("net/minecraft/world/entity/projectile/"
+                                + "hurtingprojectile/LargeFireball"))
+                .toList();
+        assertEquals(1, constructions.size());
+        assertTrue(nonEmptyIndex + 1 < semantic.indexOf(constructions.getFirst()));
     }
 
     private static List<AbstractInsnNode> instructions(MethodNode method) {

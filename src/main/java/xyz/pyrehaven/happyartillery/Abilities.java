@@ -215,8 +215,8 @@ public final class Abilities {
                 }
             }
         }
-        if (overheat.killsGhast() && !access.remove(ghast)) {
-            rejectedAttempts++;
+        if (overheat.killsGhast()) {
+            access.remove(ghast);
         }
         return rejectedAttempts == 0
                 ? new DetonationConsumed()
@@ -243,13 +243,16 @@ public final class Abilities {
         return new Vec3(Math.cos(angle) * distance, 0.0, Math.sin(angle) * distance);
     }
 
-    static Launch launch(Vec3 start, Vec3 aim, AABB occupied, AABB projectileAtOrigin) {
+    static Optional<Launch> launch(Vec3 start, Vec3 aim, AABB occupied, AABB projectileAtOrigin) {
         Objects.requireNonNull(start, "start");
         Objects.requireNonNull(aim, "aim");
         Objects.requireNonNull(occupied, "occupied");
         Objects.requireNonNull(projectileAtOrigin, "projectileAtOrigin");
-        if (!finite(start) || !finite(aim) || aim.lengthSqr() <= 1.0E-12) {
+        if (!finite(start) || !finite(aim) || !finite(occupied) || !finite(projectileAtOrigin)) {
             throw new IllegalArgumentException("fireball launch requires a finite non-zero aim");
+        }
+        if (aim.lengthSqr() <= 1.0E-12) {
+            return Optional.empty();
         }
         Vec3 direction = aim.normalize();
         AABB expanded = occupied.inflate(
@@ -259,17 +262,17 @@ public final class Abilities {
         if (start.x < expanded.minX || start.x > expanded.maxX
                 || start.y < expanded.minY || start.y > expanded.maxY
                 || start.z < expanded.minZ || start.z > expanded.maxZ) {
-            throw new IllegalArgumentException("fireball launch start is outside ridden bounds");
+            return Optional.empty();
         }
         double exit = Double.POSITIVE_INFINITY;
         exit = exitDistance(start.x, direction.x, expanded.minX, expanded.maxX, exit);
         exit = exitDistance(start.y, direction.y, expanded.minY, expanded.maxY, exit);
         exit = exitDistance(start.z, direction.z, expanded.minZ, expanded.maxZ, exit);
         if (!Double.isFinite(exit) || exit < 0.0) {
-            throw new IllegalArgumentException("fireball aim cannot exit ridden bounds");
+            return Optional.empty();
         }
         Vec3 center = start.add(direction.scale(exit));
-        return new Launch(center.subtract(projectileAtOrigin.getCenter()), direction);
+        return Optional.of(new Launch(center.subtract(projectileAtOrigin.getCenter()), direction));
     }
 
     private static double exitDistance(
@@ -285,6 +288,12 @@ public final class Abilities {
 
     private static boolean finite(Vec3 vector) {
         return Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
+    }
+
+    private static boolean finite(AABB bounds) {
+        return Double.isFinite(bounds.minX) && Double.isFinite(bounds.minY)
+                && Double.isFinite(bounds.minZ) && Double.isFinite(bounds.maxX)
+                && Double.isFinite(bounds.maxY) && Double.isFinite(bounds.maxZ);
     }
 
     private static AABB occupiedBounds(HappyGhast ghast) {
@@ -694,7 +703,7 @@ public final class Abilities {
 
         FireAttempt placeFire(G ghast, Vec3 offset);
 
-        boolean remove(G ghast);
+        void remove(G ghast);
     }
 
 
@@ -747,9 +756,13 @@ public final class Abilities {
         @Override
         public boolean addProjectile(ServerPlayer pilot, HappyGhast ghast, int explosionPower) {
             ServerLevel level = (ServerLevel) ghast.level();
-            Launch launch = launch(
+            Optional<Launch> candidate = launch(
                     pilot.getEyePosition(), pilot.getViewVector(1.0F), occupiedBounds(ghast),
                     EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
+            if (candidate.isEmpty()) {
+                return false;
+            }
+            Launch launch = candidate.get();
             LargeFireball projectile = new LargeFireball(
                     level, ghast, launch.direction(), explosionPower);
             projectile.setPos(launch.origin());
@@ -834,9 +847,13 @@ public final class Abilities {
         @Override
         public boolean spawnFireball(HappyGhast ghast, Vec3 direction, double speed, int power) {
             ServerLevel level = (ServerLevel) ghast.level();
-            Launch launch = launch(
+            Optional<Launch> candidate = launch(
                     ghast.getBoundingBox().getCenter(), direction, occupiedBounds(ghast),
                     EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
+            if (candidate.isEmpty()) {
+                return false;
+            }
+            Launch launch = candidate.get();
             LargeFireball fireball = new LargeFireball(level, ghast, launch.direction(), power);
             fireball.setPos(launch.origin());
             fireball.setDeltaMovement(launch.direction().scale(speed));
@@ -857,9 +874,8 @@ public final class Abilities {
         }
 
         @Override
-        public boolean remove(HappyGhast ghast) {
+        public void remove(HappyGhast ghast) {
             ghast.discard();
-            return ghast.isRemoved();
         }
     }
 
