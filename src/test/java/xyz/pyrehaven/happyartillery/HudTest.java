@@ -192,8 +192,8 @@ final class HudTest {
     @Test
     void restartIgnoresPersistedDirtyStateAndSendsFreshUnchangedChannels() {
         RiderState persisted = new RiderState(
-                java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.empty(),
-                Long.MIN_VALUE, java.util.Optional.of(new RiderState.HudCache(
+                java.util.Optional.empty(), Long.MIN_VALUE,
+                java.util.Optional.of(new RiderState.HudCache(
                 0.9, "RED", "HEAT 90% · FIRING", 100L)));
         RecordingAccess access = new RecordingAccess();
 
@@ -596,14 +596,13 @@ final class HudTest {
                 Arrays.stream(Hud.PresentationAccess.class.getDeclaredMethods())
                         .map(java.lang.reflect.Method::getName).collect(java.util.stream.Collectors.toSet()));
 
-        RiderState before = new RiderState(
-                java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.of(GHAST_ID),
+        RiderState before = new RiderState(java.util.Optional.of(GHAST_ID),
                 47L, java.util.Optional.empty());
         Hud.Snapshot snapshot = new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING);
         RiderState after = new Hud().update(RIDER_ID, RIDER_ID, GHAST_ID, before, 20L,
                 snapshot, Config.defaults(), new RecordingAccess());
-        assertEquals(List.of(before.fireStash(), before.cryStash(), before.riddenGhastId(), before.lastHandledTick()),
-                List.of(after.fireStash(), after.cryStash(), after.riddenGhastId(), after.lastHandledTick()));
+        assertEquals(List.of(before.riddenGhastId(), before.lastHandledTick()),
+                List.of(after.riddenGhastId(), after.lastHandledTick()));
         assertEquals(new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING), snapshot);
 
         for (String className : List.of(

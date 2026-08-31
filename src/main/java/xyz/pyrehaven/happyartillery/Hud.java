@@ -156,9 +156,7 @@ public final class Hud {
         if (riderState.hudCache().isPresent() && riderState.hudCache().get().equals(cache)) {
             return riderState;
         }
-        return new RiderState(
-                riderState.fireStash(), riderState.cryStash(), riderState.riddenGhastId(),
-                riderState.lastHandledTick(), Optional.of(cache));
+        return riderState.withHudCache(cache);
     }
 
     RiderState update(

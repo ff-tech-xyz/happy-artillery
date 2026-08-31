@@ -605,8 +605,6 @@ final class HappyArtilleryIntegrationTest {
             this.dedupRegression = dedupRegression;
             if (dedupRegression) {
                 riderStates.put("pilot", new RiderState(
-                        Optional.of(new RiderState.StashedStack(4, ItemStack.EMPTY)),
-                        Optional.of(new RiderState.StashedStack(5, ItemStack.EMPTY)),
                         Optional.of(RegressionControlAccess.GHAST_ID),
                         Long.MIN_VALUE, Optional.empty()));
                 riderStates.put("passenger", RiderState.fresh());
@@ -732,11 +730,9 @@ final class HappyArtilleryIntegrationTest {
             return player.equals("pilot");
         }
         @Override public UUID ghastId(String ghast) { return GHAST_ID; }
+        @Override public UUID playerId(String player) { return new UUID(0L, 0L); }
         @Override public ItemStack itemInHand(String player, InteractionHand hand) {
-            return Controls.cryControl();
-        }
-        @Override public ItemStack itemAt(String player, int slot) {
-            return slot == 4 ? Controls.fireControl() : Controls.cryControl();
+            return Controls.cryControl(new UUID(0L, 0L), GHAST_ID);
         }
         @Override public Controls.ObservedUse observedUse(String player) {
             return new Controls.ObservedUse(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);

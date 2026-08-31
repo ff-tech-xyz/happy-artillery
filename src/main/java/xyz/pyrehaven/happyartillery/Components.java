@@ -6,39 +6,98 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
-/** Owns control marker encoding and identity on vanilla item custom data. */
+/** Sole owner of generated-control identity in vanilla custom data. */
 public final class Components {
-    private static final String MARKER_TAG = "happy-artillery:control";
+    private static final String TYPE_TAG = "happy-artillery:control_type";
+    private static final String OWNER_TAG = "happy-artillery:control_owner";
+    private static final String RIDE_TAG = "happy-artillery:control_ride";
 
     private Components() {
     }
 
     enum Control {
-        FIRE("fire"),
-        CRY("cry");
-
+        FIRE("fire"), CRY("cry");
         private final String value;
-
-        Control(String value) {
-            this.value = value;
+        Control(String value) { this.value = value; }
+        static Optional<Control> parse(String value) {
+            return java.util.Arrays.stream(values()).filter(control -> control.value.equals(value)).findFirst();
         }
     }
 
-    static void mark(ItemStack stack, Control control) {
-        Objects.requireNonNull(stack, "stack");
-        Objects.requireNonNull(control, "control");
-        CustomData existing = stack.get(DataComponents.CUSTOM_DATA);
-        CompoundTag marker = existing == null ? new CompoundTag() : existing.copyTag();
-        marker.putString(MARKER_TAG, control.value);
-        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(marker));
+    record Marker(Control control, UUID ownerId, UUID rideId) {
+        Marker {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(ownerId, "ownerId");
+            Objects.requireNonNull(rideId, "rideId");
+        }
     }
 
-    static boolean is(ItemStack stack, Control control) {
+    sealed interface MarkerRead permits Absent, Valid, Malformed {
+        Optional<Marker> marker();
+
+        default boolean isAbsent() {
+            return this instanceof Absent;
+        }
+    }
+
+    enum Absent implements MarkerRead {
+        INSTANCE;
+        @Override public Optional<Marker> marker() { return Optional.empty(); }
+    }
+
+    record Valid(Marker value) implements MarkerRead {
+        Valid { Objects.requireNonNull(value, "value"); }
+        @Override public Optional<Marker> marker() { return Optional.of(value); }
+    }
+
+    enum Malformed implements MarkerRead {
+        INSTANCE;
+        @Override public Optional<Marker> marker() { return Optional.empty(); }
+    }
+
+    static void mark(ItemStack stack, Marker marker) {
         Objects.requireNonNull(stack, "stack");
-        Objects.requireNonNull(control, "control");
-        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
-        return data != null
-                && data.copyTag().getString(MARKER_TAG).filter(control.value::equals).isPresent();
+        Objects.requireNonNull(marker, "marker");
+        CustomData existing = stack.get(DataComponents.CUSTOM_DATA);
+        CompoundTag data = existing == null ? new CompoundTag() : existing.copyTag();
+        data.putString(TYPE_TAG, marker.control().value);
+        data.putString(OWNER_TAG, marker.ownerId().toString());
+        data.putString(RIDE_TAG, marker.rideId().toString());
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+    }
+
+    static MarkerRead marker(ItemStack stack) {
+        Objects.requireNonNull(stack, "stack");
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData == null) {
+            return Absent.INSTANCE;
+        }
+        CompoundTag data = customData.copyTag();
+        boolean attempted = data.contains(TYPE_TAG) || data.contains(OWNER_TAG) || data.contains(RIDE_TAG);
+        if (!attempted) {
+            return Absent.INSTANCE;
+        }
+        Optional<String> type = data.getString(TYPE_TAG);
+        Optional<String> owner = data.getString(OWNER_TAG);
+        Optional<String> ride = data.getString(RIDE_TAG);
+        if (type.isEmpty() || owner.isEmpty() || ride.isEmpty()) {
+            return Malformed.INSTANCE;
+        }
+        try {
+            return Control.parse(type.get())
+                    .<MarkerRead>map(control -> new Valid(
+                            new Marker(control, UUID.fromString(owner.get()), UUID.fromString(ride.get()))))
+                    .orElse(Malformed.INSTANCE);
+        } catch (IllegalArgumentException malformedUuid) {
+            return Malformed.INSTANCE;
+        }
+    }
+
+    static boolean matches(ItemStack stack, UUID ownerId, UUID rideId) {
+        return marker(stack).marker().filter(marker -> marker.ownerId().equals(ownerId)
+                && marker.rideId().equals(rideId)).isPresent();
     }
 }
