@@ -27,6 +27,8 @@ import java.util.UUID;
 
 /** Sole pilot-input, control-item, and indexed inventory owner. */
 public final class Controls {
+    private static final int FIRE_CONTROL_SLOT = 4;
+    private static final int CRY_CONTROL_SLOT = 5;
     private static final Consumable HOLD_USE = Consumable.builder()
             .consumeSeconds(Float.MAX_VALUE)
             .animation(ItemUseAnimation.NONE)
@@ -64,16 +66,8 @@ public final class Controls {
             throw new IllegalStateException("Cannot mount while an inventory stash is active");
         }
 
-        Config.Controls settings = Config.current().controls();
-        int fireSlot = settings.fireSlot();
-        int crySlot = settings.crySlot();
-        if (fireSlot == crySlot) {
-            throw new IllegalStateException("Configured control slots must be distinct");
-        }
-        int size = access.size(inventory);
-        if (fireSlot < 0 || fireSlot >= size || crySlot < 0 || crySlot >= size) {
-            throw new IndexOutOfBoundsException("Configured control slot is outside inventory");
-        }
+        int fireSlot = FIRE_CONTROL_SLOT;
+        int crySlot = CRY_CONTROL_SLOT;
 
         ItemStack fireOriginal = access.read(inventory, fireSlot);
         ItemStack cryOriginal = access.read(inventory, crySlot);
@@ -224,7 +218,6 @@ public final class Controls {
             P player, SelectedSlotDecisionAccess<P, G> access) {
         RiderState state = activePilotState(player, access).orElse(null);
         return state != null
-                && Config.current().controls().lockControlSlots()
                 && isLockedSlot(state, access.selectedSlot(player));
     }
 
@@ -240,7 +233,7 @@ public final class Controls {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(quickCraft, "quickCraft");
         RiderState state = activePilotState(player, access).orElse(null);
-        if (state == null || !Config.current().controls().lockControlSlots()) {
+        if (state == null) {
             return false;
         }
         if (slotId < 0 || slotId >= access.slotCount(menu)) {

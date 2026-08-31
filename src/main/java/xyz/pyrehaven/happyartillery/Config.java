@@ -18,10 +18,12 @@ import java.io.StringReader;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /** Sole immutable configuration owner. */
@@ -44,15 +46,36 @@ public record Config(
     }
 
     public static Config load(Path path) throws IOException {
+        Config loaded = readCandidate(path);
+        publish(path, loaded, Config::replaceAtomically);
+        return loaded;
+    }
+
+    public static Config reload(Path path) throws IOException {
+        return reload(path, Config::isRegisteredItem);
+    }
+
+    static Config reload(Path path, Predicate<String> registeredItem) throws IOException {
+        return reload(path, registeredItem, Config::replaceAtomically);
+    }
+
+    static Config reload(
+            Path path, Predicate<String> registeredItem, AtomicMove move) throws IOException {
+        Config candidate = readCandidate(path);
+        resolveConfiguredItems(candidate, registeredItem);
+        publish(path, candidate, move);
+        return candidate;
+    }
+
+    private static Config readCandidate(Path path) throws IOException {
         if (Files.notExists(path)) {
             Config defaults = defaults();
             validate(defaults);
-            Files.createDirectories(path.toAbsolutePath().getParent());
-            Files.writeString(path, JSON.toJson(defaults) + System.lineSeparator());
-            ACTIVE.set(defaults);
             return defaults;
         }
         JsonObject explicit = parseStrictObject(Files.readString(path));
+        rejectRemovedSettings(explicit);
+        rejectUnknownKeys(JSON.toJsonTree(defaults()).getAsJsonObject(), explicit, "");
         validateIntegerLeaves(explicit);
         String preset = "pvp";
         if (explicit.has("preset")) {
@@ -66,13 +89,38 @@ public record Config(
         mergeKnown(complete, explicit);
         Config loaded = JSON.fromJson(complete, Config.class);
         validate(loaded);
-        Files.writeString(path, JSON.toJson(loaded) + System.lineSeparator());
-        ACTIVE.set(loaded);
         return loaded;
     }
 
-    public static Config reload(Path path) throws IOException {
-        return load(path);
+    private static void publish(Path path, Config config, AtomicMove move) throws IOException {
+        String serialized = JSON.toJson(config) + System.lineSeparator();
+        Path target = path.toAbsolutePath();
+        Path parent = target.getParent();
+        Files.createDirectories(parent);
+        Path temporary = null;
+        try {
+            temporary = Files.createTempFile(parent, target.getFileName() + ".", ".tmp");
+            Files.writeString(temporary, serialized);
+            move.replace(temporary, target);
+            ACTIVE.set(config);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException ignored) {
+                    // Preserve the publication failure; cleanup is best-effort.
+                }
+            }
+        }
+    }
+
+    private static void replaceAtomically(Path temporary, Path target) throws IOException {
+        Files.move(temporary, target,
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    static boolean isRegisteredItem(String itemId) {
+        return BuiltInRegistries.ITEM.getOptional(Identifier.parse(itemId)).isPresent();
     }
 
     private static JsonObject parseStrictObject(String contents) {
@@ -132,9 +180,33 @@ public record Config(
         return array;
     }
 
+    private static void rejectRemovedSettings(JsonObject explicit) {
+        if (!explicit.has("controls") || !explicit.get("controls").isJsonObject()) {
+            return;
+        }
+        JsonObject controls = explicit.getAsJsonObject("controls");
+        for (String key : Set.of("fireSlot", "crySlot", "lockControlSlots")) {
+            if (controls.has(key)) {
+                throw new IllegalArgumentException("Removed config setting: controls." + key);
+            }
+        }
+    }
+
+    private static void rejectUnknownKeys(JsonObject known, JsonObject explicit, String parentPath) {
+        for (String key : explicit.keySet()) {
+            String path = parentPath.isEmpty() ? key : parentPath + "." + key;
+            if (!known.has(key)) {
+                throw new IllegalArgumentException("Unknown config key: " + path);
+            }
+            JsonElement knownValue = known.get(key);
+            JsonElement explicitValue = explicit.get(key);
+            if (knownValue.isJsonObject() && explicitValue.isJsonObject()) {
+                rejectUnknownKeys(knownValue.getAsJsonObject(), explicitValue.getAsJsonObject(), path);
+            }
+        }
+    }
+
     private static void validateIntegerLeaves(JsonObject explicit) {
-        requireExactInteger(explicit, "controls", "fireSlot");
-        requireExactInteger(explicit, "controls", "crySlot");
         requireExactInteger(explicit, "fire", "explosionPower");
         requireExactInteger(explicit, "overheat", "fuseTicks");
         requireExactInteger(explicit, "overheat", "fireballCount");
@@ -215,13 +287,8 @@ public record Config(
         Cry cry = Objects.requireNonNull(config.cry(), "cry");
         Hud hud = Objects.requireNonNull(config.hud(), "hud");
 
-        requireRange("controls.fireSlot", controls.fireSlot(), 0, 8);
-        requireRange("controls.crySlot", controls.crySlot(), 0, 8);
-        if (controls.fireSlot() == controls.crySlot()) {
-            throw new IllegalArgumentException("Control slots must be distinct");
-        }
-        requireRegisteredItem("controls.fireItem", controls.fireItem());
-        requireRegisteredItem("controls.cryItem", controls.cryItem());
+        requireIdentifier("controls.fireItem", controls.fireItem());
+        requireIdentifier("controls.cryItem", controls.cryItem());
 
         requirePositive("fire.shotCooldownSeconds", fire.shotCooldownSeconds());
         requireRange("fire.explosionPower", fire.explosionPower(), 0, Integer.MAX_VALUE);
@@ -271,10 +338,17 @@ public record Config(
         }
     }
 
-    private static void requireRegisteredItem(String name, String value) {
-        requireIdentifier(name, value);
-        if (BuiltInRegistries.ITEM.getOptional(Identifier.parse(value)).isEmpty()) {
-            throw new IllegalArgumentException(name + " is not a registered item: " + value);
+    static void resolveConfiguredItems(Config config, Predicate<String> registeredItem) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(registeredItem, "registeredItem");
+        requireResolvedItem("controls.fireItem", config.controls().fireItem(), registeredItem);
+        requireResolvedItem("controls.cryItem", config.controls().cryItem(), registeredItem);
+    }
+
+    private static void requireResolvedItem(
+            String path, String itemId, Predicate<String> registeredItem) {
+        if (!registeredItem.test(itemId)) {
+            throw new IllegalArgumentException("Missing configured item " + path + ": " + itemId);
         }
     }
 
@@ -308,8 +382,7 @@ public record Config(
     public static Config defaults() {
         return new Config(
                 "pvp",
-                new Controls(4, 5, "minecraft:fire_charge", "minecraft:ghast_tear",
-                        true, false, true),
+                new Controls("minecraft:fire_charge", "minecraft:ghast_tear", true, false),
                 new Fire(0.25, 1),
                 new Heat(
                         100.0,
@@ -329,13 +402,10 @@ public record Config(
     }
 
     public record Controls(
-            int fireSlot,
-            int crySlot,
             String fireItem,
             String cryItem,
             boolean holdToFire,
-            boolean allowPlainItems,
-            boolean lockControlSlots) {
+            boolean allowPlainItems) {
     }
 
     public record Fire(
@@ -383,4 +453,9 @@ public record Config(
             int refreshTicks,
             int warningFromPercent) {
     }
+}
+
+@FunctionalInterface
+interface AtomicMove {
+    void replace(Path temporary, Path target) throws IOException;
 }

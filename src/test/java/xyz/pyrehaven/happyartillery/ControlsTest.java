@@ -279,6 +279,16 @@ final class ControlsTest {
     }
 
     @Test
+    void temporaryFixedSlotCheckpointDoesNotReadRemovedConfigAccessors() throws IOException {
+        Set<String> removed = Set.of("fireSlot", "crySlot", "lockControlSlots");
+
+        assertFalse(methodReferences(Controls.class).stream()
+                .anyMatch(call -> call.owner().equals(
+                        "xyz/pyrehaven/happyartillery/Config$Controls")
+                        && removed.contains(call.name())));
+    }
+
+    @Test
     void productionPilotAdapterBindsExactVehiclePassengerAndUuidApis() throws Exception {
         List<MethodReference> calls = methodReferences(Controls.ServerPlayerControlAccess.class);
 
@@ -1038,23 +1048,6 @@ final class ControlsTest {
         }
     }
 
-    @Test
-    void lockConfigDisablesContainerAndDirectDropDecisions(@TempDir Path directory) throws Exception {
-        Config original = Config.current();
-        Path file = directory.resolve("happy-artillery.json");
-        SlotDecisionFixture fixture = SlotDecisionFixture.activePilot();
-        fixture.addPlayerSlot(4, Controls.fireControl());
-        try {
-            Files.writeString(file, "{\"controls\":{\"lockControlSlots\":false}}");
-            Config.reload(file);
-
-            assertFalse(fixture.decide(0, 0, ContainerInput.PICKUP));
-            assertFalse(fixture.decideSelectedDrop());
-        } finally {
-            Files.writeString(file, new com.google.gson.Gson().toJson(original));
-            Config.reload(file);
-        }
-    }
 
     @Test
     void pickupAllRejectsEveryVanillaNoScanOrNoCandidateCase() {
@@ -1093,7 +1086,7 @@ final class ControlsTest {
     }
 
     @Test
-    void activeReloadKeepsPersistedSlotsAndNextMountAdoptsNewLiveSlots(@TempDir Path directory)
+    void unrelatedReloadKeepsTemporaryFixedSlotBehavior(@TempDir Path directory)
             throws Exception {
         Config originalConfig = Config.current();
         Path file = directory.resolve("happy-artillery.json");
@@ -1105,7 +1098,7 @@ final class ControlsTest {
         inventory.clearEvents();
         try {
             Files.writeString(file, """
-                    {"controls":{"fireSlot":1,"crySlot":2}}
+                    {"controls":{"holdToFire":false}}
                     """);
             Config.reload(file);
 
@@ -1134,16 +1127,16 @@ final class ControlsTest {
             assertTrue(ItemStack.matches(new ItemStack(Items.DIAMOND), inventory.peek(4)));
             assertTrue(ItemStack.matches(new ItemStack(Items.EMERALD), inventory.peek(5)));
             inventory.clearEvents();
-            inventory.seed(1, new ItemStack(Items.APPLE, 2));
-            inventory.seed(2, ItemStack.EMPTY);
+            inventory.seed(4, new ItemStack(Items.APPLE, 2));
+            inventory.seed(5, ItemStack.EMPTY);
             UUID nextGhast = UUID.fromString("96d3970d-ef18-4a98-9602-4b2194a74590");
 
             RiderState remounted = Controls.reconcile(
                     inventory, cleared, Optional.of(nextGhast), inventory);
 
-            assertEquals(List.of("read:1", "read:2", "write:1", "write:2"), inventory.events());
-            assertEquals(1, remounted.fireStash().orElseThrow().slotIndex());
-            assertEquals(2, remounted.cryStash().orElseThrow().slotIndex());
+            assertEquals(List.of("read:4", "read:5", "write:4", "write:5"), inventory.events());
+            assertEquals(4, remounted.fireStash().orElseThrow().slotIndex());
+            assertEquals(5, remounted.cryStash().orElseThrow().slotIndex());
             assertEquals(2, remounted.fireStash().orElseThrow().stack().getCount());
             assertTrue(remounted.fireStash().orElseThrow().stack().is(Items.APPLE));
             assertTrue(remounted.cryStash().orElseThrow().stack().isEmpty());
@@ -1295,7 +1288,7 @@ final class ControlsTest {
         pilot.slots[5] = Controls.cryControl();
         RiderState active = activeState(ghastId, 100L);
         Config.Controls supplied = new Config.Controls(
-                4, 5, "minecraft:fire_charge", "minecraft:ghast_tear", false, true, true);
+                "minecraft:fire_charge", "minecraft:ghast_tear", false, true);
         try {
             Files.writeString(file, """
                     {"controls":{"holdToFire":true,"allowPlainItems":false}}
@@ -1581,7 +1574,7 @@ final class ControlsTest {
             assertEquals(active.hudCache(), acceptedAfterRejections.state().hudCache());
 
             Files.writeString(file, """
-                    {"controls":{"fireSlot":1,"crySlot":2,"allowPlainItems":true}}
+                    {"controls":{"allowPlainItems":true}}
                     """);
             Config.reload(file);
             pilot.mainHand = new ItemStack(Items.GHAST_TEAR);

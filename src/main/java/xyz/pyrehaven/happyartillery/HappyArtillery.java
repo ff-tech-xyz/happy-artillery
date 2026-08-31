@@ -60,6 +60,8 @@ public final class HappyArtillery implements ModInitializer {
         registrar.registerPlayerTick();
         registrar.registerServerStop();
         registrar.registerReload(configPath);
+        registrar.registerConfigValidation(() -> Config.resolveConfiguredItems(
+                Config.current(), Config::isRegisteredItem));
     }
 
     static int executeReload(Path configPath, ReloadFeedback feedback) {
@@ -215,6 +217,7 @@ public final class HappyArtillery implements ModInitializer {
         void registerPlayerTick();
         void registerServerStop();
         void registerReload(Path configPath);
+        void registerConfigValidation(Runnable validation);
     }
 
     interface ReloadFeedback {
@@ -276,6 +279,12 @@ public final class HappyArtillery implements ModInitializer {
                             .then(Commands.literal("reload")
                                     .executes(context -> executeReload(configPath,
                                             new CommandSourceReloadFeedback(context.getSource()))))));
+        }
+
+        @Override
+        public void registerConfigValidation(Runnable validation) {
+            Objects.requireNonNull(validation, "validation");
+            ServerLifecycleEvents.SERVER_STARTED.register(server -> validation.run());
         }
     }
 

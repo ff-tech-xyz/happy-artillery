@@ -89,10 +89,32 @@ final class HappyArtilleryIntegrationTest {
                 "player-available", 1,
                 "player-tick", 1,
                 "server-stop", 1,
-                "reload", 1), registrar.calls);
+                "reload", 1,
+                "config-validation", 1), registrar.calls);
         assertSame(configPath, registrar.reloadPath);
-        assertEquals(9, registrar.order.size());
+        assertEquals(10, registrar.order.size());
         assertEquals("ghast-state", registrar.order.getFirst());
+        assertEquals("config-validation", registrar.order.getLast());
+        assertDoesNotThrow(registrar.startupValidation::run);
+    }
+
+    @Test
+    void startupLifecycleCallbackRejectsMissingConfiguredItemWithExactPathAndId() throws Exception {
+        Path configPath = tempDir.resolve("happy-artillery.json");
+        String missing = "happy-artillery:missing_after_initializers";
+        byte[] configured = ("{\"controls\":{\"fireItem\":\"" + missing + "\"}}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(configPath, configured);
+        RecordingRegistrar registrar = new RecordingRegistrar();
+
+        HappyArtillery.initialize(configPath, registrar);
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, registrar.startupValidation::run);
+
+        assertEquals("Missing configured item controls.fireItem: " + missing, failure.getMessage());
+        assertEquals(1, registrar.calls.get("config-validation"));
+        assertEquals(new com.google.gson.Gson().toJsonTree(Config.current()),
+                com.google.gson.JsonParser.parseString(Files.readString(configPath)));
     }
 
     @Test
@@ -120,7 +142,7 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void successfulReloadRewritesSwapsReportsOnceAndReturnsBrigadierSuccess() throws Exception {
         Path configPath = tempDir.resolve("happy-artillery.json");
-        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(configPath);
         Files.writeString(configPath, "{\"preset\":\"survival\"}");
         RecordingReloadFeedback feedback = new RecordingReloadFeedback();
@@ -138,7 +160,7 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void malformedReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
         Path configPath = tempDir.resolve("happy-artillery.json");
-        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(configPath);
         byte[] invalid = "{ malformed".getBytes();
         Files.write(configPath, invalid);
@@ -157,7 +179,7 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void invalidReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
         Path configPath = tempDir.resolve("happy-artillery.json");
-        Files.writeString(configPath, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(configPath);
         byte[] invalid = "{\"controls\":{\"fireSlot\":9}}".getBytes();
         Files.write(configPath, invalid);
@@ -170,14 +192,14 @@ final class HappyArtilleryIntegrationTest {
         org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
         assertEquals(List.of(
                 "failure:Happy Artillery config reload failed: "
-                        + "controls.fireSlot must be between 0 and 8"),
+                        + "Removed config setting: controls.fireSlot"),
                 feedback.messages);
     }
 
     @Test
     void reloadIoFailureReportsOnceReturnsFailureAndPreservesState() throws Exception {
         Path validPath = tempDir.resolve("valid.json");
-        Files.writeString(validPath, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(validPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(validPath);
         RecordingReloadFeedback feedback = new RecordingReloadFeedback();
 
@@ -399,11 +421,15 @@ final class HappyArtilleryIntegrationTest {
                         "net/fabricmc/fabric/api/networking/v1/ServerPlayConnectionEvents.DISCONNECT"),
                 "registerPlayerTick", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents.END_SERVER_TICK"),
                 "registerServerStop", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerLifecycleEvents.SERVER_STOPPED"),
+                "registerConfigValidation", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerLifecycleEvents.SERVER_STARTED"),
                 "registerReload", List.of("net/fabricmc/fabric/api/command/v2/CommandRegistrationCallback.EVENT"));
 
         for (Map.Entry<String, List<String>> entry : expected.entrySet()) {
-            String descriptor = entry.getKey().equals("registerReload")
-                    ? "(Ljava/nio/file/Path;)V" : "()V";
+            String descriptor = switch (entry.getKey()) {
+                case "registerReload" -> "(Ljava/nio/file/Path;)V";
+                case "registerConfigValidation" -> "(Ljava/lang/Runnable;)V";
+                default -> "()V";
+            };
             MethodNode method = method(registrar, entry.getKey(), descriptor);
             List<String> events = Stream.iterate(method.instructions.getFirst(), java.util.Objects::nonNull,
                             instruction -> instruction.getNext())
@@ -733,6 +759,7 @@ final class HappyArtilleryIntegrationTest {
         private final Map<String, Integer> calls = new LinkedHashMap<>();
         private final List<String> order = new ArrayList<>();
         private Path reloadPath;
+        private Runnable startupValidation;
 
         private void record(String name) {
             calls.merge(name, 1, Integer::sum);
@@ -750,6 +777,10 @@ final class HappyArtilleryIntegrationTest {
         public void registerReload(Path path) {
             reloadPath = path;
             record("reload");
+        }
+        public void registerConfigValidation(Runnable validation) {
+            startupValidation = validation;
+            record("config-validation");
         }
     }
 

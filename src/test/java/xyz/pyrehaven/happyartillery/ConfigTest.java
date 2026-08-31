@@ -14,13 +14,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -55,15 +58,28 @@ final class ConfigTest {
     }
 
     @Test
+    void controlsSchemaContainsOnlyMovableControlSettings() {
+        assertEquals(List.of("fireItem", "cryItem", "holdToFire", "allowPlainItems"),
+                Stream.of(Config.Controls.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertEquals(1, Config.Controls.class.getDeclaredConstructors().length);
+        assertThrows(NoSuchMethodException.class,
+                () -> Config.Controls.class.getDeclaredMethod("fireSlot"));
+        assertThrows(NoSuchMethodException.class,
+                () -> Config.Controls.class.getDeclaredMethod("crySlot"));
+        assertThrows(NoSuchMethodException.class,
+                () -> Config.Controls.class.getDeclaredMethod("lockControlSlots"));
+    }
+
+    @Test
     void defaultsContainTheCompleteSchema() throws ReflectiveOperationException {
         Object defaults = Config.class.getMethod("defaults").invoke(null);
 
         assertEquals(Map.of(
                 "preset", "pvp",
                 "controls", Map.of(
-                        "fireSlot", 4, "crySlot", 5,
                         "fireItem", "minecraft:fire_charge", "cryItem", "minecraft:ghast_tear",
-                        "holdToFire", true, "allowPlainItems", false, "lockControlSlots", true),
+                        "holdToFire", true, "allowPlainItems", false),
                 "fire", Map.of(
                         "shotCooldownSeconds", 0.25, "explosionPower", 1),
                 "heat", Map.ofEntries(
@@ -92,22 +108,22 @@ final class ConfigTest {
     void startupLoadPublishesTheValidatedObjectForCallTimeReads(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
 
         Config loaded = Config.load(file);
         Object active = Config.class.getMethod("current").invoke(null);
 
         assertSame(loaded, active);
-        assertEquals(2, ((Config) active).controls().fireSlot());
+        assertEquals(false, ((Config) active).controls().holdToFire());
     }
 
     @Test
     void failedReloadPreservesExactActiveObjectAndInvalidBytes(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
-        byte[] invalid = "{\"controls\":{\"fireSlot\":9}}".getBytes();
+        byte[] invalid = "{\"hud\":{\"warningFromPercent\":101}}".getBytes();
         Files.write(file, invalid);
 
         var reload = Config.class.getMethod("reload", Path.class);
@@ -115,20 +131,19 @@ final class ConfigTest {
 
         assertSame(previous, Config.current());
         assertArrayEquals(invalid, Files.readAllBytes(file));
-        assertEquals(2, Config.current().controls().fireSlot());
+        assertEquals(false, Config.current().controls().holdToFire());
     }
 
     @Test
     void successfulReloadRewritesCompleteSchemaAndAtomicallySwaps(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
         Files.writeString(file, """
                 {
                   "preset": "survival",
-                  "overheat": {"explosionPower": 9.0},
-                  "obsolete": true
+                  "overheat": {"explosionPower": 9.0}
                 }
                 """);
 
@@ -176,22 +191,54 @@ final class ConfigTest {
     }
 
     @Test
-    void successfulLoadRewritesMissingKeysAndRemovesUnknownKeys(@TempDir Path directory)
+    void unknownRootKeyFailsWithFullPathWithoutChangingStateOrBytes(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, """
-                {
-                  "controls": {"fireSlot": 2, "obsolete": true},
-                  "unknownGroup": {"ignored": true}
-                }
-                """);
+        Config previous = Config.load(file);
+        byte[] invalid = "{\"unknownGroup\":true}".getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
 
-        Config loaded = Config.load(file);
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
 
-        assertEquals(2, loaded.controls().fireSlot());
-        assertEquals("minecraft:ghast_tear", loaded.controls().cryItem());
-        assertEquals(new Gson().toJsonTree(loaded),
-                JsonParser.parseString(Files.readString(file)));
+        assertEquals("Unknown config key: unknownGroup", failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @Test
+    void unknownNestedKeyFailsWithFullPathWithoutChangingStateOrBytes(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = "{\"heat\":{\"cold\":{\"typo\":1}}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Unknown config key: heat.cold.typo", failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @ParameterizedTest(name = "removed controls.{0} is rejected")
+    @MethodSource("removedControlSettings")
+    void removedControlSettingFailsClearlyWithoutChangingStateOrBytes(
+            String key, String value, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = ("{\"controls\":{\"" + key + "\":" + value + "}}")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Removed config setting: controls." + key, failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
     }
 
     @Test
@@ -205,8 +252,8 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(8, serialized.size());
-        assertEquals(39, declaredKeyCount(serialized));
-        assertEquals(44, nestedLeafCount(serialized));
+        assertEquals(36, declaredKeyCount(serialized));
+        assertEquals(41, nestedLeafCount(serialized));
         assertEquals(serialized, JsonParser.parseString(Files.readString(file)));
     }
 
@@ -237,7 +284,6 @@ final class ConfigTest {
         Path file = directory.resolve("happy-artillery.json");
         Files.writeString(file, """
                 {
-                  "controls": {"fireSlot": 0, "crySlot": 8},
                   "fire": {"explosionPower": 0},
                   "heat": {"firingWindowSeconds": 0},
                   "water": {"coolPerSecond": 0, "floor": 100},
@@ -252,8 +298,6 @@ final class ConfigTest {
                 """);
 
         Config lower = Config.load(file);
-        assertEquals(0, lower.controls().fireSlot());
-        assertEquals(8, lower.controls().crySlot());
         assertEquals(100.0, lower.water().floor());
         assertEquals(0, lower.hud().warningFromPercent());
 
@@ -261,21 +305,94 @@ final class ConfigTest {
         assertEquals(100, Config.reload(file).hud().warningFromPercent());
     }
 
-    @ParameterizedTest(name = "startup rejects unregistered controls.{0}")
+    @Test
+    void parsingAcceptsSyntacticallyValidItemIdBeforeRegistryLifecycle(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file,
+                "{\"controls\":{\"fireItem\":\"later-mod:registered_after_initialize\"}}");
+
+        Config loaded = Config.load(file);
+
+        assertEquals("later-mod:registered_after_initialize", loaded.controls().fireItem());
+        assertSame(loaded, Config.current());
+    }
+
+    @ParameterizedTest(name = "lifecycle rejects missing controls.{0}")
     @MethodSource("unregisteredControlItems")
-    void startupRejectsUnregisteredControlItemWithoutMutation(
+    void lifecycleResolutionFailsWithExactConfigPathAndId(
+            String key, String itemId) throws Exception {
+        Config candidate = Config.defaults();
+        Config.Controls controls = new Config.Controls(
+                key.equals("fireItem") ? itemId : candidate.controls().fireItem(),
+                key.equals("cryItem") ? itemId : candidate.controls().cryItem(),
+                candidate.controls().holdToFire(), candidate.controls().allowPlainItems());
+        candidate = new Config(
+                candidate.preset(), controls, candidate.fire(), candidate.heat(), candidate.water(),
+                candidate.overheat(), candidate.cry(), candidate.hud());
+        Config resolvedCandidate = candidate;
+        Predicate<String> registry = id -> !id.equals(itemId);
+
+        var method = Config.class.getDeclaredMethod(
+                "resolveConfiguredItems", Config.class, Predicate.class);
+        InvocationTargetException failure = assertThrows(
+                InvocationTargetException.class,
+                () -> method.invoke(null, resolvedCandidate, registry));
+
+        assertEquals("Missing configured item controls." + key + ": " + itemId,
+                failure.getCause().getMessage());
+    }
+
+    @ParameterizedTest(name = "reload registry failure preserves controls.{0} transaction")
+    @MethodSource("unregisteredControlItems")
+    void reloadRegistryFailurePreservesExactLiveObjectAndFileBytes(
             String key, String itemId, @TempDir Path directory) throws Exception {
-        Path baselineFile = directory.resolve("baseline.json");
-        Files.writeString(baselineFile, "{\"controls\":{\"fireSlot\":2}}");
-        Config previous = Config.load(baselineFile);
-        Path invalidFile = directory.resolve("invalid.json");
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
         byte[] invalid = controlItemDocument(key, itemId).getBytes(StandardCharsets.UTF_8);
-        Files.write(invalidFile, invalid);
+        Files.write(file, invalid);
+        Predicate<String> registry = id -> !id.equals(itemId);
+        var reload = Config.class.getDeclaredMethod("reload", Path.class, Predicate.class);
 
-        assertThrows(IllegalArgumentException.class, () -> Config.load(invalidFile));
+        InvocationTargetException failure = assertThrows(
+                InvocationTargetException.class, () -> reload.invoke(null, file, registry));
 
+        assertEquals("Missing configured item controls." + key + ": " + itemId,
+                failure.getCause().getMessage());
         assertSame(previous, Config.current());
-        assertArrayEquals(invalid, Files.readAllBytes(invalidFile));
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @Test
+    void replacementFailurePreservesExactLiveObjectTargetBytesAndCleansTemporaryFile(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] candidateBytes = "{\"controls\":{\"holdToFire\":false}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, candidateBytes);
+        IOException replacementFailure = new IOException("replacement failed");
+
+        AtomicMove failingMove = (temporary, target) -> {
+            assertEquals(file.getParent(), temporary.getParent());
+            assertEquals(file, target);
+            JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
+                    .getAsJsonObject();
+            assertEquals(36, declaredKeyCount(serialized));
+            assertEquals(false, serialized.getAsJsonObject("controls")
+                    .get("holdToFire").getAsBoolean());
+            throw replacementFailure;
+        };
+
+        IOException failure = assertThrows(IOException.class,
+                () -> Config.reload(file, item -> true, failingMove));
+
+        assertSame(replacementFailure, failure);
+        assertSame(previous, Config.current());
+        assertArrayEquals(candidateBytes, Files.readAllBytes(file));
+        try (Stream<Path> files = Files.list(directory)) {
+            assertEquals(List.of(file), files.toList());
+        }
     }
 
     @ParameterizedTest(name = "reload rejects unregistered controls.{0}")
@@ -283,7 +400,7 @@ final class ConfigTest {
     void reloadRejectsUnregisteredControlItemWithoutMutation(
             String key, String itemId, @TempDir Path directory) throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
         byte[] invalid = controlItemDocument(key, itemId).getBytes(StandardCharsets.UTF_8);
         Files.write(file, invalid);
@@ -344,6 +461,13 @@ final class ConfigTest {
         assertRejectedWithoutMutation(directory, invalidJson, path + " accepted " + rawValue);
     }
 
+    private static Stream<Arguments> removedControlSettings() {
+        return Stream.of(
+                Arguments.of("fireSlot", "2"),
+                Arguments.of("crySlot", "6"),
+                Arguments.of("lockControlSlots", "false"));
+    }
+
     private static Stream<Arguments> invalidExistingFiles() {
         return Stream.of(
                 Arguments.of("malformed JSON", "{"),
@@ -352,7 +476,7 @@ final class ConfigTest {
                 Arguments.of("explicit null", "{\"hud\":{\"bossBar\":null}}"),
                 Arguments.of("wrong scalar type", "{\"hud\":{\"bossBar\":\"false\"}}"),
                 Arguments.of("non-finite number", "{\"heat\":{\"limit\":NaN}}"),
-                Arguments.of("impossible range", "{\"controls\":{\"fireSlot\":9}}"),
+                Arguments.of("impossible range", "{\"hud\":{\"warningFromPercent\":101}}"),
                 Arguments.of("zero positive value", "{\"fire\":{\"shotCooldownSeconds\":0}}"),
                 Arguments.of("negative duration", "{\"fire\":{\"shotCooldownSeconds\":-1}}"),
                 Arguments.of("negative count", "{\"overheat\":{\"fireballCount\":-1}}"),
@@ -360,7 +484,6 @@ final class ConfigTest {
                         "{\"hud\":{\"refreshTicks\":1}}"),
                 Arguments.of("HUD refresh just below the four-tick packet floor",
                         "{\"hud\":{\"refreshTicks\":3}}"),
-                Arguments.of("duplicate slots", "{\"controls\":{\"fireSlot\":5,\"crySlot\":5}}"),
                 Arguments.of("crossed temperatures", "{\"heat\":{\"coldMaxTemperature\":1.0,\"hotMinTemperature\":1.0}}"),
                 Arguments.of("water floor above heat limit", "{\"water\":{\"floor\":101}}"));
     }
@@ -368,7 +491,7 @@ final class ConfigTest {
     private static Stream<Arguments> nonStrictJsonDocuments() {
         return Stream.of(
                 Arguments.of("comments", "{\"preset\":\"pvp\" /* comment */}"),
-                Arguments.of("unquoted keys", "{controls:{\"fireSlot\":2}}"),
+                Arguments.of("unquoted keys", "{controls:{\"holdToFire\":false}}"),
                 Arguments.of("trailing comment after the document", "{} /* trailing */"),
                 Arguments.of("trailing token after the document", "{} true"));
     }
@@ -395,7 +518,7 @@ final class ConfigTest {
                 Arguments.of("duplicate top-level known key",
                         "{\"preset\":\"pvp\",\"preset\":\"survival\"}"),
                 Arguments.of("duplicate group-level known key",
-                        "{\"controls\":{\"fireSlot\":2,\"fireSlot\":3}}"),
+                        "{\"controls\":{\"holdToFire\":true,\"holdToFire\":false}}"),
                 Arguments.of("duplicate nested heat-profile known key",
                         "{\"heat\":{\"cold\":{\"heatPerShot\":0.7,\"heatPerShot\":0.8}}}"),
                 Arguments.of("duplicate unknown key",
@@ -404,8 +527,6 @@ final class ConfigTest {
 
     private static Stream<Arguments> invalidIntegerLeaves() {
         String[] paths = {
-                "controls.fireSlot",
-                "controls.crySlot",
                 "fire.explosionPower",
                 "overheat.fuseTicks",
                 "overheat.fireballCount",
@@ -427,7 +548,7 @@ final class ConfigTest {
     private static void assertRejectedWithoutMutation(
             Path directory, String invalidJson, String message) throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"controls\":{\"fireSlot\":2}}");
+        Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
         byte[] invalid = invalidJson.getBytes();
         Files.write(file, invalid);
