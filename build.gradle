@@ -32,6 +32,7 @@ def localMinecraftMetadataServer = {
 loom {
 	noIntermediateMappings()
 	customMinecraftMetadata.set(localMinecraftMetadataServer)
+	createRemapConfigurations(sourceSets.test)
 
 	mods {
 		"happy-artillery" {
@@ -55,7 +56,7 @@ dependencies {
 	compileOnly "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
 
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
-	testImplementation "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
+	modTestImplementation "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
 	testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
