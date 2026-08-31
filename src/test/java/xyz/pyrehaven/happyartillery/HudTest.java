@@ -47,7 +47,7 @@ final class HudTest {
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 12L,
                 new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 16L,
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 17L,
                 new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
 
@@ -101,8 +101,32 @@ final class HudTest {
 
         assertEquals(new ActionObservation(
                         List.of("action:GREEN:HEAT 26% · FIRING"),
-                        new RiderState.HudCache(0.26, "GREEN", "HEAT 26% · FIRING", 8L)),
+                        new RiderState.HudCache(0.26, "GREEN", "HEAT 26% · FIRING", 4L)),
                 new ActionObservation(access.actionEvents(), state.hudCache().orElseThrow()));
+    }
+
+    @Test
+    void unchangedNormalStatusResendsWhilePilotHoldsFireControl() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Hud.Snapshot firing = new Hud.Snapshot(
+                25.0, BiomeClass.BASE, Hud.Status.FIRING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.HAND_ACCESSIBLE,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)),
+                true);
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                firing, Config.defaults(), access);
+
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                firing, Config.defaults(), access);
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 8L,
+                firing, Config.defaults(), access);
+
+        assertEquals(List.of(
+                "action:GREEN:HEAT 25% · FIRING",
+                "action:GREEN:HEAT 25% · FIRING"),
+                access.actionEvents());
     }
 
     @Test
@@ -154,7 +178,45 @@ final class HudTest {
             for (int tick = start; tick < start + 20; tick++) {
                 packets += sendsAtTick[tick];
             }
-            assertTrue(packets < 10, "window " + start + ".." + (start + 19) + " sent " + packets);
+            assertTrue(packets < 10, "window " + start + ".." + (start + 19)
+                    + " sent " + packets + ": " + java.util.Arrays.toString(sendsAtTick));
+        }
+    }
+
+    @Test
+    void separatedActionAndAuxiliaryCadencesStayBelowTenForReviewCounterexample() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Controls.InventorySnapshot controls = controlSnapshot(
+                Controls.ControlLocation.HAND_ACCESSIBLE,
+                Controls.ControlLocation.HAND_ACCESSIBLE);
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.FIRING,
+                        java.util.Optional.of(controls), true),
+                Config.defaults(), access);
+        access.events.clear();
+        int[] sendsAtTick = new int[31];
+
+        for (int tick = 1; tick <= 30; tick++) {
+            double heat = tick == 5 || tick >= 18 ? 90.0 : tick >= 6 && tick <= 10 ? 50.0 : 10.0;
+            BiomeClass biomeClass = heat >= 50.0 ? BiomeClass.HOT : BiomeClass.COLD;
+            int before = access.events.size();
+            state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, tick,
+                    new Hud.Snapshot(heat, biomeClass, Hud.Status.FIRING,
+                            java.util.Optional.of(controls), true),
+                    Config.defaults(), access);
+            sendsAtTick[tick] = access.events.size() - before;
+        }
+
+        assertEquals(7, access.actionEvents().size());
+        assertEquals(List.of("particle", "particle"), access.particleEvents());
+        assertEquals(new RiderState.HudCache(
+                        0.9, "RED", "HEAT 90% · FIRING", 28L),
+                state.hudCache().orElseThrow());
+        for (int start = 1; start <= 11; start++) {
+            int packets = Arrays.stream(sendsAtTick, start, start + 20).sum();
+            assertTrue(packets < 10, "window " + start + ".." + (start + 19)
+                    + " sent " + packets + ": " + Arrays.toString(sendsAtTick));
         }
     }
 
@@ -203,7 +265,10 @@ final class HudTest {
                     new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
                             java.util.Optional.of(controls.get(index))),
                     Config.defaults(), access);
-            assertEquals(List.of(expected.get(index)), access.actionEvents(), "repeat case " + index);
+            assertEquals(index < 3
+                            ? List.of(expected.get(index), expected.get(index))
+                            : List.of(expected.get(index)),
+                    access.actionEvents(), "repeat case " + index);
         }
 
         Hud passengerHud = new Hud();
@@ -219,15 +284,37 @@ final class HudTest {
     }
 
     @Test
-    void controlWarningExecutesBeforeIndependentParticleBudget() {
+    void unchangedControlWarningResendsAtConfiguredCadence() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Hud.Snapshot warning = new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.MISSING,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)));
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                warning, Config.defaults(), access);
+
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 1L,
+                warning, Config.defaults(), access);
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                warning, Config.defaults(), access);
+
+        assertEquals(List.of(
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"),
+                access.actionEvents());
+    }
+
+    @Test
+    void unchangedControlWarningResendsWhenThresholdEntryIsDue() {
         Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
-                new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING,
+                new Hud.Snapshot(90.0, BiomeClass.HOT, Hud.Status.FIRING,
                         java.util.Optional.of(controlSnapshot(
-                                Controls.ControlLocation.HAND_ACCESSIBLE,
+                                Controls.ControlLocation.MISSING,
                                 Controls.ControlLocation.HAND_ACCESSIBLE))),
-                Config.defaults(), access);
+                configWithWarningThreshold(95), access);
         access.events.clear();
 
         hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
@@ -237,8 +324,81 @@ final class HudTest {
                                 Controls.ControlLocation.HAND_ACCESSIBLE))),
                 Config.defaults(), access);
 
-        assertEquals(List.of("action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT", "particle"),
+        assertTrue(access.presentationEvents().contains(
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"), access.events::toString);
+    }
+
+    @Test
+    void unchangedActiveFireStatusResendsWhenThresholdEntryIsDue() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Hud.Snapshot activeFire = new Hud.Snapshot(
+                90.0, BiomeClass.HOT, Hud.Status.FIRING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.HAND_ACCESSIBLE,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)), true);
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                activeFire, configWithWarningThreshold(95), access);
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                activeFire, configWithWarningThreshold(95), access);
+        access.events.clear();
+
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 8L,
+                activeFire, Config.defaults(), access);
+
+        assertTrue(access.presentationEvents().contains("action:RED:HEAT 90% · FIRING"),
+                access.events::toString);
+    }
+
+    @Test
+    void reservedAuxiliarySlotRemainsDueOnTheNextTick() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Hud.Snapshot activeFire = new Hud.Snapshot(
+                90.0, BiomeClass.HOT, Hud.Status.FIRING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.HAND_ACCESSIBLE,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)), true);
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                activeFire, configWithWarningThreshold(95), access);
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                activeFire, configWithWarningThreshold(95), access);
+        access.events.clear();
+
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 8L,
+                activeFire, Config.defaults(), access);
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 9L,
+                activeFire, Config.defaults(), access);
+
+        assertEquals(List.of("action:RED:HEAT 90% · FIRING", "particle"),
                 access.presentationEvents());
+    }
+
+    @Test
+    void changedControlWarningWaitsForCadenceAfterPromptFreshSessionWarning() {
+        Hud hud = new Hud();
+        RecordingAccess access = new RecordingAccess();
+        Hud.Snapshot missing = new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.MISSING,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)));
+        Hud.Snapshot inventory = new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                java.util.Optional.of(controlSnapshot(
+                        Controls.ControlLocation.MAIN_INVENTORY_ONLY,
+                        Controls.ControlLocation.HAND_ACCESSIBLE)));
+
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                missing, Config.defaults(), access);
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 1L,
+                inventory, Config.defaults(), access);
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 2L,
+                missing, Config.defaults(), access);
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                inventory, Config.defaults(), access);
+
+        assertEquals(List.of(
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:GOLD:CONTROL IN INVENTORY"), access.actionEvents());
     }
 
     @Test
@@ -246,8 +406,8 @@ final class HudTest {
         Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
         RiderState state = RiderState.fresh();
-        int[] ticks = {0, 1, 4, 8, 9, 16, 20, 24};
-        int[] heat = {84, 85, 90, 80, 85, 90, 90, 90};
+        int[] ticks = {0, 1, 4, 8, 9, 16, 20, 24, 29};
+        int[] heat = {84, 85, 90, 80, 85, 90, 90, 90, 90};
         for (int index = 0; index < ticks.length; index++) {
             state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, ticks[index],
                     new Hud.Snapshot(heat[index], BiomeClass.BASE, Hud.Status.FIRING),
@@ -276,7 +436,7 @@ final class HudTest {
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
 
-        assertEquals(List.of("particle", "action:RED:HEAT 90% · FIRING"),
+        assertEquals(List.of("action:RED:HEAT 90% · FIRING", "particle"),
                 access.presentationEvents());
     }
 
@@ -300,7 +460,7 @@ final class HudTest {
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
 
-        assertEquals(List.of("particle", "action:RED:HEAT 90% · FIRING"),
+        assertEquals(List.of("action:RED:HEAT 90% · FIRING", "particle"),
                 access.presentationEvents());
     }
 
@@ -324,7 +484,7 @@ final class HudTest {
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
 
-        assertEquals(List.of("particle", "action:RED:HEAT 90% · FIRING"),
+        assertEquals(List.of("action:RED:HEAT 90% · FIRING", "particle"),
                 access.presentationEvents());
     }
 
@@ -426,19 +586,25 @@ final class HudTest {
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
                 new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "BLUE", "", Long.MIN_VALUE),
+        assertEquals(new RiderState.HudCache(0.1, "BLUE", "HEAT 50% · FIRING", 4L),
                 state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 8L,
                 new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "GOLD", "", Long.MIN_VALUE),
+        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING", 4L),
                 state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 12L,
                 new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "GOLD", "HEAT 50% · FIRING", 12L),
+        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING", 4L),
+                state.hudCache().orElseThrow());
+
+        state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 13L,
+                new Hud.Snapshot(50.0, BiomeClass.HOT, Hud.Status.FIRING),
+                Config.defaults(), access);
+        assertEquals(new RiderState.HudCache(0.5, "GOLD", "HEAT 50% · FIRING", 4L),
                 state.hudCache().orElseThrow());
     }
 
@@ -456,14 +622,14 @@ final class HudTest {
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 2L,
                 new Hud.Snapshot(40.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        for (int tick : List.of(4, 8, 12, 16)) {
+        for (int tick : List.of(4, 8, 12, 16, 21)) {
             state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, tick,
                     new Hud.Snapshot(40.0, BiomeClass.HOT, Hud.Status.FIRING),
                     Config.defaults(), access);
         }
 
-        assertEquals(List.of("particle", "progress:0.4", "color:GOLD",
-                "action:GOLD:HEAT 40% · FIRING"), access.events);
+        assertEquals(List.of("action:GOLD:HEAT 40% · FIRING", "particle",
+                "progress:0.4", "color:GOLD"), access.events);
     }
 
     @Test
@@ -495,16 +661,15 @@ final class HudTest {
                 Config.defaults(), access);
         access.events.clear();
 
-        for (int dueTick : List.of(4, 8, 12, 16)) {
-            state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, dueTick - 1L,
-                    new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
-                    Config.defaults(), access);
-            state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, dueTick,
-                    new Hud.Snapshot(90.0, BiomeClass.HOT, Hud.Status.FIRING),
+        for (int tick = 1; tick <= 25; tick++) {
+            boolean warning = (tick / 4) % 2 == 1;
+            state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, tick,
+                    new Hud.Snapshot(warning ? 90.0 : 10.0,
+                            warning ? BiomeClass.HOT : BiomeClass.COLD,
+                            warning ? Hud.Status.FIRING : Hud.Status.COOLING),
                     Config.defaults(), access);
         }
 
-        assertEquals(4, access.events.size(), access.events::toString);
         assertTrue(access.events.contains("particle"), access.events::toString);
         assertTrue(access.events.contains("progress:0.9"), access.events::toString);
         assertTrue(access.events.contains("color:RED"), access.events::toString);
@@ -550,10 +715,11 @@ final class HudTest {
                 Config.defaults(), access);
         assertEquals(List.of("create:0.9:RED", "add"), access.events);
 
-        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 12L,
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 13L,
                 new Hud.Snapshot(90.0, BiomeClass.HOT, Hud.Status.FIRING),
                 Config.defaults(), access);
-        assertEquals(List.of("create:0.9:RED", "add", "particle"), access.events);
+        assertEquals(List.of("create:0.9:RED", "add",
+                "action:RED:HEAT 90% · FIRING", "particle"), access.events);
     }
 
     @Test
@@ -715,6 +881,14 @@ final class HudTest {
         return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent()));
+    }
+
+    private static Config configWithWarningThreshold(int warningFromPercent) {
+        Config defaults = Config.defaults();
+        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+                defaults.water(), defaults.overheat(), defaults.cry(),
+                new Config.Hud(defaults.hud().bossBar(), defaults.hud().actionBar(),
+                        defaults.hud().refreshTicks(), warningFromPercent));
     }
 
     private static Controls.InventorySnapshot controlSnapshot(

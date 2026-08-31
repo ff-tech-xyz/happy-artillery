@@ -334,6 +334,7 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, access.configReads);
         assertEquals(1, access.fireCalls);
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
+        assertEquals(List.of(true, false), access.activeFireControls);
     }
 
     @Test
@@ -707,6 +708,7 @@ final class HappyArtilleryIntegrationTest {
         private boolean onlinePlayersForbidden;
         private GhastState authoritativeState;
         private final List<String> hudSnapshots = new ArrayList<>();
+        private final List<Boolean> activeFireControls = new ArrayList<>();
         private final List<String> removedHud = new ArrayList<>();
         private final List<String> recovered = new ArrayList<>();
         private final Map<String, RiderState> riderStates = new LinkedHashMap<>();
@@ -880,7 +882,8 @@ final class HappyArtilleryIntegrationTest {
         @Override public void render(
                 HappyArtillery.PlayerView<String, String> rider, String ghast,
                 GhastState state, long now, Config config, BiomeClass biomeClass,
-                Optional<Controls.InventorySnapshot> pilotSnapshot) {
+                Optional<Controls.InventorySnapshot> pilotSnapshot,
+                boolean activeFireControl) {
             assertSame(expectedConfig, config);
             assertSame(BiomeClass.HOT, biomeClass);
             if (rider.pilot()) {
@@ -889,6 +892,7 @@ final class HappyArtilleryIntegrationTest {
                 assertEquals(Optional.empty(), pilotSnapshot);
             }
             hudSnapshots.add(rider.player() + ":" + state.heat());
+            activeFireControls.add(activeFireControl);
             order.add("hud:" + rider.player());
             if (dedupRegression) {
                 RiderState updated = hud.update(

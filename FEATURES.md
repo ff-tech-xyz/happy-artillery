@@ -276,7 +276,12 @@ Cry:
   stop. Passengers see it read-only. Progress is `heat / configured heat.limit`, bounded to the boss-bar
   range `[0, 1]`; `heat / 100` is only the default-limit example. Updates send only changed values and
   never a remove-then-add pair.
-- Action bar is dirty-checked and limited to every configured four ticks. Pilot control status has exact
+- The action bar has its own configured four-tick cadence, independent of boss-bar and warning-particle
+  convergence. A fresh-session control warning may appear immediately; after that, changed or unchanged
+  control warnings and the active-fire heat line send no more than once per cadence. A due particle or
+  dirty boss value cannot consume that action-bar tick. The separate boss/particle rotation uses a
+  minimum five-tick cadence and still converges during continuous fire, keeping total presentation
+  traffic below ten packets in every sliding 20-tick window. Pilot control status has exact
   priority: if either generated control is absent, show
   `CONTROL MISSING · DISMOUNT AND REMOUNT`; otherwise, if either is in main inventory rather than a
   hand-accessible hotbar/offhand location, show `CONTROL IN INVENTORY` or `CONTROLS IN INVENTORY` as

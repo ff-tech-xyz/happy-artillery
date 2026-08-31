@@ -150,6 +150,8 @@ public final class HappyArtillery implements ModInitializer {
         }
         GhastState post = advanced;
         RiderState acceptedPilotState = null;
+        boolean activeFireControl = admission instanceof Controls.Accepted accepted
+                && accepted.intent() == Controls.ControlIntent.FIRE;
         if (admission instanceof Controls.Accepted accepted) {
             acceptedPilotState = accepted.state();
             access.replaceRiderState(pilot.player(), acceptedPilotState);
@@ -167,7 +169,8 @@ public final class HappyArtillery implements ModInitializer {
                                 rider.player(), acceptedPilotState, rider.riddenGhast(), rider.pilot())
                         : rider;
                 access.render(renderView, ghast, post, now, config, biomeClass,
-                        rider == pilot ? Optional.of(snapshot) : Optional.empty());
+                        rider == pilot ? Optional.of(snapshot) : Optional.empty(),
+                        rider == pilot && activeFireControl);
             }
         }
     }
@@ -199,7 +202,8 @@ public final class HappyArtillery implements ModInitializer {
         void render(
                 PlayerView<P, G> rider, G ghast, GhastState state, long now,
                 Config config, BiomeClass biomeClass,
-                Optional<Controls.InventorySnapshot> pilotSnapshot);
+                Optional<Controls.InventorySnapshot> pilotSnapshot,
+                boolean activeFireControl);
     }
 
     record PlayerView<P, G>(P player, RiderState state, Optional<G> riddenGhast, boolean pilot) {
@@ -565,7 +569,8 @@ public final class HappyArtillery implements ModInitializer {
         public void render(
                 PlayerView<ServerPlayer, HappyGhast> rider, HappyGhast ghast,
                 GhastState state, long now, Config config, BiomeClass biomeClass,
-                Optional<Controls.InventorySnapshot> pilotSnapshot) {
+                Optional<Controls.InventorySnapshot> pilotSnapshot,
+                boolean activeFireControl) {
             Hud.Status status = biomeClass == BiomeClass.NETHER
                     ? Hud.Status.NO_COOLING
                     : now <= state.firingWindowEndTick() ? Hud.Status.FIRING : Hud.Status.COOLING;
@@ -574,7 +579,9 @@ public final class HappyArtillery implements ModInitializer {
             }
             RiderState updated = HUD.update(
                     rider.player(), level, ghast, rider.state(), now,
-                    new Hud.Snapshot(state.heat(), biomeClass, status, pilotSnapshot), config);
+                    new Hud.Snapshot(
+                            state.heat(), biomeClass, status, pilotSnapshot, activeFireControl),
+                    config);
             if (!updated.equals(rider.state())) {
                 replaceRiderState(rider.player(), updated);
             }

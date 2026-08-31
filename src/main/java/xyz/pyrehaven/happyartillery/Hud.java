@@ -17,6 +17,7 @@ import java.util.UUID;
 
 /** Sole boss/action-bar and warning-particle owner for every rider. */
 public final class Hud {
+    private static final long AUXILIARY_MIN_CADENCE_TICKS = 5L;
     private final Map<Object, Session> sessions = new HashMap<>();
 
     <R, H> RiderState update(
@@ -48,7 +49,7 @@ public final class Hud {
                 R oldViewer = (R) session.viewer;
                 access.removeViewer(handle, oldViewer);
             }
-            session = new Session(ghastId, rider, config.hud().actionBar());
+            session = new Session(ghastId, rider, config.hud().actionBar(), now);
             sessions.put(riderId, session);
         } else if (session.viewer != rider) {
             if (session.display != null) {
@@ -61,7 +62,7 @@ public final class Hud {
                 attachmentDelivered = true;
             }
             session.viewer = rider;
-            session.resetChannels(config.hud().actionBar());
+            session.resetChannels(config.hud().actionBar(), now);
             viewerReplaced = true;
         }
         boolean actionReenabled = !session.actionEnabled && config.hud().actionBar();
@@ -74,8 +75,6 @@ public final class Hud {
             cache = new RiderState.HudCache(
                     cache.bossProgress(), cache.bossColor(), "", Long.MIN_VALUE);
         }
-        boolean refreshDue = !session.refreshed
-                || refreshDue(now, session.lastRefreshTick, config.hud().refreshTicks());
         double progress = normalized(snapshot.heat(), config.heat().limit());
         Color color = color(progress, snapshot.biomeClass(), config.hud().warningFromPercent());
         double warning = warningThreshold(config.hud().warningFromPercent());
@@ -91,6 +90,7 @@ public final class Hud {
             access.removeViewer(handle, rider);
             display = null;
             session.display = null;
+            attachmentDelivered = true;
             cache = new RiderState.HudCache(
                     -1.0, "", cache.actionBarText(), cache.lastActionBarTick());
         }
@@ -107,61 +107,63 @@ public final class Hud {
         String actionText = actionText(progress, snapshot);
         boolean controlWarning = snapshot.pilotControls().isPresent()
                 && !normalControlStatus(snapshot.pilotControls().orElseThrow());
-        boolean actionDelivered = false;
-        if (controlWarning && session.actionEnabled
-                && !actionText.equals(cache.actionBarText())) {
-            Color warningColor = missingControl(snapshot.pilotControls().orElseThrow())
-                    ? Color.RED : Color.GOLD;
-            access.actionBar(rider, actionText, warningColor);
+        boolean persistentAction = controlWarning || snapshot.activeFireControl();
+        boolean actionChanged = !actionText.equals(cache.actionBarText());
+        boolean actionDue = refreshDue(now, session.lastActionTick, config.hud().refreshTicks());
+        boolean promptWarning = freshSession && controlWarning;
+        if (session.actionEnabled && (persistentAction || actionChanged)
+                && (promptWarning || actionReenabled || actionDue)
+                && (!attachmentDelivered || promptWarning)) {
+            Color actionColor = controlWarning
+                    ? (missingControl(snapshot.pilotControls().orElseThrow()) ? Color.RED : Color.GOLD)
+                    : snapshot.biomeClass() == BiomeClass.NETHER ? Color.RED : color;
+            access.actionBar(rider, actionText, actionColor);
             cache = new RiderState.HudCache(
                     cache.bossProgress(), cache.bossColor(), actionText, now);
-            actionDelivered = true;
+            session.lastActionTick = now;
         }
         if (attachmentDelivered) {
             session.lastRefreshTick = now;
             session.refreshed = true;
-        } else if (refreshDue) {
-            for (int offset = 0; offset < 4; offset++) {
-                int channel = (session.nextChannel + offset) % 4;
-                boolean delivered = false;
-                if (channel == 0 && session.warningPending) {
-                    access.warningParticle(rider);
-                    session.warningPending = false;
-                    delivered = true;
-                } else if (channel == 1 && display != null
-                        && Double.compare(progress, cache.bossProgress()) != 0) {
-                    @SuppressWarnings("unchecked")
-                    H handle = (H) display.handle();
-                    access.setProgress(handle, progress);
-                    cache = new RiderState.HudCache(
-                            progress, cache.bossColor(),
-                            cache.actionBarText(), cache.lastActionBarTick());
-                    delivered = true;
-                } else if (channel == 2 && display != null
-                        && !color.name().equals(cache.bossColor())) {
-                    @SuppressWarnings("unchecked")
-                    H handle = (H) display.handle();
-                    access.setColor(handle, color);
-                    cache = new RiderState.HudCache(
-                            cache.bossProgress(), color.name(),
-                            cache.actionBarText(), cache.lastActionBarTick());
-                    delivered = true;
-                } else if (channel == 3 && !actionDelivered
-                        && session.actionEnabled
-                        && !actionText.equals(cache.actionBarText())) {
-                    access.actionBar(rider, actionText,
-                            snapshot.biomeClass() == BiomeClass.NETHER ? Color.RED : color);
-                    cache = new RiderState.HudCache(
-                            cache.bossProgress(), cache.bossColor(), actionText, now);
-                    delivered = true;
+        } else {
+            boolean auxiliaryDue = !session.refreshed
+                    || refreshDue(now, session.lastRefreshTick,
+                    Math.max(AUXILIARY_MIN_CADENCE_TICKS, config.hud().refreshTicks()));
+            if (auxiliaryDue) {
+                for (int offset = 0; offset < 3; offset++) {
+                    int channel = (session.nextChannel + offset) % 3;
+                    boolean delivered = false;
+                    if (channel == 0 && session.warningPending) {
+                        access.warningParticle(rider);
+                        session.warningPending = false;
+                        delivered = true;
+                    } else if (channel == 1 && display != null
+                            && Double.compare(progress, cache.bossProgress()) != 0) {
+                        @SuppressWarnings("unchecked")
+                        H handle = (H) display.handle();
+                        access.setProgress(handle, progress);
+                        cache = new RiderState.HudCache(
+                                progress, cache.bossColor(),
+                                cache.actionBarText(), cache.lastActionBarTick());
+                        delivered = true;
+                    } else if (channel == 2 && display != null
+                            && !color.name().equals(cache.bossColor())) {
+                        @SuppressWarnings("unchecked")
+                        H handle = (H) display.handle();
+                        access.setColor(handle, color);
+                        cache = new RiderState.HudCache(
+                                cache.bossProgress(), color.name(),
+                                cache.actionBarText(), cache.lastActionBarTick());
+                        delivered = true;
+                    }
+                    if (delivered) {
+                        session.nextChannel = (channel + 1) % 3;
+                        break;
+                    }
                 }
-                if (delivered) {
-                    session.nextChannel = (channel + 1) % 4;
-                    break;
-                }
+                session.lastRefreshTick = now;
+                session.refreshed = true;
             }
-            session.lastRefreshTick = now;
-            session.refreshed = true;
         }
         if (riderState.hudCache().isPresent() && riderState.hudCache().get().equals(cache)) {
             return riderState;
@@ -287,7 +289,7 @@ public final class Hud {
         return Math.max(0.0, Math.min(1.0, warningFromPercent / 100.0));
     }
 
-    private static boolean refreshDue(long now, long lastRefreshTick, int refreshTicks) {
+    private static boolean refreshDue(long now, long lastRefreshTick, long refreshTicks) {
         if (now < lastRefreshTick) {
             return true;
         }
@@ -301,9 +303,16 @@ public final class Hud {
 
     public record Snapshot(
             double heat, BiomeClass biomeClass, Status status,
-            Optional<Controls.InventorySnapshot> pilotControls) {
+            Optional<Controls.InventorySnapshot> pilotControls,
+            boolean activeFireControl) {
         public Snapshot(double heat, BiomeClass biomeClass, Status status) {
-            this(heat, biomeClass, status, Optional.empty());
+            this(heat, biomeClass, status, Optional.empty(), false);
+        }
+
+        public Snapshot(
+                double heat, BiomeClass biomeClass, Status status,
+                Optional<Controls.InventorySnapshot> pilotControls) {
+            this(heat, biomeClass, status, pilotControls, false);
         }
 
         public Snapshot {
@@ -423,20 +432,23 @@ public final class Hud {
         private Object viewer;
         private Display display;
         private long lastRefreshTick = Long.MIN_VALUE;
+        private long lastActionTick;
         private boolean refreshed;
         private boolean actionEnabled;
         private boolean warningAbove;
         private boolean warningPending;
         private int nextChannel;
 
-        private Session(Object ghastId, Object viewer, boolean actionEnabled) {
+        private Session(Object ghastId, Object viewer, boolean actionEnabled, long now) {
             this.ghastId = ghastId;
             this.viewer = viewer;
             this.actionEnabled = actionEnabled;
+            this.lastActionTick = now;
         }
 
-        private void resetChannels(boolean enabled) {
+        private void resetChannels(boolean enabled, long now) {
             lastRefreshTick = Long.MIN_VALUE;
+            lastActionTick = now;
             refreshed = false;
             actionEnabled = enabled;
             warningAbove = false;
