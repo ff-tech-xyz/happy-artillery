@@ -571,6 +571,41 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void productionRiderLossAndRenderStayConnectedToTypedHudBoundaries() throws IOException {
+        ClassNode driverOwner = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
+        assertEquals(List.of("xyz/pyrehaven/happyartillery/Hud.remove"
+                        + "(Lnet/minecraft/server/level/ServerPlayer;)V"),
+                methodCalls(method(driverOwner, "removeHud",
+                        "(Lnet/minecraft/server/level/ServerPlayer;)V")).stream()
+                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
+
+        ClassNode registrar = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$FabricRegistrar");
+        assertEquals(List.of(
+                        "net/minecraft/server/network/ServerGamePacketListenerImpl.getPlayer"
+                                + "()Lnet/minecraft/server/level/ServerPlayer;",
+                        "xyz/pyrehaven/happyartillery/Hud.remove"
+                                + "(Lnet/minecraft/server/level/ServerPlayer;)V"),
+                methodCalls(method(registrar, "lambda$registerPlayerAvailable$1",
+                        "(Lnet/minecraft/server/network/ServerGamePacketListenerImpl;"
+                                + "Lnet/minecraft/server/MinecraftServer;)V")).stream()
+                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
+
+        MethodNode render = method(driverOwner, "render",
+                "(L" + ROOT + "$PlayerView;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
+                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;"
+                        + "Ljava/util/Optional;Z)V");
+        assertEquals(1, methodCalls(render).stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
+                && call.name.equals("minecraftPresentation")).count());
+        assertEquals(1, methodCalls(render).stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
+                && call.name.equals("update")
+                && call.desc.endsWith("L" + PACKAGE + "Hud$PresentationAccess;)L"
+                        + PACKAGE + "RiderState;")).count());
+    }
+
+    @Test
     void productionStopDelegatesOnlyToAbilitiesAndHudAndRootConstructsNoProjectile() throws IOException {
         ClassNode lifecycle = BytecodeTestSupport.classNode(
                 HappyArtillery.class.getName() + "$MinecraftLifecycleAccess");
@@ -720,7 +755,7 @@ final class HappyArtilleryIntegrationTest {
         private final List<String> removedHud = new ArrayList<>();
         private final List<String> recovered = new ArrayList<>();
         private final Map<String, RiderState> riderStates = new LinkedHashMap<>();
-        private final Hud hud = new Hud();
+        private final Hud<String, String> hud = new Hud<>(NoopPresentationAccess.INSTANCE);
         private final Controls.InventorySnapshot inventorySnapshot = new Controls.InventorySnapshot(
                 Controls.ControlLocation.HAND_ACCESSIBLE,
                 Controls.ControlLocation.HAND_ACCESSIBLE, 0);

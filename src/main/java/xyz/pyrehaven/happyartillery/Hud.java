@@ -16,11 +16,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Sole boss/action-bar and warning-particle owner for every rider. */
-public final class Hud {
+public final class Hud<R, H> {
     private static final long AUXILIARY_MIN_CADENCE_TICKS = 5L;
-    private final Map<Object, Session> sessions = new HashMap<>();
+    private final Map<Object, Session<R, H>> sessions = new HashMap<>();
+    private final ViewerAccess<R, H> viewerAccess;
 
-    <R, H> RiderState update(
+    Hud(ViewerAccess<R, H> viewerAccess) {
+        this.viewerAccess = Objects.requireNonNull(viewerAccess, "viewerAccess");
+    }
+
+    static Hud<ServerPlayer, ServerBossEvent> minecraft() {
+        return new Hud<>(MinecraftViewerAccess.INSTANCE);
+    }
+
+    RiderState update(
             Object riderId,
             R rider,
             Object ghastId,
@@ -37,28 +46,20 @@ public final class Hud {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(access, "access");
 
-        Session session = sessions.get(riderId);
+        Session<R, H> session = sessions.get(riderId);
         boolean freshSession = session == null || !ghastId.equals(session.ghastId);
         boolean viewerReplaced = false;
         boolean attachmentDelivered = false;
         if (freshSession) {
             if (session != null && session.display != null) {
-                @SuppressWarnings("unchecked")
-                H handle = (H) session.display.handle();
-                @SuppressWarnings("unchecked")
-                R oldViewer = (R) session.viewer;
-                access.removeViewer(handle, oldViewer);
+                access.removeViewer(session.display, session.viewer);
             }
-            session = new Session(ghastId, rider, config.hud().actionBar(), now);
+            session = new Session<>(ghastId, rider, config.hud().actionBar(), now);
             sessions.put(riderId, session);
         } else if (session.viewer != rider) {
             if (session.display != null) {
-                @SuppressWarnings("unchecked")
-                H handle = (H) session.display.handle();
-                @SuppressWarnings("unchecked")
-                R oldViewer = (R) session.viewer;
-                access.removeViewer(handle, oldViewer);
-                access.addViewer(handle, rider);
+                access.removeViewer(session.display, session.viewer);
+                access.addViewer(session.display, rider);
                 attachmentDelivered = true;
             }
             session.viewer = rider;
@@ -83,11 +84,9 @@ public final class Hud {
             session.warningPending = true;
         }
         session.warningAbove = aboveWarning;
-        Display display = session.display;
+        H display = session.display;
         if (display != null && !config.hud().bossBar()) {
-            @SuppressWarnings("unchecked")
-            H handle = (H) display.handle();
-            access.removeViewer(handle, rider);
+            access.removeViewer(display, rider);
             display = null;
             session.display = null;
             attachmentDelivered = true;
@@ -97,7 +96,7 @@ public final class Hud {
         if (config.hud().bossBar() && display == null) {
             H handle = access.createBossBar(progress, color);
             access.addViewer(handle, rider);
-            display = new Display(handle);
+            display = handle;
             session.display = display;
             cache = new RiderState.HudCache(
                     progress, color.name(), cache.actionBarText(), cache.lastActionBarTick());
@@ -139,18 +138,14 @@ public final class Hud {
                         delivered = true;
                     } else if (channel == 1 && display != null
                             && Double.compare(progress, cache.bossProgress()) != 0) {
-                        @SuppressWarnings("unchecked")
-                        H handle = (H) display.handle();
-                        access.setProgress(handle, progress);
+                        access.setProgress(display, progress);
                         cache = new RiderState.HudCache(
                                 progress, cache.bossColor(),
                                 cache.actionBarText(), cache.lastActionBarTick());
                         delivered = true;
                     } else if (channel == 2 && display != null
                             && !color.name().equals(cache.bossColor())) {
-                        @SuppressWarnings("unchecked")
-                        H handle = (H) display.handle();
-                        access.setColor(handle, color);
+                        access.setColor(display, color);
                         cache = new RiderState.HudCache(
                                 cache.bossProgress(), color.name(),
                                 cache.actionBarText(), cache.lastActionBarTick());
@@ -171,63 +166,39 @@ public final class Hud {
         return riderState.withHudCache(cache);
     }
 
-    RiderState update(
-            ServerPlayer rider,
-            ServerLevel level,
-            HappyGhast ghast,
-            RiderState riderState,
-            long now,
-            Snapshot snapshot,
-            Config config) {
+    static PresentationAccess<ServerPlayer, ServerBossEvent> minecraftPresentation(
+            ServerLevel level, HappyGhast ghast) {
         Objects.requireNonNull(ghast, "ghast");
         if (ghast.level() != Objects.requireNonNull(level, "level")) {
             throw new IllegalArgumentException("HUD ghast must be loaded in the rider's server level");
         }
-        return update(rider.getUUID(), rider, ghast.getUUID(), riderState, now, snapshot, config,
-                new MinecraftPresentationAccess(level, ghast));
+        return new MinecraftPresentationAccess(level, ghast);
     }
 
     void remove(ServerPlayer rider) {
-        Session session = sessions.remove(rider.getUUID());
-        if (session != null && session.display != null) {
-            ((ServerBossEvent) session.display.handle()).removePlayer(rider);
-        }
+        remove(rider.getUUID(), viewerAccess);
     }
 
     void clear() {
-        for (Session session : sessions.values()) {
-            if (session.display != null) {
-                ((ServerBossEvent) session.display.handle()).removePlayer((ServerPlayer) session.viewer);
-            }
-        }
-        sessions.clear();
+        clear(viewerAccess);
     }
 
-    <R, H> void remove(Object riderId, R rider, PresentationAccess<R, H> access) {
+    void remove(Object riderId, ViewerAccess<R, H> access) {
         Objects.requireNonNull(riderId, "riderId");
-        Objects.requireNonNull(rider, "rider");
         Objects.requireNonNull(access, "access");
-        Session session = sessions.remove(riderId);
+        Session<R, H> session = sessions.remove(riderId);
         if (session != null && session.display != null) {
-            @SuppressWarnings("unchecked")
-            H handle = (H) session.display.handle();
-            @SuppressWarnings("unchecked")
-            R currentViewer = (R) session.viewer;
-            access.removeViewer(handle, currentViewer);
+            access.removeViewer(session.display, session.viewer);
         }
     }
 
-    <R, H> void clear(PresentationAccess<R, H> access) {
+    void clear(ViewerAccess<R, H> access) {
         Objects.requireNonNull(access, "access");
-        for (Map.Entry<Object, Session> entry : sessions.entrySet()) {
-            if (entry.getValue().display == null) {
+        for (Session<R, H> session : sessions.values()) {
+            if (session.display == null) {
                 continue;
             }
-            @SuppressWarnings("unchecked")
-            R rider = (R) entry.getValue().viewer;
-            @SuppressWarnings("unchecked")
-            H handle = (H) entry.getValue().display.handle();
-            access.removeViewer(handle, rider);
+            access.removeViewer(session.display, session.viewer);
         }
         sessions.clear();
     }
@@ -341,7 +312,11 @@ public final class Hud {
         GREEN
     }
 
-    interface PresentationAccess<R, H> {
+    interface ViewerAccess<R, H> {
+        void removeViewer(H handle, R rider);
+    }
+
+    interface PresentationAccess<R, H> extends ViewerAccess<R, H> {
         H createBossBar(double progress, Color color);
 
         void addViewer(H handle, R rider);
@@ -349,8 +324,6 @@ public final class Hud {
         void setProgress(H handle, double progress);
 
         void setColor(H handle, Color color);
-
-        void removeViewer(H handle, R rider);
 
         void actionBar(R rider, String text, Color color);
 
@@ -393,7 +366,7 @@ public final class Hud {
 
         @Override
         public void removeViewer(ServerBossEvent handle, ServerPlayer rider) {
-            handle.removePlayer(rider);
+            MinecraftViewerAccess.INSTANCE.removeViewer(handle, rider);
         }
 
         @Override
@@ -427,10 +400,19 @@ public final class Hud {
         }
     }
 
-    private static final class Session {
+    private enum MinecraftViewerAccess implements ViewerAccess<ServerPlayer, ServerBossEvent> {
+        INSTANCE;
+
+        @Override
+        public void removeViewer(ServerBossEvent handle, ServerPlayer rider) {
+            handle.removePlayer(rider);
+        }
+    }
+
+    private static final class Session<R, H> {
         private final Object ghastId;
-        private Object viewer;
-        private Display display;
+        private R viewer;
+        private H display;
         private long lastRefreshTick = Long.MIN_VALUE;
         private long lastActionTick;
         private boolean refreshed;
@@ -439,7 +421,7 @@ public final class Hud {
         private boolean warningPending;
         private int nextChannel;
 
-        private Session(Object ghastId, Object viewer, boolean actionEnabled, long now) {
+        private Session(Object ghastId, R viewer, boolean actionEnabled, long now) {
             this.ghastId = ghastId;
             this.viewer = viewer;
             this.actionEnabled = actionEnabled;
@@ -457,6 +439,4 @@ public final class Hud {
         }
     }
 
-    private record Display(Object handle) {
-    }
 }

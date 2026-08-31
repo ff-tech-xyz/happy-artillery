@@ -39,7 +39,7 @@ import java.util.UUID;
 /** Composition root for the guarded owner graph. */
 public final class HappyArtillery implements ModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("happy-artillery");
-    private static final Hud HUD = new Hud();
+    private static final Hud<ServerPlayer, net.minecraft.server.level.ServerBossEvent> HUD = Hud.minecraft();
 
     @Override
     public void onInitialize() {
@@ -578,10 +578,10 @@ public final class HappyArtillery implements ModInitializer {
                 throw new IllegalArgumentException("HUD requires a loaded server Happy Ghast");
             }
             RiderState updated = HUD.update(
-                    rider.player(), level, ghast, rider.state(), now,
+                    rider.player().getUUID(), rider.player(), ghast.getUUID(), rider.state(), now,
                     new Hud.Snapshot(
                             state.heat(), biomeClass, status, pilotSnapshot, activeFireControl),
-                    config);
+                    config, Hud.minecraftPresentation(level, ghast));
             if (!updated.equals(rider.state())) {
                 replaceRiderState(rider.player(), updated);
             }

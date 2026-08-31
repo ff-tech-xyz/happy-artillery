@@ -6,6 +6,10 @@ import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -23,9 +27,29 @@ final class HudTest {
     private static final UUID GHAST_ID = UUID.fromString("646f44ce-77ea-4bde-8a87-935850df538c");
 
     @Test
+    void sessionStorageOwnsTypedViewerAndHandleAtTheClassBoundary() throws Exception {
+        assertEquals(List.of("R", "H"), Arrays.stream(Hud.class.getTypeParameters())
+                .map(java.lang.reflect.TypeVariable::getName).toList());
+
+        Class<?> session = Class.forName(Hud.class.getName() + "$Session");
+        assertEquals(List.of("R", "H"), Arrays.stream(session.getTypeParameters())
+                .map(java.lang.reflect.TypeVariable::getName).toList());
+        assertEquals("R", session.getDeclaredField("viewer").getGenericType().getTypeName());
+        assertEquals("H", session.getDeclaredField("display").getGenericType().getTypeName());
+        assertEquals("java.util.Map<java.lang.Object, xyz.pyrehaven.happyartillery.Hud$Session<R, H>>",
+                Hud.class.getDeclaredField("sessions").getGenericType().getTypeName());
+        assertEquals(Set.of(Hud.ViewerAccess.class),
+                Set.of(Hud.PresentationAccess.class.getInterfaces()));
+        assertEquals(Set.of("removeViewer"), Arrays.stream(Hud.ViewerAccess.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(false, Arrays.stream(Hud.class.getDeclaredClasses())
+                .anyMatch(type -> type.getSimpleName().equals("Display")));
+    }
+
+    @Test
     void firstVisibleUpdateCreatesAndAddsExactlyOneBossBar() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
 
         hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -36,8 +60,8 @@ final class HudTest {
 
     @Test
     void changedBossValuesUpdateInPlaceWithoutRemoveAddTraffic() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = RiderState.fresh();
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 0L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -67,7 +91,7 @@ final class HudTest {
         for (int index = 0; index < snapshots.size(); index++) {
             RecordingAccess access = new RecordingAccess();
             UUID rider = new UUID(0L, index + 1L);
-            new Hud().update(rider, rider, GHAST_ID, RiderState.fresh(), 0L,
+            new Hud<UUID, String>(access).update(rider, rider, GHAST_ID, RiderState.fresh(), 0L,
                     snapshots.get(index), Config.defaults(), access);
             creations.add(access.events.getFirst());
         }
@@ -83,8 +107,8 @@ final class HudTest {
 
     @Test
     void actionBarSendsOnlyDirtyTextAtConfiguredFourTickIntervals() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = RiderState.fresh();
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 0L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -107,8 +131,8 @@ final class HudTest {
 
     @Test
     void unchangedNormalStatusResendsWhilePilotHoldsFireControl() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Hud.Snapshot firing = new Hud.Snapshot(
                 25.0, BiomeClass.BASE, Hud.Status.FIRING,
                 java.util.Optional.of(controlSnapshot(
@@ -131,8 +155,8 @@ final class HudTest {
 
     @Test
     void configuredCadenceBoundsAdversarialHudPacketsToSingleDigitsPerRiderSecond() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -152,8 +176,8 @@ final class HudTest {
 
     @Test
     void everySlidingTwentyTickWindowStaysBelowTenPresentationPacketsIncludingTickTwenty() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -185,8 +209,8 @@ final class HudTest {
 
     @Test
     void separatedActionAndAuxiliaryCadencesStayBelowTenForReviewCounterexample() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Controls.InventorySnapshot controls = controlSnapshot(
                 Controls.ControlLocation.HAND_ACCESSIBLE,
                 Controls.ControlLocation.HAND_ACCESSIBLE);
@@ -223,7 +247,7 @@ final class HudTest {
     @Test
     void netherActionStatusOverridesSnapshotStatusAndUsesRed() {
         RecordingAccess access = new RecordingAccess();
-        Hud hud = new Hud();
+        Hud<UUID, String> hud = new Hud<>(access);
 
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(20.0, BiomeClass.NETHER, Hud.Status.COOLING),
@@ -253,8 +277,8 @@ final class HudTest {
                 "action:GREEN:HEAT 25% · COOLING");
 
         for (int index = 0; index < controls.size(); index++) {
-            Hud hud = new Hud();
             RecordingAccess access = new RecordingAccess();
+            Hud<UUID, String> hud = new Hud<>(access);
             RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                     new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
                             java.util.Optional.of(controls.get(index))),
@@ -271,8 +295,8 @@ final class HudTest {
                     access.actionEvents(), "repeat case " + index);
         }
 
-        Hud passengerHud = new Hud();
         RecordingAccess passengerAccess = new RecordingAccess();
+        Hud<UUID, String> passengerHud = new Hud<>(passengerAccess);
         RiderState passenger = passengerHud.update(RIDER_ID, RIDER_ID, GHAST_ID,
                 RiderState.fresh(), 0L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -285,8 +309,8 @@ final class HudTest {
 
     @Test
     void unchangedControlWarningResendsAtConfiguredCadence() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Hud.Snapshot warning = new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
                 java.util.Optional.of(controlSnapshot(
                         Controls.ControlLocation.MISSING,
@@ -307,8 +331,8 @@ final class HudTest {
 
     @Test
     void unchangedControlWarningResendsWhenThresholdEntryIsDue() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(90.0, BiomeClass.HOT, Hud.Status.FIRING,
                         java.util.Optional.of(controlSnapshot(
@@ -330,8 +354,8 @@ final class HudTest {
 
     @Test
     void unchangedActiveFireStatusResendsWhenThresholdEntryIsDue() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Hud.Snapshot activeFire = new Hud.Snapshot(
                 90.0, BiomeClass.HOT, Hud.Status.FIRING,
                 java.util.Optional.of(controlSnapshot(
@@ -352,8 +376,8 @@ final class HudTest {
 
     @Test
     void reservedAuxiliarySlotRemainsDueOnTheNextTick() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Hud.Snapshot activeFire = new Hud.Snapshot(
                 90.0, BiomeClass.HOT, Hud.Status.FIRING,
                 java.util.Optional.of(controlSnapshot(
@@ -376,8 +400,8 @@ final class HudTest {
 
     @Test
     void changedControlWarningWaitsForCadenceAfterPromptFreshSessionWarning() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         Hud.Snapshot missing = new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
                 java.util.Optional.of(controlSnapshot(
                         Controls.ControlLocation.MISSING,
@@ -403,8 +427,8 @@ final class HudTest {
 
     @Test
     void warningParticlesSendOnlyOnConfiguredThresholdEntry() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = RiderState.fresh();
         int[] ticks = {0, 1, 4, 8, 9, 16, 20, 24, 29};
         int[] heat = {84, 85, 90, 80, 85, 90, 90, 90, 90};
@@ -425,7 +449,7 @@ final class HudTest {
                 0.9, "RED", "HEAT 90% · FIRING", 100L)));
         RecordingAccess access = new RecordingAccess();
 
-        Hud hud = new Hud();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, persisted, 100L,
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
@@ -442,12 +466,12 @@ final class HudTest {
 
     @Test
     void sameGhastRemountSendsFreshUnchangedActionAndWarning() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
-        hud.remove(RIDER_ID, RIDER_ID, access);
+        hud.remove(RIDER_ID, access);
         access.events.clear();
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
@@ -466,8 +490,8 @@ final class HudTest {
 
     @Test
     void changedGhastSessionSendsFreshUnchangedActionAndWarning() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(90.0, BiomeClass.BASE, Hud.Status.FIRING),
                 Config.defaults(), access);
@@ -490,8 +514,8 @@ final class HudTest {
 
     @Test
     void actionToggleOnSendsFreshUnchangedText() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
                 configWithHud(true, false, 4), access);
@@ -509,8 +533,8 @@ final class HudTest {
 
     @Test
     void ordinaryFutureRefreshTickTreatsClockRollbackAsFreshCadence() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 100L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
                 configWithHud(false, true, 4), access);
@@ -525,8 +549,8 @@ final class HudTest {
 
     @Test
     void saturatedFutureRefreshTickTreatsClockRollbackAsFreshCadence() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), Long.MAX_VALUE,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
                 configWithHud(false, true, 4), access);
@@ -541,8 +565,8 @@ final class HudTest {
 
     @Test
     void minimumTickValueStillHonorsCadenceAfterTheFirstRefresh() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), Long.MIN_VALUE,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
                 configWithHud(false, true, 4), access);
@@ -557,8 +581,8 @@ final class HudTest {
 
     @Test
     void forwardTickOverflowCannotSuppressAChangedPresentationRefresh() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(),
                 Long.MIN_VALUE + 1L,
                 new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -574,8 +598,8 @@ final class HudTest {
 
     @Test
     void persistedCacheTracksOnlyTheLastDeliveredValueOfEachChannel() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -610,8 +634,8 @@ final class HudTest {
 
     @Test
     void warningCrossingOwnsNextSendAfterHeatFallsAndBossEventuallyConvergesInPlace() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -634,8 +658,8 @@ final class HudTest {
 
     @Test
     void continuouslyChangingHeatCannotStarveBossColorOrActionText() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -654,8 +678,8 @@ final class HudTest {
 
     @Test
     void repeatedWarningCrossingsCannotStarveOtherDirtyPresentationChannels() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -678,8 +702,8 @@ final class HudTest {
 
     @Test
     void disablingAndReenablingBossBarRemovesThenCreatesOneFreshHandle() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = RiderState.fresh();
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 0L,
                 new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -697,8 +721,8 @@ final class HudTest {
 
     @Test
     void bossReenableAttachmentDefersPendingWarningUntilTheNextCadence() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.COLD, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -724,8 +748,8 @@ final class HudTest {
 
     @Test
     void riddenGhastIdentityChangeRemovesOldHandleBeforeAddingReplacement() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING),
                 Config.defaults(), access);
@@ -740,8 +764,8 @@ final class HudTest {
 
     @Test
     void stableRiderIdReplacesViewerObjectExactlyOnceWithoutCreatingAnotherHandle() {
-        Hud hud = new Hud();
         ViewerRecordingAccess access = new ViewerRecordingAccess();
+        Hud<TestViewer, String> hud = new Hud<>(access);
         TestViewer first = new TestViewer("first");
         TestViewer replacement = new TestViewer("replacement");
         RiderState state = hud.update(RIDER_ID, first, GHAST_ID, RiderState.fresh(), 0L,
@@ -762,9 +786,67 @@ final class HudTest {
     }
 
     @Test
+    void teardownDetachesStoredReplacementViewerAndRemountCreatesFreshSession() {
+        ViewerRecordingAccess access = new ViewerRecordingAccess();
+        Hud<TestViewer, String> hud = new Hud<>(access);
+        TestViewer first = new TestViewer("first");
+        TestViewer replacement = new TestViewer("replacement");
+        RiderState state = hud.update(RIDER_ID, first, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+        state = hud.update(RIDER_ID, replacement, GHAST_ID, state, 4L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+        access.events.clear();
+
+        hud.remove(RIDER_ID, access);
+        hud.update(RIDER_ID, replacement, GHAST_ID, state, 8L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+
+        assertEquals(List.of("remove:replacement", "create", "add:replacement"), access.events);
+    }
+
+    @Test
+    void clearDetachesEveryStoredCurrentViewerAndEvictsSessionsWithoutDisplays() {
+        ViewerRecordingAccess access = new ViewerRecordingAccess();
+        Hud<TestViewer, String> hud = new Hud<>(access);
+        TestViewer first = new TestViewer("first");
+        TestViewer replacement = new TestViewer("replacement");
+        TestViewer passenger = new TestViewer("passenger");
+        TestViewer hidden = new TestViewer("hidden");
+        UUID passengerId = UUID.fromString("a307681f-cdd8-46e0-9bdf-23d082409da3");
+        UUID hiddenId = UUID.fromString("7aaeb02c-60ca-4497-b666-b60ee7a044e8");
+        RiderState riderState = hud.update(RIDER_ID, first, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+        hud.update(RIDER_ID, replacement, GHAST_ID, riderState, 4L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+        hud.update(passengerId, passenger, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                Config.defaults(), access);
+        RiderState hiddenState = hud.update(hiddenId, hidden, GHAST_ID, RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING),
+                configWithHud(false, true, 4), access);
+        access.events.clear();
+
+        hud.clear(access);
+        hud.update(hiddenId, hidden, GHAST_ID, hiddenState, 1L,
+                new Hud.Snapshot(25.0, BiomeClass.BASE, Hud.Status.COOLING,
+                        java.util.Optional.of(controlSnapshot(
+                                Controls.ControlLocation.MISSING,
+                                Controls.ControlLocation.HAND_ACCESSIBLE))),
+                configWithHud(false, true, 4), access);
+
+        assertEquals(List.of("remove:replacement", "remove:passenger",
+                "action:hidden"), access.events);
+    }
+
+    @Test
     void riderAndServerTeardownRemoveEveryBoundedHandleExactlyOnce() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         UUID passenger = UUID.fromString("a307681f-cdd8-46e0-9bdf-23d082409da3");
         hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 new Hud.Snapshot(10.0, BiomeClass.BASE, Hud.Status.COOLING),
@@ -774,7 +856,7 @@ final class HudTest {
                 Config.defaults(), access);
         access.events.clear();
 
-        hud.remove(RIDER_ID, RIDER_ID, access);
+        hud.remove(RIDER_ID, access);
         hud.clear(access);
 
         assertEquals(List.of("remove", "remove"), access.bossEvents());
@@ -790,15 +872,15 @@ final class HudTest {
 
     @Test
     void minecraft262AdapterOwnsExactBossActionAndTargetedParticleBindings() throws Exception {
-        Hud.class.getDeclaredMethod("update", ServerPlayer.class,
-                net.minecraft.server.level.ServerLevel.class, HappyGhast.class,
-                RiderState.class, long.class, Hud.Snapshot.class, Config.class);
+        Hud.class.getDeclaredMethod("minecraftPresentation",
+                net.minecraft.server.level.ServerLevel.class, HappyGhast.class);
         Hud.class.getDeclaredMethod("remove", ServerPlayer.class);
         Hud.class.getDeclaredMethod("clear");
 
         Set<String> calls = new java.util.HashSet<>();
         for (String className : List.of(
-                Hud.class.getName(), Hud.class.getName() + "$MinecraftPresentationAccess")) {
+                Hud.class.getName(), Hud.class.getName() + "$MinecraftPresentationAccess",
+                Hud.class.getName() + "$MinecraftViewerAccess")) {
             for (MethodNode method : BytecodeTestSupport.classNode(className).methods) {
                 for (var instruction : method.instructions) {
                     if (instruction instanceof MethodInsnNode call) {
@@ -822,21 +904,24 @@ final class HudTest {
     @Test
     void presentationBoundaryReceivesSnapshotWithoutGameplayMutationOrClassification() throws Exception {
         assertEquals(Set.of("createBossBar", "addViewer", "setProgress", "setColor",
-                        "removeViewer", "actionBar", "warningParticle"),
+                        "actionBar", "warningParticle"),
                 Arrays.stream(Hud.PresentationAccess.class.getDeclaredMethods())
                         .map(java.lang.reflect.Method::getName).collect(java.util.stream.Collectors.toSet()));
 
         RiderState before = new RiderState(java.util.Optional.of(GHAST_ID),
                 47L, java.util.Optional.empty());
         Hud.Snapshot snapshot = new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING);
-        RiderState after = new Hud().update(RIDER_ID, RIDER_ID, GHAST_ID, before, 20L,
-                snapshot, Config.defaults(), new RecordingAccess());
+        RecordingAccess access = new RecordingAccess();
+        RiderState after = new Hud<UUID, String>(access).update(
+                RIDER_ID, RIDER_ID, GHAST_ID, before, 20L,
+                snapshot, Config.defaults(), access);
         assertEquals(List.of(before.riddenGhastId(), before.lastHandledTick()),
                 List.of(after.riddenGhastId(), after.lastHandledTick()));
         assertEquals(new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING), snapshot);
 
         for (String className : List.of(
-                Hud.class.getName(), Hud.class.getName() + "$MinecraftPresentationAccess")) {
+                Hud.class.getName(), Hud.class.getName() + "$MinecraftPresentationAccess",
+                Hud.class.getName() + "$MinecraftViewerAccess")) {
             for (MethodNode method : BytecodeTestSupport.classNode(className).methods) {
                 for (var instruction : method.instructions) {
                     if (instruction instanceof MethodInsnNode call) {
@@ -855,8 +940,8 @@ final class HudTest {
 
     @Test
     void pilotAndPassengersRenderFromOnePostTransitionSnapshot() {
-        Hud hud = new Hud();
         RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
         UUID passenger = UUID.fromString("7aaeb02c-60ca-4497-b666-b60ee7a044e8");
         Hud.Snapshot snapshot = new Hud.Snapshot(63.0, BiomeClass.COLD, Hud.Status.COOLING);
 
@@ -874,6 +959,74 @@ final class HudTest {
                         access.actionEvents().size(),
                         List.of(pilotState.hudCache().orElseThrow(),
                                 passengerState.hudCache().orElseThrow())));
+    }
+
+    @Test
+    void productionTeardownWrappersDelegateWithExactReceiverIdAndTypedBoundary() throws Exception {
+        org.objectweb.asm.tree.ClassNode owner = BytecodeTestSupport.classNode(Hud.class.getName());
+        MethodNode remove = exactMethod(owner, "remove",
+                "(Lnet/minecraft/server/level/ServerPlayer;)V");
+        MethodNode clear = exactMethod(owner, "clear", "()V");
+
+        assertEquals(List.of(
+                        "ALOAD 0",
+                        "ALOAD 1",
+                        "INVOKEVIRTUAL net/minecraft/server/level/ServerPlayer.getUUID()Ljava/util/UUID;",
+                        "ALOAD 0",
+                        "GETFIELD xyz/pyrehaven/happyartillery/Hud.viewerAccess Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;",
+                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Hud.remove(Ljava/lang/Object;Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;)V",
+                        "RETURN"), wrapperShape(remove));
+        assertEquals(List.of(
+                        "ALOAD 0",
+                        "ALOAD 0",
+                        "GETFIELD xyz/pyrehaven/happyartillery/Hud.viewerAccess Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;",
+                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Hud.clear(Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;)V",
+                        "RETURN"), wrapperShape(clear));
+
+        for (MethodNode wrapper : List.of(remove, clear)) {
+            assertFalse(wrapperShape(wrapper).stream().anyMatch(operation ->
+                    operation.contains("java/util/Map")
+                            || operation.contains("Hud$Session")
+                            || operation.contains("ServerBossEvent.removePlayer")
+                            || operation.startsWith("CHECKCAST")), wrapperShape(wrapper)::toString);
+        }
+    }
+
+    private static MethodNode exactMethod(
+            org.objectweb.asm.tree.ClassNode owner, String name, String descriptor) {
+        List<MethodNode> matches = owner.methods.stream()
+                .filter(method -> method.name.equals(name) && method.desc.equals(descriptor))
+                .toList();
+        assertEquals(1, matches.size(), owner.name + "." + name + descriptor);
+        return matches.getFirst();
+    }
+
+    private static List<String> wrapperShape(MethodNode method) {
+        List<String> shape = new ArrayList<>();
+        for (AbstractInsnNode instruction = method.instructions.getFirst();
+                instruction != null; instruction = instruction.getNext()) {
+            if (instruction.getOpcode() < 0) {
+                continue;
+            }
+            if (instruction instanceof VarInsnNode variable
+                    && instruction.getOpcode() == org.objectweb.asm.Opcodes.ALOAD) {
+                shape.add("ALOAD " + variable.var);
+            } else if (instruction instanceof FieldInsnNode field
+                    && instruction.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD) {
+                shape.add("GETFIELD " + field.owner + "." + field.name + " " + field.desc);
+            } else if (instruction instanceof MethodInsnNode call) {
+                String opcode = instruction.getOpcode() == org.objectweb.asm.Opcodes.INVOKEVIRTUAL
+                        ? "INVOKEVIRTUAL" : "UNEXPECTED-OPCODE-" + instruction.getOpcode();
+                shape.add(opcode + " " + call.owner + "." + call.name + call.desc);
+            } else if (instruction.getOpcode() == org.objectweb.asm.Opcodes.RETURN) {
+                shape.add("RETURN");
+            } else if (instruction instanceof TypeInsnNode type) {
+                shape.add("CHECKCAST " + type.desc);
+            } else {
+                shape.add("UNEXPECTED-OPCODE-" + instruction.getOpcode());
+            }
+        }
+        return shape;
     }
 
     private static Config configWithHud(boolean bossBar, boolean actionBar, int refreshTicks) {
