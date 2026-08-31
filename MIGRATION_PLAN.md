@@ -295,7 +295,8 @@ owner remains, and the implementation still matches the thirteen-file tree.
    Java/Bedrock-through-Geyser intent.
 3. Document `/ha reload`, strict unknown/removed-key failure, and only the final 36-key schema.
 4. Add a player/server-owner-facing `1.2.0` changelog against `v1.1.2.2`, not intermediate defects.
-5. Replace `LICENSE` with complete canonical MIT text only after confirming the factual copyright line.
+5. Match OMWH's settled licensing: copy its complete CC0 1.0 Universal legal code byte-for-byte,
+   declare `CC0-1.0` in Fabric metadata, and link the repository license from the README.
 6. Build and inspect runtime metadata and packaged license; add a dependency-free docs/artifact agreement
    check if it fits existing verification style.
 

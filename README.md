@@ -66,7 +66,7 @@ Built jars are written to `build/libs/`.
 
 ## License
 
-MIT
+[CC0 1.0 Universal](LICENSE)
 
 ## Credits
 

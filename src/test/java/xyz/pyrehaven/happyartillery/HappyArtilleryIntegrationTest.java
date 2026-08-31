@@ -26,7 +26,9 @@ import org.objectweb.asm.tree.VarInsnNode;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -243,6 +245,11 @@ final class HappyArtilleryIntegrationTest {
         String buildBytes = Files.readString(Path.of("build.gradle"));
 
         assertEquals("Happy Artillery", metadata.get("name").getAsString());
+        assertEquals("CC0-1.0", metadata.get("license").getAsString());
+        String licenseSha256 = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(Path.of("LICENSE"))));
+        assertEquals("7abc65c185d25f94d129f580a8015025af33f09c9e44d9ba288889ab2d36855c",
+                licenseSha256);
         assertFalse(metadata.get("description").getAsString().toLowerCase().contains("structural"));
         assertFalse(metadata.get("description").getAsString().toLowerCase().contains("no gameplay"));
         assertFalse(metadataBytes.toLowerCase().contains("non-deployable"));

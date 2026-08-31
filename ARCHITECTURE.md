@@ -95,7 +95,7 @@ happy-artillery/
 ├── CHANGELOG.md
 │   # Public released-version history, not intermediate rewrite state.
 ├── LICENSE
-│   # MIT license packaged into the artifact.
+│   # Complete CC0 1.0 Universal legal text packaged into the artifact.
 ├── .gitignore
 │   # Excludes generated Gradle, IDE, run, world, log, and jar output.
 ├── build.gradle

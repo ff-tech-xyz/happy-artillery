@@ -11,7 +11,7 @@
 		"homepage": "https://pyrehaven.xyz",
 		"sources": "https://github.com/ff-tech-xyz/happy-artillery"
 	},
-	"license": "MIT",
+	"license": "CC0-1.0",
 	"icon": "assets/happy-artillery/icon.png",
 	"environment": "*",
 	"entrypoints": {
