@@ -1,5 +1,6 @@
 package xyz.pyrehaven.happyartillery;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -24,7 +25,8 @@ import java.util.UUID;
 
 /** Sole owner of generated controls, bounded inventory policy, and pilot admission. */
 public final class Controls {
-    static final String ALLOCATION_REFUSAL = "Happy Artillery needs 2 free inventory slots.";
+    private static final Component ALLOCATION_REFUSAL = Component.literal("Controls need 2 free slots.")
+            .withStyle(ChatFormatting.RED);
     private static final int HOTBAR_END = 8;
     private static final int MAIN_END = 35;
     private static final int OFFHAND = 40;
@@ -461,7 +463,7 @@ public final class Controls {
         ItemStack read(T inventory, int slot);
         void write(T inventory, int slot, ItemStack stack);
         UUID ownerId(T inventory);
-        void message(T inventory, String text);
+        void message(T inventory, Component message);
     }
 
     enum ServerPlayerInventoryAccess implements InventoryAccess<ServerPlayer> {
@@ -473,8 +475,8 @@ public final class Controls {
             player.getInventory().setItem(slot, stack.copy());
         }
         @Override public UUID ownerId(ServerPlayer player) { return player.getUUID(); }
-        @Override public void message(ServerPlayer player, String text) {
-            player.sendSystemMessage(Component.literal(text));
+        @Override public void message(ServerPlayer player, Component message) {
+            player.sendSystemMessage(message);
         }
     }
 

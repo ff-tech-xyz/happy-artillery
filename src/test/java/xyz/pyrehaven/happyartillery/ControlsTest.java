@@ -3,6 +3,7 @@ package xyz.pyrehaven.happyartillery;
 import com.mojang.authlib.GameProfile;
 import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
+import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
@@ -11,6 +12,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.data.registries.VanillaRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
@@ -238,7 +241,7 @@ final class ControlsTest {
     }
 
     @Test
-    void fewerThanTwoCandidatesWritesNothingRecordsRideAndMessagesExactlyOnce() {
+    void fewerThanTwoCandidatesWritesNothingRecordsRideAndSendsExactRedRefusalOnce() {
         for (int empties : List.of(0, 1)) {
             RecordingInventory inventory = RecordingInventory.filled();
             if (empties == 1) inventory.seed(3, ItemStack.EMPTY);
@@ -256,7 +259,10 @@ final class ControlsTest {
             }
             assertEquals(Optional.of(RIDE), mounted.riddenGhastId());
             assertSame(mounted, sameRide);
-            assertEquals(List.of(Controls.ALLOCATION_REFUSAL), inventory.messages);
+            assertEquals(1, inventory.messages.size());
+            Component refusal = inventory.messages.getFirst();
+            assertEquals("Controls need 2 free slots.", refusal.getString());
+            assertEquals(TextColor.fromLegacyFormat(ChatFormatting.RED), refusal.getStyle().getColor());
             assertTrue(inventory.writeSlots().isEmpty());
         }
     }
@@ -833,7 +839,7 @@ final class ControlsTest {
         private final ItemStack[] stacks = new ItemStack[41];
         private final List<Integer> reads = new ArrayList<>();
         private final List<Integer> writes = new ArrayList<>();
-        private final List<String> messages = new ArrayList<>();
+        private final List<Component> messages = new ArrayList<>();
 
         private RecordingInventory(boolean filled) {
             Arrays.setAll(stacks, ignored -> filled ? new ItemStack(Items.STONE) : ItemStack.EMPTY);
@@ -853,7 +859,7 @@ final class ControlsTest {
             writes.add(slot); stacks[slot] = stack.copy();
         }
         @Override public UUID ownerId(RecordingInventory inventory) { return OWNER; }
-        @Override public void message(RecordingInventory inventory, String text) { messages.add(text); }
+        @Override public void message(RecordingInventory inventory, Component message) { messages.add(message); }
     }
 
     private static final class TestPilot implements Controls.ControlAccess<TestPilot, UUID> {

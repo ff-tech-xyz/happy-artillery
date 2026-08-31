@@ -132,7 +132,7 @@ Presets:
   then main-inventory indexes `9..35`. Armor and offhand are not allocation destinations. It reserves two
   empty candidates before writing either control. With fewer than two, it writes nothing, preserves every
   inventory byte, records the ride as reconciled to prevent retries/spam, and sends exactly one direct
-  message: `Happy Artillery needs 2 free inventory slots.`
+  message: `Controls need 2 free slots.` in red.
 - Controls are fresh configured vanilla-item stacks carrying namespaced markers in vanilla custom data,
   plus display names and glint. Each marker contains control type, owner UUID, and ridden-ghast UUID.
   A marked stack authorizes only its owner during that exact ride. Raw configured items do nothing by
