@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -55,6 +56,10 @@ final class ConfigTest {
     @Test
     void configSchemaIsImmutable() {
         assertTrue(Config.class.isRecord(), "Config must be an immutable record");
+        assertEquals(List.of("controls", "fire", "heat", "water", "overheat", "cry", "hud"),
+                Stream.of(Config.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertThrows(NoSuchMethodException.class, () -> Config.class.getDeclaredMethod("preset"));
     }
 
     @Test
@@ -76,7 +81,6 @@ final class ConfigTest {
         Object defaults = Config.class.getMethod("defaults").invoke(null);
 
         assertEquals(Map.of(
-                "preset", "pvp",
                 "controls", Map.of(
                         "fireItem", "minecraft:fire_charge", "cryItem", "minecraft:ghast_tear",
                         "holdToFire", true, "allowPlainItems", false),
@@ -140,42 +144,33 @@ final class ConfigTest {
         Path file = directory.resolve("happy-artillery.json");
         Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
-        Files.writeString(file, """
-                {
-                  "preset": "survival",
-                  "overheat": {"explosionPower": 9.0}
-                }
-                """);
+        Files.writeString(file, "{\"overheat\":{\"explosionPower\":9.0}}");
 
         Config reloaded = Config.reload(file);
 
         assertNotSame(previous, reloaded);
         assertSame(reloaded, Config.current());
-        assertEquals("survival", reloaded.preset());
         assertEquals(9.0, reloaded.overheat().explosionPower());
-        assertEquals(12, reloaded.overheat().fireballCount());
+        assertEquals(24, reloaded.overheat().fireballCount());
         assertEquals(new Gson().toJsonTree(reloaded),
                 JsonParser.parseString(Files.readString(file)));
     }
 
     @Test
-    void presetAppliesBeforeExplicitOverrides(@TempDir Path directory) throws Exception {
+    void partialKnownKeysOverlayDefaultsAndRewriteOnlyPresetFreeSchema(@TempDir Path directory)
+            throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, """
-                {
-                  "preset": "survival",
-                  "overheat": {"explosionPower": 9.0}
-                }
-                """);
+        Files.writeString(file, "{\"overheat\":{\"explosionPower\":9.0}}");
 
-        Config loaded = (Config) Config.class.getMethod("load", Path.class).invoke(null, file);
+        Config loaded = Config.load(file);
+        JsonObject rewritten = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
 
-        assertEquals("survival", loaded.preset());
-        assertEquals(4.0, loaded.overheat().fireRadius());
-        assertEquals(12, loaded.overheat().fireballCount());
         assertEquals(9.0, loaded.overheat().explosionPower());
-        assertTrue(Stream.of(Config.Overheat.class.getRecordComponents())
-                .noneMatch(component -> component.getName().equals("respectProtection")));
+        assertEquals(Config.defaults().overheat().fireballCount(),
+                loaded.overheat().fireballCount());
+        assertEquals(Set.of("controls", "fire", "heat", "water", "overheat", "cry", "hud"),
+                rewritten.keySet());
+        assertEquals(new Gson().toJsonTree(loaded), rewritten);
     }
 
     @Test
@@ -251,33 +246,12 @@ final class ConfigTest {
         Config second = Config.reload(file);
 
         assertEquals(first, second);
-        assertEquals(8, serialized.size());
-        assertEquals(36, declaredKeyCount(serialized));
-        assertEquals(41, nestedLeafCount(serialized));
+        assertEquals(7, serialized.size());
+        assertEquals(35, declaredKeyCount(serialized));
+        assertEquals(40, nestedLeafCount(serialized));
         assertEquals(serialized, JsonParser.parseString(Files.readString(file)));
     }
 
-    @Test
-    void everyPresetSuppliesItsCompleteBehaviorBeforeOverrides(@TempDir Path directory)
-            throws Exception {
-        Path file = directory.resolve("happy-artillery.json");
-
-        Files.writeString(file, "{\"preset\":\"pvp\"}");
-        assertEquals(Config.defaults(), Config.load(file));
-
-        Files.writeString(file, "{\"preset\":\"survival\"}");
-        Config survival = Config.reload(file);
-        assertEquals(4.0, survival.overheat().explosionPower());
-        assertEquals(12, survival.overheat().fireballCount());
-        assertEquals(4.0, survival.overheat().fireRadius());
-        assertTrue(survival.overheat().breaksBlocks());
-
-        Files.writeString(file, "{\"preset\":\"off\"}");
-        Config off = Config.reload(file);
-        assertEquals(0, off.overheat().fireAttempts());
-        assertEquals(false, off.overheat().breaksBlocks());
-        assertEquals(1, off.fire().explosionPower());
-    }
 
     @Test
     void inclusiveValidationBoundariesAreAccepted(@TempDir Path directory) throws Exception {
@@ -328,7 +302,7 @@ final class ConfigTest {
                 key.equals("cryItem") ? itemId : candidate.controls().cryItem(),
                 candidate.controls().holdToFire(), candidate.controls().allowPlainItems());
         candidate = new Config(
-                candidate.preset(), controls, candidate.fire(), candidate.heat(), candidate.water(),
+                controls, candidate.fire(), candidate.heat(), candidate.water(),
                 candidate.overheat(), candidate.cry(), candidate.hud());
         Config resolvedCandidate = candidate;
         Predicate<String> registry = id -> !id.equals(itemId);
@@ -378,7 +352,7 @@ final class ConfigTest {
             assertEquals(file, target);
             JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
                     .getAsJsonObject();
-            assertEquals(36, declaredKeyCount(serialized));
+            assertEquals(35, declaredKeyCount(serialized));
             assertEquals(false, serialized.getAsJsonObject("controls")
                     .get("holdToFire").getAsBoolean());
             throw replacementFailure;
@@ -423,18 +397,33 @@ final class ConfigTest {
         assertArrayEquals(original, Files.readAllBytes(file));
     }
 
-    @ParameterizedTest(name = "preset type {0} is a validation failure")
-    @MethodSource("nonStringPresets")
-    void nonStringPresetFailsAsIllegalArgumentWithoutChangingStateOrBytes(
+    @Test
+    void removedPresetFailsAtStartupWithPathWithoutRewritingBytes(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] invalid = "{\"preset\":\"survival\"}".getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.load(file));
+
+        assertEquals("Removed config setting: preset", failure.getMessage());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @ParameterizedTest(name = "removed preset form {0} is rejected")
+    @MethodSource("removedPresetValues")
+    void removedPresetFailsWithPathWithoutChangingStateOrBytes(
             String description, String invalidJson, @TempDir Path directory) throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"preset\":\"survival\"}");
         Config previous = Config.load(file);
         byte[] invalid = invalidJson.getBytes(StandardCharsets.UTF_8);
         Files.write(file, invalid);
 
-        assertThrows(IllegalArgumentException.class, () -> Config.reload(file), description);
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file), description);
 
+        assertEquals("Removed config setting: preset", failure.getMessage());
         assertSame(previous, Config.current(), description);
         assertArrayEquals(invalid, Files.readAllBytes(file), description);
     }
@@ -471,7 +460,7 @@ final class ConfigTest {
     private static Stream<Arguments> invalidExistingFiles() {
         return Stream.of(
                 Arguments.of("malformed JSON", "{"),
-                Arguments.of("unknown preset", "{\"preset\":\"creative\"}"),
+                Arguments.of("removed preset", "{\"preset\":\"creative\"}"),
                 Arguments.of("invalid identifier", "{\"controls\":{\"fireItem\":\"Bad Item\"}}"),
                 Arguments.of("explicit null", "{\"hud\":{\"bossBar\":null}}"),
                 Arguments.of("wrong scalar type", "{\"hud\":{\"bossBar\":\"false\"}}"),
@@ -490,14 +479,15 @@ final class ConfigTest {
 
     private static Stream<Arguments> nonStrictJsonDocuments() {
         return Stream.of(
-                Arguments.of("comments", "{\"preset\":\"pvp\" /* comment */}"),
+                Arguments.of("comments", "{\"controls\":{\"holdToFire\":true /* comment */}}"),
                 Arguments.of("unquoted keys", "{controls:{\"holdToFire\":false}}"),
                 Arguments.of("trailing comment after the document", "{} /* trailing */"),
                 Arguments.of("trailing token after the document", "{} true"));
     }
 
-    private static Stream<Arguments> nonStringPresets() {
+    private static Stream<Arguments> removedPresetValues() {
         return Stream.of(
+                Arguments.of("string", "{\"preset\":\"survival\"}"),
                 Arguments.of("null", "{\"preset\":null}"),
                 Arguments.of("array", "{\"preset\":[]}"),
                 Arguments.of("object", "{\"preset\":{}}"));
@@ -516,7 +506,7 @@ final class ConfigTest {
     private static Stream<Arguments> duplicateKeyDocuments() {
         return Stream.of(
                 Arguments.of("duplicate top-level known key",
-                        "{\"preset\":\"pvp\",\"preset\":\"survival\"}"),
+                        "{\"hud\":{},\"hud\":{}}"),
                 Arguments.of("duplicate group-level known key",
                         "{\"controls\":{\"holdToFire\":true,\"holdToFire\":false}}"),
                 Arguments.of("duplicate nested heat-profile known key",
@@ -559,7 +549,7 @@ final class ConfigTest {
     }
 
     private static int declaredKeyCount(JsonObject root) {
-        int count = 1;
+        int count = 0;
         for (String group : new String[]{"controls", "fire", "heat", "water", "overheat", "cry", "hud"}) {
             count += root.getAsJsonObject(group).size();
         }

@@ -146,14 +146,14 @@ final class HappyArtilleryIntegrationTest {
         Path configPath = tempDir.resolve("happy-artillery.json");
         Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(configPath);
-        Files.writeString(configPath, "{\"preset\":\"survival\"}");
+        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":true}}");
         RecordingReloadFeedback feedback = new RecordingReloadFeedback();
 
         int result = HappyArtillery.executeReload(configPath, feedback);
 
         assertEquals(1, result);
         assertNotSame(previous, Config.current());
-        assertEquals("survival", Config.current().preset());
+        assertEquals(true, Config.current().controls().holdToFire());
         assertEquals(new com.google.gson.Gson().toJsonTree(Config.current()),
                 com.google.gson.JsonParser.parseString(Files.readString(configPath)));
         assertEquals(List.of("success:Happy Artillery config reloaded."), feedback.messages);
@@ -215,12 +215,13 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void nonStringPresetReloadsReportOnceAndPreserveStateAndBytes() throws Exception {
+    void removedPresetReloadsReportOnceAndPreserveStateAndBytes() throws Exception {
         List<String> invalidDocuments = List.of(
-                "{\"preset\":null}", "{\"preset\":[]}", "{\"preset\":{}}");
+                "{\"preset\":\"survival\"}", "{\"preset\":null}",
+                "{\"preset\":[]}", "{\"preset\":{}}");
         for (int index = 0; index < invalidDocuments.size(); index++) {
             Path configPath = tempDir.resolve("preset-type-" + index + ".json");
-            Files.writeString(configPath, "{\"preset\":\"survival\"}");
+            Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
             Config previous = Config.load(configPath);
             byte[] invalid = invalidDocuments.get(index).getBytes(java.nio.charset.StandardCharsets.UTF_8);
             Files.write(configPath, invalid);
@@ -232,7 +233,7 @@ final class HappyArtilleryIntegrationTest {
             assertSame(previous, Config.current());
             org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
             assertEquals(List.of(
-                    "failure:Happy Artillery config reload failed: preset must be a string"),
+                    "failure:Happy Artillery config reload failed: Removed config setting: preset"),
                     feedback.messages);
         }
     }

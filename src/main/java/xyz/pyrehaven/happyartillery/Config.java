@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 
 /** Sole immutable configuration owner. */
 public record Config(
-        String preset,
         Controls controls,
         Fire fire,
         Heat heat,
@@ -77,15 +76,7 @@ public record Config(
         rejectRemovedSettings(explicit);
         rejectUnknownKeys(JSON.toJsonTree(defaults()).getAsJsonObject(), explicit, "");
         validateIntegerLeaves(explicit);
-        String preset = "pvp";
-        if (explicit.has("preset")) {
-            JsonElement value = explicit.get("preset");
-            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
-                throw new IllegalArgumentException("preset must be a string");
-            }
-            preset = value.getAsString();
-        }
-        JsonObject complete = JSON.toJsonTree(preset(preset)).getAsJsonObject();
+        JsonObject complete = JSON.toJsonTree(defaults()).getAsJsonObject();
         mergeKnown(complete, explicit);
         Config loaded = JSON.fromJson(complete, Config.class);
         validate(loaded);
@@ -181,6 +172,9 @@ public record Config(
     }
 
     private static void rejectRemovedSettings(JsonObject explicit) {
+        if (explicit.has("preset")) {
+            throw new IllegalArgumentException("Removed config setting: preset");
+        }
         if (!explicit.has("controls") || !explicit.get("controls").isJsonObject()) {
             return;
         }
@@ -233,21 +227,6 @@ public record Config(
         }
     }
 
-    private static Config preset(String name) {
-        Config defaults = defaults();
-        return switch (name) {
-            case "pvp" -> defaults;
-            case "survival" -> new Config(
-                    name, defaults.controls(), defaults.fire(), defaults.heat(), defaults.water(),
-                    new Overheat(0, 4.0, 12, 0.4, 2, 24, 4.0, true, true),
-                    defaults.cry(), defaults.hud());
-            case "off" -> new Config(
-                    name, defaults.controls(), defaults.fire(), defaults.heat(), defaults.water(),
-                    new Overheat(0, 6.0, 24, 0.4, 2, 0, 8.0, true, false),
-                    defaults.cry(), defaults.hud());
-            default -> throw new IllegalArgumentException("Unknown preset: " + name);
-        };
-    }
 
     private static void mergeKnown(JsonObject target, JsonObject explicit) {
         for (String key : target.keySet()) {
@@ -381,7 +360,6 @@ public record Config(
 
     public static Config defaults() {
         return new Config(
-                "pvp",
                 new Controls("minecraft:fire_charge", "minecraft:ghast_tear", true, false),
                 new Fire(0.25, 1),
                 new Heat(

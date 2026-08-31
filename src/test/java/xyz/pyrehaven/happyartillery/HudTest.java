@@ -878,14 +878,14 @@ final class HudTest {
 
     private static Config configWithHud(boolean bossBar, boolean actionBar, int refreshTicks) {
         Config defaults = Config.defaults();
-        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+        return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent()));
     }
 
     private static Config configWithWarningThreshold(int warningFromPercent) {
         Config defaults = Config.defaults();
-        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+        return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(defaults.hud().bossBar(), defaults.hud().actionBar(),
                         defaults.hud().refreshTicks(), warningFromPercent));

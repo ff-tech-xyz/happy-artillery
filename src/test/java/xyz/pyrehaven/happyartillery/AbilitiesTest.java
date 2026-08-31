@@ -1345,7 +1345,7 @@ final class AbilitiesTest {
 
     private static Config configWithCry(boolean enabled, double volume, double cooldownSeconds) {
         Config defaults = Config.defaults();
-        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+        return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), new Config.Cry(enabled, volume, cooldownSeconds),
                 defaults.hud());
     }
@@ -1364,7 +1364,7 @@ final class AbilitiesTest {
                 originalOverheat.fireballSpeed(), originalOverheat.fireballPower(),
                 originalOverheat.fireAttempts(), originalOverheat.fireRadius(),
                 originalOverheat.killsGhast(), originalOverheat.breaksBlocks());
-        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), heat,
+        return new Config(defaults.controls(), defaults.fire(), heat,
                 defaults.water(), overheat, defaults.cry(), defaults.hud());
     }
 
@@ -1376,7 +1376,7 @@ final class AbilitiesTest {
         Config.Overheat overheat = new Config.Overheat(
                 fuseTicks, explosionPower, fireballCount, fireballSpeed, fireballPower,
                 fireAttempts, fireRadius, killsGhast, breaksBlocks);
-        return new Config(defaults.preset(), defaults.controls(), defaults.fire(), defaults.heat(),
+        return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), overheat, defaults.cry(), defaults.hud());
     }
 
