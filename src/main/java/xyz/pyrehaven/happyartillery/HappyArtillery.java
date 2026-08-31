@@ -453,7 +453,7 @@ public final class HappyArtillery implements ModInitializer {
 
         @Override
         public void runDueFuses(long now) {
-            Abilities.runDueFuses(now);
+            Abilities.runDueFuses(now, server);
         }
 
         @Override

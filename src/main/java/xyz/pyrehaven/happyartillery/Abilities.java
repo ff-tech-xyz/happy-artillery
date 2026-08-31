@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
@@ -18,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -46,8 +48,7 @@ public final class Abilities {
             long now,
             FuseQueue<P, G> fuses,
             DetonationAccess<P, G> access) {
-        Objects.requireNonNull(state, "state").ifPresent(
-                attached -> fuses.onGhastLoad(ghast, attached, now, access));
+        fuses.onGhastLoad(ghast, Objects.requireNonNull(state, "state"), now, access);
     }
 
     static int onRiderAvailable(UUID riderId) {
@@ -58,8 +59,8 @@ public final class Abilities {
         onRiderAvailable(Objects.requireNonNull(rider, "rider").getUUID());
     }
 
-    static int runDueFuses(long now) {
-        return FUSES.runDue(now, Config.current(), ServerPlayerDetonationAccess.INSTANCE);
+    static int runDueFuses(long now, MinecraftServer server) {
+        return FUSES.runDue(now, Config.current(), new ServerPlayerDetonationAccess(server));
     }
 
     static void onServerStop() {
@@ -118,15 +119,16 @@ public final class Abilities {
                 heated.detonateAtTick(),
                 heated.detonatingRiderId());
         if (shot.detonates()) {
+            DetonationAccess<P, G> executionAccess = detonationAccess.executionAccess(ghast);
             long deadline = saturatedAdd(now, config.overheat().fuseTicks());
             GhastState pending = new GhastState(
                     committed.heat(), committed.heatAnchorTick(), committed.firingWindowEndTick(),
                     committed.fireReadyTick(), committed.cryReadyTick(),
                     java.util.OptionalLong.of(deadline),
-                    java.util.Optional.of(detonationAccess.riderId(pilot)));
-            detonationAccess.replaceState(ghast, pending);
+                    java.util.Optional.of(executionAccess.riderId(pilot)));
+            executionAccess.replaceState(ghast, pending);
             Optional<DetonationOutcome> immediate = fuses.submit(
-                    ghast, pending, now, config, detonationAccess);
+                    ghast, pending, now, config, executionAccess);
             if (immediate.isPresent()) {
                 DetonationOutcome detonation = immediate.orElseThrow();
                 return detonation instanceof DetonationConsumed
@@ -147,17 +149,44 @@ public final class Abilities {
             long now,
             Config config,
             DetonationAccess<P, G> access) {
-        Objects.requireNonNull(config, "config");
-        Objects.requireNonNull(access, "access");
-        if (!access.loaded(ghast)) {
-            return new DetonationDeferred(DetonationDeferral.GHAST_UNLOADED);
-        }
-        GhastState current = access.state(ghast);
-        if (current.detonateAtTick().isEmpty()
-                || now < current.detonateAtTick().getAsLong()) {
+        Optional<GhastState> attached = access.attachedState(ghast);
+        if (attached.isEmpty()) {
             return new DetonationIgnored();
         }
-        P storedRider = access.resolveRider(ghast, current.detonatingRiderId().orElseThrow());
+        GhastState current = attached.orElseThrow();
+        if (current.detonateAtTick().isEmpty() || current.detonatingRiderId().isEmpty()) {
+            return new DetonationIgnored();
+        }
+        ExecutionEvidence evidence = new ExecutionEvidence();
+        return executeDetonation(ghast, current.detonateAtTick().getAsLong(),
+                current.detonatingRiderId().orElseThrow(), now, config, access, evidence, attached);
+    }
+
+    private static <P, G> DetonationOutcome executeDetonation(
+            G ghast,
+            long expectedDeadline,
+            UUID expectedRiderId,
+            long now,
+            Config config,
+            DetonationAccess<P, G> access,
+            ExecutionEvidence evidence,
+            Optional<GhastState> attached) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(access, "access");
+        if (attached.isEmpty()) {
+            evidence.stale = true;
+            return new DetonationIgnored();
+        }
+        GhastState current = attached.orElseThrow();
+        if (current.detonateAtTick().isEmpty()
+                || current.detonateAtTick().getAsLong() != expectedDeadline
+                || current.detonatingRiderId().isEmpty()
+                || !current.detonatingRiderId().orElseThrow().equals(expectedRiderId)
+                || now < expectedDeadline) {
+            evidence.stale = true;
+            return new DetonationIgnored();
+        }
+        P storedRider = access.resolveRider(ghast, expectedRiderId);
         if (storedRider == null) {
             return new DetonationDeferred(DetonationDeferral.RIDER_UNAVAILABLE);
         }
@@ -192,6 +221,10 @@ public final class Abilities {
         return rejectedAttempts == 0
                 ? new DetonationConsumed()
                 : new DetonationConsumedWithFailures(rejectedAttempts);
+    }
+
+    private static final class ExecutionEvidence {
+        private boolean stale;
     }
 
     private static Vec3 sphereDirection(int index, int count) {
@@ -325,30 +358,40 @@ public final class Abilities {
     }
 
     static final class FuseQueue<P, G> {
-        private final PriorityQueue<FuseTask<G>> tasks = new PriorityQueue<>(
-                java.util.Comparator.comparingLong(FuseTask::deadline));
-        private final Map<UUID, FuseTask<G>> scheduled = new HashMap<>();
-        private final Map<UUID, Set<FuseTask<G>>> riderDeferred = new HashMap<>();
+        private final PriorityQueue<FuseTask> tasks = new PriorityQueue<>(
+                java.util.Comparator.comparingLong(FuseTask::deadline)
+                        .thenComparingLong(FuseTask::sequence));
+        private final Map<UUID, FuseTask> scheduled = new HashMap<>();
+        private final Map<UUID, Set<FuseTask>> riderDeferred = new HashMap<>();
+        private long nextSequence;
 
         void schedule(G ghast, GhastState state, DetonationAccess<P, G> access) {
-            Objects.requireNonNull(state, "state");
+            schedule(ghast, Optional.of(Objects.requireNonNull(state, "state")), access);
+        }
+
+        private void schedule(
+                G ghast, Optional<GhastState> attached, DetonationAccess<P, G> access) {
             Objects.requireNonNull(access, "access");
-            if (state.detonateAtTick().isEmpty()) {
+            UUID ghastId = access.ghastId(ghast);
+            FuseTask existing = scheduled.get(ghastId);
+            if (attached.isEmpty() || attached.orElseThrow().detonateAtTick().isEmpty()
+                    || attached.orElseThrow().detonatingRiderId().isEmpty()) {
+                removeOwner(existing);
                 return;
             }
-            UUID ghastId = access.ghastId(ghast);
+            GhastState state = attached.orElseThrow();
             long deadline = state.detonateAtTick().getAsLong();
             UUID riderId = state.detonatingRiderId().orElseThrow();
-            FuseTask<G> existing = scheduled.get(ghastId);
             if (existing != null && existing.deadline() == deadline
-                    && existing.riderId().equals(riderId) && existing.ghast() == ghast) {
+                    && existing.riderId().equals(riderId)) {
+                removeDeferred(existing);
+                if (!tasks.contains(existing)) {
+                    tasks.add(existing);
+                }
                 return;
             }
-            if (existing != null) {
-                tasks.remove(existing);
-                removeDeferred(existing);
-            }
-            FuseTask<G> task = new FuseTask<>(ghastId, ghast, deadline, riderId);
+            removeOwner(existing);
+            FuseTask task = new FuseTask(ghastId, deadline, riderId, nextSequence++);
             scheduled.put(ghastId, task);
             tasks.add(task);
         }
@@ -360,7 +403,7 @@ public final class Abilities {
                 Config config,
                 DetonationAccess<P, G> access) {
             schedule(ghast, state, access);
-            FuseTask<G> task = scheduled.get(access.ghastId(ghast));
+            FuseTask task = scheduled.get(access.ghastId(ghast));
             if (task == null || task.deadline() > now) {
                 return Optional.empty();
             }
@@ -369,8 +412,13 @@ public final class Abilities {
         }
 
         void onGhastLoad(
-                G ghast, GhastState state, long now, DetonationAccess<P, G> access) {
+                G ghast, Optional<GhastState> state, long now, DetonationAccess<P, G> access) {
             schedule(ghast, state, access);
+        }
+
+        void onGhastLoad(
+                G ghast, GhastState state, long now, DetonationAccess<P, G> access) {
+            onGhastLoad(ghast, Optional.of(state), now, access);
         }
 
         int runDue(
@@ -378,47 +426,89 @@ public final class Abilities {
                 Config config,
                 DetonationAccess<P, G> access) {
             int detonations = 0;
+            Throwable firstFailure = null;
+            ArrayList<FuseTask> batch = new ArrayList<>();
             while (!tasks.isEmpty() && tasks.peek().deadline() <= now) {
-                FuseTask<G> task = tasks.remove();
-                DetonationOutcome outcome = executeOwnedTask(task, now, config, access);
-                if (outcome instanceof DetonationConsumed
-                        || outcome instanceof DetonationConsumedWithFailures) {
-                    detonations++;
+                batch.add(tasks.remove());
+            }
+            for (FuseTask task : batch) {
+                if (scheduled.get(task.ghastId()) != task) {
+                    continue;
                 }
+                tasks.remove(task);
+                try {
+                    DetonationOutcome outcome = executeOwnedTask(task, now, config, access);
+                    if (outcome instanceof DetonationConsumed
+                            || outcome instanceof DetonationConsumedWithFailures) {
+                        detonations++;
+                    }
+                } catch (RuntimeException | Error failure) {
+                    if (firstFailure == null) {
+                        firstFailure = failure;
+                    } else if (firstFailure != failure) {
+                        firstFailure.addSuppressed(failure);
+                    }
+                }
+            }
+            if (firstFailure instanceof Error error) {
+                throw error;
+            }
+            if (firstFailure instanceof RuntimeException runtime) {
+                throw runtime;
             }
             return detonations;
         }
 
         private DetonationOutcome executeOwnedTask(
-                FuseTask<G> task,
+                FuseTask task,
                 long now,
                 Config config,
                 DetonationAccess<P, G> access) {
-            DetonationOutcome outcome;
+            ExecutionEvidence evidence = new ExecutionEvidence();
             try {
-                outcome = executeDetonation(task.ghast(), now, config, access);
+                G ghast = access.resolveGhast(task.ghastId());
+                if (ghast == null) {
+                    return new DetonationDeferred(DetonationDeferral.GHAST_UNLOADED);
+                }
+                return executeOwnedTask(task, ghast, now, config, access, evidence);
             } catch (RuntimeException | Error failure) {
-                tasks.add(task);
+                if (evidence.stale) {
+                    removeOwner(task);
+                } else {
+                    makeDormant(task);
+                }
                 throw failure;
             }
+        }
+
+        private DetonationOutcome executeOwnedTask(
+                FuseTask task,
+                G ghast,
+                long now,
+                Config config,
+                DetonationAccess<P, G> access,
+                ExecutionEvidence evidence) {
+            DetonationOutcome outcome = executeDetonation(
+                    ghast, task.deadline(), task.riderId(), now, config, access, evidence,
+                    access.attachedState(ghast));
             if (outcome instanceof DetonationDeferred deferred
                     && deferred.reason() == DetonationDeferral.RIDER_UNAVAILABLE) {
                 riderDeferred.computeIfAbsent(task.riderId(), ignored -> new LinkedHashSet<>())
                         .add(task);
-            } else {
-                scheduled.remove(task.ghastId(), task);
+            } else if (!(outcome instanceof DetonationDeferred)) {
+                removeOwner(task);
             }
             return outcome;
         }
 
         int onRiderAvailable(UUID riderId) {
-            Set<FuseTask<G>> deferred = riderDeferred.remove(riderId);
+            Set<FuseTask> deferred = riderDeferred.remove(riderId);
             if (deferred == null) {
                 return 0;
             }
             int reactivated = 0;
-            for (FuseTask<G> task : deferred) {
-                if (scheduled.get(task.ghastId()) == task) {
+            for (FuseTask task : deferred) {
+                if (scheduled.get(task.ghastId()) == task && !tasks.contains(task)) {
                     tasks.add(task);
                     reactivated++;
                 }
@@ -432,8 +522,22 @@ public final class Abilities {
             riderDeferred.clear();
         }
 
-        private void removeDeferred(FuseTask<G> task) {
-            Set<FuseTask<G>> deferred = riderDeferred.get(task.riderId());
+        private void removeOwner(FuseTask task) {
+            if (task == null) {
+                return;
+            }
+            tasks.remove(task);
+            removeDeferred(task);
+            scheduled.remove(task.ghastId(), task);
+        }
+
+        private void makeDormant(FuseTask task) {
+            tasks.remove(task);
+            removeDeferred(task);
+        }
+
+        private void removeDeferred(FuseTask task) {
+            Set<FuseTask> deferred = riderDeferred.get(task.riderId());
             if (deferred == null) {
                 return;
             }
@@ -442,8 +546,12 @@ public final class Abilities {
                 riderDeferred.remove(task.riderId());
             }
         }
+    }
 
-        private record FuseTask<G>(UUID ghastId, G ghast, long deadline, UUID riderId) {
+    private record FuseTask(UUID ghastId, long deadline, UUID riderId, long sequence) {
+        private FuseTask {
+            Objects.requireNonNull(ghastId, "ghastId");
+            Objects.requireNonNull(riderId, "riderId");
         }
     }
 
@@ -557,15 +665,19 @@ public final class Abilities {
     }
 
     interface DetonationAccess<P, G> {
+        default DetonationAccess<P, G> executionAccess(G ghast) {
+            return this;
+        }
+
         UUID riderId(P rider);
 
         UUID ghastId(G ghast);
 
+        G resolveGhast(UUID ghastId);
+
         P resolveRider(G ghast, UUID riderId);
 
-        GhastState state(G ghast);
-
-        boolean loaded(G ghast);
+        Optional<GhastState> attachedState(G ghast);
 
         void replaceState(G ghast, GhastState state);
 
@@ -653,8 +765,20 @@ public final class Abilities {
         }
     }
 
-    enum ServerPlayerDetonationAccess implements DetonationAccess<ServerPlayer, HappyGhast> {
-        INSTANCE;
+    private static final class ServerPlayerDetonationAccess
+            implements DetonationAccess<ServerPlayer, HappyGhast> {
+        private static final ServerPlayerDetonationAccess INSTANCE =
+                new ServerPlayerDetonationAccess(null);
+        private final MinecraftServer server;
+
+        private ServerPlayerDetonationAccess(MinecraftServer server) {
+            this.server = server;
+        }
+
+        @Override
+        public DetonationAccess<ServerPlayer, HappyGhast> executionAccess(HappyGhast ghast) {
+            return new ServerPlayerDetonationAccess(ghast.level().getServer());
+        }
 
         @Override
         public UUID riderId(ServerPlayer rider) {
@@ -667,27 +791,29 @@ public final class Abilities {
         }
 
         @Override
+        public HappyGhast resolveGhast(UUID ghastId) {
+            if (server == null) {
+                throw new IllegalStateException("UUID resolution requires server context");
+            }
+            for (ServerLevel level : server.getAllLevels()) {
+                Entity entity = level.getEntity(ghastId);
+                if (entity instanceof HappyGhast ghast) {
+                    return ghast;
+                }
+            }
+            return null;
+        }
+
+        @Override
         public ServerPlayer resolveRider(HappyGhast ghast, UUID riderId) {
             ServerLevel level = (ServerLevel) ghast.level();
             return level.getServer().getPlayerList().getPlayer(riderId);
         }
 
-        Optional<GhastState> attachedState(HappyGhast ghast) {
+        @Override
+        public Optional<GhastState> attachedState(HappyGhast ghast) {
             AttachmentTarget target = (AttachmentTarget) (Object) ghast;
             return Optional.ofNullable(target.getAttached(GhastState.register()));
-        }
-
-        @Override
-        public GhastState state(HappyGhast ghast) {
-            AttachmentTarget target = (AttachmentTarget) (Object) ghast;
-            return Objects.requireNonNull(target.getAttached(GhastState.register()),
-                    "loaded Happy Ghast has no artillery state");
-        }
-
-        @Override
-        public boolean loaded(HappyGhast ghast) {
-            return ghast.level() instanceof ServerLevel level
-                    && level.getEntity(ghast.getUUID()) == ghast;
         }
 
         @Override
