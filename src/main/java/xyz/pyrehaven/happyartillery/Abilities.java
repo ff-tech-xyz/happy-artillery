@@ -3,16 +3,17 @@ package xyz.pyrehaven.happyartillery;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.resources.ResourceKey;
-
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.math.BigDecimal;
@@ -26,10 +27,10 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.UUID;
 
-
 /** Sole fire, cry, and detonation owner. */
 public final class Abilities {
     private static final FuseQueue<ServerPlayer, HappyGhast> FUSES = new FuseQueue<>();
+    private static final double LAUNCH_CLEARANCE = 0.01;
 
     private Abilities() {
     }
@@ -70,18 +71,6 @@ public final class Abilities {
             HappyGhast ghast,
             GhastState state,
             long now,
-            ResourceKey<Level> dimension,
-            double baseTemperature) {
-        Config config = Config.current();
-        BiomeClass biomeClass = BiomeClass.classify(dimension, baseTemperature, config);
-        return fire(pilot, ghast, state, now, config, biomeClass);
-    }
-
-    static FireOutcome fire(
-            ServerPlayer pilot,
-            HappyGhast ghast,
-            GhastState state,
-            long now,
             Config config,
             BiomeClass biomeClass) {
         return fire(pilot, ghast, state, now, config, biomeClass,
@@ -95,7 +84,9 @@ public final class Abilities {
             long now,
             Config config,
             BiomeClass biomeClass,
-            FireAccess<P, G> access) {
+            FireAccess<P, G> access,
+            FuseQueue<P, G> fuses,
+            DetonationAccess<P, G> detonationAccess) {
         Objects.requireNonNull(pilot, "pilot");
         Objects.requireNonNull(ghast, "ghast");
         Objects.requireNonNull(state, "state");
@@ -127,45 +118,28 @@ public final class Abilities {
                 heated.detonateAtTick(),
                 heated.detonatingRiderId());
         if (shot.detonates()) {
-            return new OverheatCrossing(state, committed);
+            long deadline = saturatedAdd(now, config.overheat().fuseTicks());
+            GhastState pending = new GhastState(
+                    committed.heat(), committed.heatAnchorTick(), committed.firingWindowEndTick(),
+                    committed.fireReadyTick(), committed.cryReadyTick(),
+                    java.util.OptionalLong.of(deadline),
+                    java.util.Optional.of(detonationAccess.riderId(pilot)));
+            detonationAccess.replaceState(ghast, pending);
+            Optional<DetonationOutcome> immediate = fuses.submit(
+                    ghast, pending, now, config, detonationAccess);
+            if (immediate.isPresent()) {
+                DetonationOutcome detonation = immediate.orElseThrow();
+                return detonation instanceof DetonationConsumed
+                        ? new Detonated()
+                        : new Rejected(FireRejection.EFFECT_FAILED);
+            }
+            return new DetonationPending(pending);
         }
         if (!access.addProjectile(pilot, ghast, config.fire().explosionPower())) {
             return new Rejected(FireRejection.EFFECT_FAILED);
         }
         access.replaceState(ghast, committed);
         return new Fired(committed);
-    }
-
-    static <P, G> FireOutcome fire(
-            P pilot,
-            G ghast,
-            GhastState state,
-            long now,
-            Config config,
-            BiomeClass biomeClass,
-            FireAccess<P, G> fireAccess,
-            FuseQueue<P, G> fuses,
-            DetonationAccess<P, G> detonationAccess) {
-        FireOutcome outcome = fire(pilot, ghast, state, now, config, biomeClass, fireAccess);
-        if (!(outcome instanceof OverheatCrossing crossing)) {
-            return outcome;
-        }
-        long deadline = saturatedAdd(now, config.overheat().fuseTicks());
-        GhastState heated = crossing.proposedState();
-        GhastState pending = new GhastState(
-                heated.heat(), heated.heatAnchorTick(), heated.firingWindowEndTick(),
-                heated.fireReadyTick(), heated.cryReadyTick(), java.util.OptionalLong.of(deadline),
-                java.util.Optional.of(detonationAccess.riderId(pilot)));
-        detonationAccess.replaceState(ghast, pending);
-        Optional<DetonationOutcome> immediate = fuses.submit(
-                ghast, pending, now, config, detonationAccess);
-        if (immediate.isPresent()) {
-            DetonationOutcome detonation = immediate.orElseThrow();
-            return detonation instanceof DetonationConsumed
-                    ? new Detonated()
-                    : new Rejected(FireRejection.EFFECT_FAILED);
-        }
-        return new DetonationPending(pending);
     }
 
     static <P, G> DetonationOutcome executeDetonation(
@@ -196,8 +170,8 @@ public final class Abilities {
                 : new GhastState(0.0, now, now, now, current.cryReadyTick(),
                         java.util.OptionalLong.empty(), java.util.Optional.empty());
         access.replaceState(ghast, consumed);
-        int rejectedAttempts = access.explode(storedRider, ghast,
-                overheat.explosionPower(), overheat.breaksBlocks()) ? 0 : 1;
+        access.explode(storedRider, ghast, overheat.explosionPower(), overheat.breaksBlocks());
+        int rejectedAttempts = 0;
         for (int index = 0; index < overheat.fireballCount(); index++) {
             if (!access.spawnFireball(ghast, sphereDirection(index, overheat.fireballCount()),
                     overheat.fireballSpeed(), overheat.fireballPower())) {
@@ -236,6 +210,57 @@ public final class Abilities {
         return new Vec3(Math.cos(angle) * distance, 0.0, Math.sin(angle) * distance);
     }
 
+    static Launch launch(Vec3 start, Vec3 aim, AABB occupied, AABB projectileAtOrigin) {
+        Objects.requireNonNull(start, "start");
+        Objects.requireNonNull(aim, "aim");
+        Objects.requireNonNull(occupied, "occupied");
+        Objects.requireNonNull(projectileAtOrigin, "projectileAtOrigin");
+        if (!finite(start) || !finite(aim) || aim.lengthSqr() <= 1.0E-12) {
+            throw new IllegalArgumentException("fireball launch requires a finite non-zero aim");
+        }
+        Vec3 direction = aim.normalize();
+        AABB expanded = occupied.inflate(
+                projectileAtOrigin.getXsize() * 0.5 + LAUNCH_CLEARANCE,
+                projectileAtOrigin.getYsize() * 0.5 + LAUNCH_CLEARANCE,
+                projectileAtOrigin.getZsize() * 0.5 + LAUNCH_CLEARANCE);
+        if (start.x < expanded.minX || start.x > expanded.maxX
+                || start.y < expanded.minY || start.y > expanded.maxY
+                || start.z < expanded.minZ || start.z > expanded.maxZ) {
+            throw new IllegalArgumentException("fireball launch start is outside ridden bounds");
+        }
+        double exit = Double.POSITIVE_INFINITY;
+        exit = exitDistance(start.x, direction.x, expanded.minX, expanded.maxX, exit);
+        exit = exitDistance(start.y, direction.y, expanded.minY, expanded.maxY, exit);
+        exit = exitDistance(start.z, direction.z, expanded.minZ, expanded.maxZ, exit);
+        if (!Double.isFinite(exit) || exit < 0.0) {
+            throw new IllegalArgumentException("fireball aim cannot exit ridden bounds");
+        }
+        Vec3 center = start.add(direction.scale(exit));
+        return new Launch(center.subtract(projectileAtOrigin.getCenter()), direction);
+    }
+
+    private static double exitDistance(
+            double start, double direction, double minimum, double maximum, double current) {
+        if (direction > 0.0) {
+            return Math.min(current, (maximum - start) / direction);
+        }
+        if (direction < 0.0) {
+            return Math.min(current, (minimum - start) / direction);
+        }
+        return current;
+    }
+
+    private static boolean finite(Vec3 vector) {
+        return Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
+    }
+
+    record Launch(Vec3 origin, Vec3 direction) {
+        Launch {
+            Objects.requireNonNull(origin, "origin");
+            Objects.requireNonNull(direction, "direction");
+        }
+    }
+
     static <P, G> CryOutcome cry(
             P pilot,
             G ghast,
@@ -268,9 +293,7 @@ public final class Abilities {
                 cooldownDeadline(now, config.cry().cooldownSeconds()),
                 state.detonateAtTick(),
                 state.detonatingRiderId());
-        if (!access.playCry(ghast, config.cry().volume())) {
-            return new CryRejected(CryRejection.EFFECT_FAILED);
-        }
+        access.playCry(ghast, config.cry().volume());
         access.replaceState(ghast, committed);
         return new Cried(committed);
     }
@@ -403,18 +426,6 @@ public final class Abilities {
             return reactivated;
         }
 
-        int queuedTasks() {
-            return tasks.size();
-        }
-
-        int deferredTasks() {
-            return riderDeferred.values().stream().mapToInt(Set::size).sum();
-        }
-
-        int ownedTasks() {
-            return scheduled.size();
-        }
-
         void clear() {
             tasks.clear();
             scheduled.clear();
@@ -471,20 +482,12 @@ public final class Abilities {
         REJECTED
     }
 
-    sealed interface FireOutcome permits Fired, OverheatCrossing, Detonated, DetonationPending, Rejected {
+    sealed interface FireOutcome permits Fired, Detonated, DetonationPending, Rejected {
     }
 
     record Fired(GhastState state) implements FireOutcome {
         Fired {
             Objects.requireNonNull(state, "state");
-        }
-    }
-
-    record OverheatCrossing(GhastState originalState, GhastState proposedState)
-            implements FireOutcome {
-        OverheatCrossing {
-            Objects.requireNonNull(originalState, "originalState");
-            Objects.requireNonNull(proposedState, "proposedState");
         }
     }
 
@@ -530,8 +533,7 @@ public final class Abilities {
         NOT_PILOT,
         IN_WATER,
         DISABLED,
-        ON_COOLDOWN,
-        EFFECT_FAILED
+        ON_COOLDOWN
     }
 
     interface CryAccess<P, G> {
@@ -539,7 +541,7 @@ public final class Abilities {
 
         boolean inWater(G ghast);
 
-        boolean playCry(G ghast, double volume);
+        void playCry(G ghast, double volume);
 
         void replaceState(G ghast, GhastState state);
     }
@@ -567,7 +569,7 @@ public final class Abilities {
 
         void replaceState(G ghast, GhastState state);
 
-        boolean explode(P pilot, G ghast, double power, boolean breaksBlocks);
+        void explode(P pilot, G ghast, double power, boolean breaksBlocks);
 
         boolean spawnFireball(G ghast, Vec3 direction, double speed, int power);
 
@@ -592,7 +594,7 @@ public final class Abilities {
         }
 
         @Override
-        public boolean playCry(HappyGhast ghast, double volume) {
+        public void playCry(HappyGhast ghast, double volume) {
             Level level = ghast.level();
             level.playSound(
                     null,
@@ -601,7 +603,6 @@ public final class Abilities {
                     SoundSource.HOSTILE,
                     (float) volume,
                     0.8F);
-            return true;
         }
 
         @Override
@@ -627,12 +628,16 @@ public final class Abilities {
         @Override
         public boolean addProjectile(ServerPlayer pilot, HappyGhast ghast, int explosionPower) {
             ServerLevel level = (ServerLevel) ghast.level();
-            Vec3 direction = pilot.getViewVector(1.0F).normalize();
-            LargeFireball projectile = new LargeFireball(level, ghast, direction, explosionPower);
-            projectile.setPos(
-                    ghast.getX() + direction.x * 4.0,
-                    ghast.getY(0.5) + 0.5,
-                    ghast.getZ() + direction.z * 4.0);
+            AABB occupied = ghast.getSelfAndPassengers()
+                    .map(Entity::getBoundingBox)
+                    .reduce(AABB::minmax)
+                    .orElseThrow();
+            Launch launch = launch(
+                    pilot.getEyePosition(), pilot.getViewVector(1.0F), occupied,
+                    EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
+            LargeFireball projectile = new LargeFireball(
+                    level, ghast, launch.direction(), explosionPower);
+            projectile.setPos(launch.origin());
             if (!level.addFreshEntity(projectile)) {
                 return false;
             }
@@ -689,15 +694,12 @@ public final class Abilities {
         public void replaceState(HappyGhast ghast, GhastState state) {
             GhastState.replace((AttachmentTarget) (Object) ghast, state);
         }
-
-
         @Override
-        public boolean explode(
+        public void explode(
                 ServerPlayer pilot, HappyGhast ghast, double power, boolean breaksBlocks) {
             Level level = ghast.level();
             level.explode(pilot, ghast.getX(), ghast.getY(), ghast.getZ(), (float) power,
                     breaksBlocks ? Level.ExplosionInteraction.BLOCK : Level.ExplosionInteraction.NONE);
-            return true;
         }
 
         @Override

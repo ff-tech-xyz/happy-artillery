@@ -585,6 +585,82 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void productionFireUsesAlreadyCapturedConfigAndBiomeThroughBothBoundaries() throws IOException {
+        String adapterDescriptor = "(Lnet/minecraft/server/level/ServerPlayer;"
+                + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
+                + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;)L"
+                + PACKAGE + "Abilities$FireOutcome;";
+        String coreDescriptor = "(Ljava/lang/Object;Ljava/lang/Object;L" + PACKAGE
+                + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;L"
+                + PACKAGE + "Abilities$FireAccess;L" + PACKAGE + "Abilities$FuseQueue;L"
+                + PACKAGE + "Abilities$DetonationAccess;)L" + PACKAGE
+                + "Abilities$FireOutcome;";
+
+        ClassNode driverOwner = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
+        MethodNode driver = method(driverOwner, "fire", adapterDescriptor);
+        List<MethodInsnNode> driverCalls = methodCalls(driver).stream()
+                .filter(call -> call.owner.equals(PACKAGE + "Abilities")
+                        && call.name.equals("fire"))
+                .toList();
+        assertEquals(1, driverCalls.size());
+        MethodInsnNode adapterCall = driverCalls.getFirst();
+        assertEquals(PACKAGE + "Abilities", adapterCall.owner);
+        assertEquals(adapterDescriptor, adapterCall.desc);
+        assertEquals(List.of(
+                        "ALOAD 1", "ALOAD 2", "ALOAD 3", "LLOAD 4", "ALOAD 6", "ALOAD 7"),
+                previousOperands(adapterCall, 6));
+
+        ClassNode abilitiesOwner = BytecodeTestSupport.classNode(Abilities.class.getName());
+        MethodNode adapter = method(abilitiesOwner, "fire", adapterDescriptor);
+        List<MethodInsnNode> adapterCalls = methodCalls(adapter).stream()
+                .filter(call -> call.owner.equals(PACKAGE + "Abilities")
+                        && call.name.equals("fire"))
+                .toList();
+        assertEquals(1, adapterCalls.size());
+        MethodInsnNode coreCall = adapterCalls.getFirst();
+        assertEquals(PACKAGE + "Abilities", coreCall.owner);
+        assertEquals(coreDescriptor, coreCall.desc);
+        assertEquals(List.of(
+                        "ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5", "ALOAD 6",
+                        "GETSTATIC " + PACKAGE + "Abilities$ServerPlayerFireAccess.INSTANCE L"
+                                + PACKAGE + "Abilities$ServerPlayerFireAccess;",
+                        "GETSTATIC " + PACKAGE + "Abilities.FUSES L" + PACKAGE
+                                + "Abilities$FuseQueue;",
+                        "GETSTATIC " + PACKAGE + "Abilities$ServerPlayerDetonationAccess.INSTANCE L"
+                                + PACKAGE + "Abilities$ServerPlayerDetonationAccess;"),
+                previousOperands(coreCall, 9));
+    }
+
+    @Test
+    void productionFireAndCryRouteWaterFeedbackDirectlyWithoutEnumConversion() throws IOException {
+        ClassNode access = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
+        MethodNode fire = method(access, "fire",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
+                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;)L"
+                        + PACKAGE + "Abilities$FireOutcome;");
+        MethodNode cry = method(access, "cry",
+                "(Lnet/minecraft/server/level/ServerPlayer;"
+                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
+                        + "GhastState;JL" + PACKAGE + "Config;)L" + PACKAGE
+                        + "Abilities$CryOutcome;");
+
+        for (MethodNode ability : List.of(fire, cry)) {
+            List<MethodInsnNode> calls = methodCalls(ability);
+            assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+                    PACKAGE + "Feedback") && call.name.equals("presentWaterBlocked")).count());
+            assertEquals(0, calls.stream().filter(call -> call.owner.equals(
+                    PACKAGE + "Feedback") && call.name.equals("present")).count());
+        }
+        assertEquals(0, Stream.iterate(fire.instructions.getFirst(), java.util.Objects::nonNull,
+                        AbstractInsnNode::getNext)
+                .filter(FieldInsnNode.class::isInstance).map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals(PACKAGE + "Abilities$CryRejection")).count());
+    }
+
+    @Test
     void loadAvailabilityAndStopCallbacksDelegateToTheirExistingOwners() {
         RecordingLifecycle lifecycle = new RecordingLifecycle();
 
@@ -738,6 +814,7 @@ final class HappyArtilleryIntegrationTest {
         @Override public GhastState advance(
                 String ghast, GhastState state, long now, Config config, BiomeClass biomeClass) {
             assertSame(expectedConfig, config);
+            assertSame(BiomeClass.HOT, biomeClass);
             return new GhastState(5.0, now, now, 0L, 0L,
                     java.util.OptionalLong.empty(), Optional.empty());
         }
@@ -780,6 +857,7 @@ final class HappyArtilleryIntegrationTest {
                 String pilot, String ghast, GhastState state, long now,
                 Config config, BiomeClass biomeClass) {
             assertSame(expectedConfig, config);
+            assertSame(BiomeClass.HOT, biomeClass);
             fireCalls++;
             if (consumedFailure) {
                 authoritativeState = new GhastState(0.0, 41L, 41L, 41L, 0L,
@@ -804,6 +882,7 @@ final class HappyArtilleryIntegrationTest {
                 GhastState state, long now, Config config, BiomeClass biomeClass,
                 Optional<Controls.InventorySnapshot> pilotSnapshot) {
             assertSame(expectedConfig, config);
+            assertSame(BiomeClass.HOT, biomeClass);
             if (rider.pilot()) {
                 assertSame(inventorySnapshot, pilotSnapshot.orElseThrow());
             } else {
@@ -938,6 +1017,36 @@ final class HappyArtilleryIntegrationTest {
             }
         }
         return shape;
+    }
+
+    private static List<String> previousOperands(AbstractInsnNode boundary, int count) {
+        List<String> operands = new ArrayList<>();
+        for (AbstractInsnNode instruction = boundary.getPrevious();
+                instruction != null && operands.size() < count;
+                instruction = instruction.getPrevious()) {
+            if (instruction.getOpcode() < 0) {
+                continue;
+            }
+            String operand;
+            if (instruction instanceof VarInsnNode variable) {
+                String opcode = switch (instruction.getOpcode()) {
+                    case Opcodes.ALOAD -> "ALOAD";
+                    case Opcodes.LLOAD -> "LLOAD";
+                    default -> throw new AssertionError(
+                            "Unexpected local-load opcode " + instruction.getOpcode());
+                };
+                operand = opcode + " " + variable.var;
+            } else if (instruction instanceof FieldInsnNode field
+                    && instruction.getOpcode() == Opcodes.GETSTATIC) {
+                operand = "GETSTATIC " + field.owner + "." + field.name + " " + field.desc;
+            } else {
+                throw new AssertionError(
+                        "Unexpected fire-boundary operand opcode " + instruction.getOpcode());
+            }
+            operands.add(0, operand);
+        }
+        assertEquals(count, operands.size());
+        return operands;
     }
 
     private static List<MethodInsnNode> methodCalls(MethodNode method) {

@@ -11,18 +11,15 @@ public final class Feedback {
     private Feedback() {
     }
 
-    static <P> void present(Abilities.CryRejection rejection, P player, Access<P> access) {
-        Objects.requireNonNull(rejection, "rejection");
+    static <P> void presentWaterBlocked(P player, Access<P> access) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(access, "access");
-        if (rejection == Abilities.CryRejection.IN_WATER) {
-            access.actionBar(player, "Can't use artillery in water");
-            access.blockedSound(player);
-        }
+        access.actionBar(player, "Can't use artillery in water");
+        access.blockedSound(player);
     }
 
-    static void present(Abilities.CryRejection rejection, ServerPlayer player) {
-        present(rejection, player, ServerPlayerFeedbackAccess.INSTANCE);
+    static void presentWaterBlocked(ServerPlayer player) {
+        presentWaterBlocked(player, ServerPlayerFeedbackAccess.INSTANCE);
     }
 
     interface Access<P> {

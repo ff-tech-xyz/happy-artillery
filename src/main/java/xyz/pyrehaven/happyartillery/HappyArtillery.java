@@ -544,7 +544,7 @@ public final class HappyArtillery implements ModInitializer {
                     pilot, ghast, state, now, config, biomeClass);
             if (outcome instanceof Abilities.Rejected rejected
                     && rejected.reason() == Abilities.FireRejection.IN_WATER) {
-                Feedback.present(Abilities.CryRejection.IN_WATER, pilot);
+                Feedback.presentWaterBlocked(pilot);
             }
             return outcome;
         }
@@ -554,12 +554,12 @@ public final class HappyArtillery implements ModInitializer {
                 ServerPlayer pilot, HappyGhast ghast, GhastState state, long now, Config config) {
             Abilities.CryOutcome outcome = Abilities.cry(
                     pilot, ghast, state, now, config, Abilities.ServerPlayerCryAccess.INSTANCE);
-            if (outcome instanceof Abilities.CryRejected rejected) {
-                Feedback.present(rejected.reason(), pilot);
+            if (outcome instanceof Abilities.CryRejected rejected
+                    && rejected.reason() == Abilities.CryRejection.IN_WATER) {
+                Feedback.presentWaterBlocked(pilot);
             }
             return outcome;
         }
-
 
         @Override
         public void render(

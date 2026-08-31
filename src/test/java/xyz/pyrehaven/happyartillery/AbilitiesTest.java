@@ -1,10 +1,12 @@
 package xyz.pyrehaven.happyartillery;
 
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
@@ -13,6 +15,7 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 import org.junit.jupiter.api.Test;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +26,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -50,6 +54,10 @@ final class AbilitiesTest {
         assertEquals(outcome, Abilities.class.getDeclaredMethod(
                 "cry", Object.class, Object.class, GhastState.class, long.class, Config.class, access)
                 .getReturnType());
+        assertEquals(void.class, access.getDeclaredMethod("playCry", Object.class, double.class)
+                .getReturnType());
+        assertEquals(Set.of("NOT_PILOT", "IN_WATER", "DISABLED", "ON_COOLDOWN"),
+                Stream.of(Abilities.CryRejection.values()).map(Enum::name).collect(Collectors.toSet()));
     }
 
     @Test
@@ -129,22 +137,6 @@ final class AbilitiesTest {
     }
 
     @Test
-    void rejectedSoundDoesNotCommitCryDeadlineOrAnyOtherState() {
-        RecordingCryAccess access = new RecordingCryAccess();
-        access.soundAccepted = false;
-        GhastState original = new GhastState(20.0, 50L, 75L, 90L, 100L,
-                java.util.OptionalLong.of(600L), java.util.Optional.of(RIDER_ID));
-
-        Abilities.CryOutcome outcome = cry(original, 100L, Config.defaults(), access);
-
-        assertEquals(new Abilities.CryRejected(Abilities.CryRejection.EFFECT_FAILED), outcome);
-        assertEquals(List.of("sound"), access.events);
-        assertEquals(1, access.sounds);
-        assertEquals(0, access.replacements);
-        assertEquals(100L, original.cryReadyTick());
-    }
-
-    @Test
     void feedbackBoundaryOwnsActionBarAndBlockedSoundEffects() throws Exception {
         Class<?> access = Class.forName("xyz.pyrehaven.happyartillery.Feedback$Access");
 
@@ -153,7 +145,7 @@ final class AbilitiesTest {
                         .map(java.lang.reflect.Method::getName)
                         .collect(Collectors.toSet()));
         assertEquals(void.class, Feedback.class.getDeclaredMethod(
-                "present", Abilities.CryRejection.class, Object.class, access).getReturnType());
+                "presentWaterBlocked", Object.class, access).getReturnType());
     }
 
     @Test
@@ -161,21 +153,11 @@ final class AbilitiesTest {
         RecordingFeedbackAccess access = new RecordingFeedbackAccess();
         Object player = new Object();
 
-        Feedback.present(Abilities.CryRejection.IN_WATER, player, access);
+        Feedback.presentWaterBlocked(player, access);
 
         assertEquals(List.of("action:Can't use artillery in water", "sound"), access.events);
     }
 
-    @Test
-    void cooldownAndAuthorizationCryRejectionsStaySilent() {
-        RecordingFeedbackAccess access = new RecordingFeedbackAccess();
-        Object player = new Object();
-
-        Feedback.present(Abilities.CryRejection.ON_COOLDOWN, player, access);
-        Feedback.present(Abilities.CryRejection.NOT_PILOT, player, access);
-
-        assertEquals(List.of(), access.events);
-    }
 
     @Test
     void minecraftCryAdapterUsesGhastScreamHostileConfiguredVolumeAndPointEightPitch()
@@ -192,7 +174,7 @@ final class AbilitiesTest {
         ClassNode adapter = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerCryAccess");
         MethodNode play = exactMethod(adapter, "playCry",
-                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;D)Z");
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;D)V");
         List<FieldInsnNode> fields = instructions(play).stream()
                 .filter(FieldInsnNode.class::isInstance)
                 .map(FieldInsnNode.class::cast)
@@ -222,10 +204,10 @@ final class AbilitiesTest {
     void minecraftFeedbackAdapterUsesOverlayMessageAndASeparateBlockedSound() throws Exception {
         ClassNode feedback = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Feedback");
-        MethodNode real = exactMethod(feedback, "present",
-                "(Lxyz/pyrehaven/happyartillery/Abilities$CryRejection;"
-                        + "Lnet/minecraft/server/level/ServerPlayer;)V");
-        assertEquals(1, callsTo(real, "xyz/pyrehaven/happyartillery/Feedback", "present").size());
+        MethodNode real = exactMethod(feedback, "presentWaterBlocked",
+                "(Lnet/minecraft/server/level/ServerPlayer;)V");
+        assertEquals(1, callsTo(real,
+                "xyz/pyrehaven/happyartillery/Feedback", "presentWaterBlocked").size());
 
         ClassNode adapter = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Feedback$ServerPlayerFeedbackAccess");
@@ -248,11 +230,11 @@ final class AbilitiesTest {
     }
 
     @Test
-    void fireOutcomesIncludeAnExplicitOverheatCrossingBoundary() throws Exception {
+    void fireOutcomesExposeOnlyFinalAbilityResults() throws Exception {
         Class<?> outcome = Class.forName("xyz.pyrehaven.happyartillery.Abilities$FireOutcome");
 
         assertTrue(outcome.isSealed());
-        assertEquals(Set.of("Fired", "OverheatCrossing", "Detonated", "DetonationPending", "Rejected"),
+        assertEquals(Set.of("Fired", "Detonated", "DetonationPending", "Rejected"),
                 Stream.of(outcome.getPermittedSubclasses())
                         .map(Class::getSimpleName)
                         .collect(Collectors.toSet()));
@@ -351,7 +333,8 @@ final class AbilitiesTest {
     }
 
     @Test
-    void crossingWithFuseCommitsAbsoluteDeadlineAndQueuesOneTask() {
+    void crossingWithFuseCommitsAbsoluteDeadlineAndExecutesOnceWhenDue() {
+        Object ghast = new Object();
         RecordingAccess fire = new RecordingAccess();
         RecordingDetonationAccess detonation = new RecordingDetonationAccess();
         Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
@@ -360,7 +343,7 @@ final class AbilitiesTest {
                 java.util.OptionalLong.empty());
 
         Abilities.FireOutcome outcome = Abilities.fire(
-                new Object(), new Object(), original, 100L, config, BiomeClass.BASE, fire,
+                new Object(), ghast, original, 100L, config, BiomeClass.BASE, fire,
                 queue, detonation);
 
         assertTrue(outcome instanceof Abilities.DetonationPending);
@@ -369,8 +352,11 @@ final class AbilitiesTest {
         assertEquals(java.util.Optional.of(RIDER_ID), pending.detonatingRiderId());
         assertEquals(pending, detonation.replacedState);
         assertEquals(List.of("replace"), detonation.events);
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(1, queue.ownedTasks());
+        assertEquals(0, queue.runDue(139L, config, detonation));
+        assertEquals(1, queue.runDue(140L, config, detonation));
+        assertEquals(1, detonation.explosions);
+        assertEquals(1, detonation.removals);
+        assertEquals(0, queue.runDue(140L, config, detonation));
     }
 
     @Test
@@ -392,15 +378,16 @@ final class AbilitiesTest {
                 detonation.events);
         assertEquals(1, detonation.explosions);
         assertEquals(1, detonation.removals);
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.runDue(100L, config, detonation));
+        assertEquals(1, detonation.explosions);
+        assertEquals(1, detonation.removals);
     }
 
     @Test
-    void zeroFuseReportsEffectFailureAfterQueueConsumesPendingEvent() {
+    void zeroFuseExplosionCannotInventARejectedOutcome() {
         RecordingAccess fire = new RecordingAccess();
         RecordingDetonationAccess detonation = new RecordingDetonationAccess();
         Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
-        detonation.explosionAccepted = false;
         Config config = configWithOverheat(0, 6.0, 0, 0.4, 2, 0, 8.0,
                 true, true);
         GhastState original = new GhastState(98.75, 100L, 100L, 0L, 300L,
@@ -410,10 +397,11 @@ final class AbilitiesTest {
                 new Object(), new Object(), original, 100L, config, BiomeClass.BASE, fire,
                 queue, detonation);
 
-        assertEquals(new Abilities.Rejected(Abilities.FireRejection.EFFECT_FAILED), outcome);
+        assertEquals(new Abilities.Detonated(), outcome);
         assertEquals(java.util.OptionalLong.empty(), detonation.state.detonateAtTick());
         assertEquals(java.util.Optional.empty(), detonation.state.detonatingRiderId());
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.runDue(100L, config, detonation));
+        assertEquals(1, detonation.explosions);
     }
 
     @Test
@@ -433,15 +421,13 @@ final class AbilitiesTest {
                 queue, detonation);
 
         assertEquals(new Abilities.Rejected(Abilities.FireRejection.EFFECT_FAILED), outcome);
-        assertEquals(0, queue.queuedTasks());
-        assertEquals(1, queue.deferredTasks());
-        assertEquals(1, queue.ownedTasks());
         detonation.riderAvailable = true;
         assertEquals(1, queue.onRiderAvailable(RIDER_ID));
         assertEquals(1, queue.runDue(101L, config, detonation));
         assertEquals(1, detonation.explosions);
         assertEquals(1, detonation.removals);
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.onRiderAvailable(RIDER_ID));
+        assertEquals(0, queue.runDue(101L, config, detonation));
     }
 
     @Test
@@ -462,16 +448,15 @@ final class AbilitiesTest {
 
         assertEquals(new Abilities.Rejected(Abilities.FireRejection.EFFECT_FAILED), outcome);
         assertEquals(java.util.OptionalLong.of(100L), detonation.state.detonateAtTick());
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.runDue(101L, config, detonation));
+        assertEquals(0, detonation.explosions + detonation.removals);
         detonation.loaded = true;
         queue.onGhastLoad(ghast, detonation.state, 101L, detonation);
         queue.onGhastLoad(ghast, detonation.state, 101L, detonation);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
         assertEquals(1, queue.runDue(101L, config, detonation));
         assertEquals(1, detonation.explosions);
         assertEquals(1, detonation.removals);
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.runDue(101L, config, detonation));
     }
 
     @Test
@@ -502,7 +487,6 @@ final class AbilitiesTest {
         RecordingDetonationAccess access = new RecordingDetonationAccess();
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
                 java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
-        access.explosionAccepted = false;
         access.fireballAccepted = false;
         access.fireAttempts.addAll(List.of(
                 Abilities.FireAttempt.SKIPPED,
@@ -514,7 +498,7 @@ final class AbilitiesTest {
         Abilities.DetonationOutcome outcome = Abilities.executeDetonation(
                 new Object(), 140L, config, access);
 
-        assertEquals(new Abilities.DetonationConsumedWithFailures(5), outcome);
+        assertEquals(new Abilities.DetonationConsumedWithFailures(4), outcome);
         assertEquals(List.of("replace", "explode:6.0:true", "fireball", "fireball", "fire", "fire",
                 "remove"), access.events);
         assertEquals(java.util.OptionalLong.empty(), access.state.detonateAtTick());
@@ -565,20 +549,14 @@ final class AbilitiesTest {
         assertEquals(List.of("replace"), access.events);
         assertEquals(0, access.explosions + access.directions.size()
                 + access.fireOffsets.size() + access.removals);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
         queue.onGhastLoad(ghast, pending, 141L, access);
         queue.onGhastLoad(ghast, pending, 141L, access);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
 
         access.replacementFailure = null;
         assertEquals(1, queue.runDue(150L, config, access));
         assertEquals(0, queue.runDue(150L, config, access));
         assertEquals(1, access.explosions);
         assertEquals(1, access.removals);
-        assertEquals(0, queue.ownedTasks());
     }
 
     @Test
@@ -599,19 +577,13 @@ final class AbilitiesTest {
 
         assertSame(access.stateFailure, failure);
         assertEquals(1, access.stateReads);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
         queue.onGhastLoad(ghast, pending, 141L, access);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
 
         access.stateFailure = null;
         assertEquals(1, queue.runDue(150L, config, access));
         assertEquals(0, queue.runDue(150L, config, access));
         assertEquals(1, access.explosions);
         assertEquals(1, access.removals);
-        assertEquals(0, queue.ownedTasks());
     }
 
     @Test
@@ -632,19 +604,13 @@ final class AbilitiesTest {
 
         assertSame(access.loadedFailure, failure);
         assertEquals(0, access.stateReads);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
         queue.onGhastLoad(ghast, pending, 141L, access);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
 
         access.loadedFailure = null;
         assertEquals(1, queue.runDue(150L, config, access));
         assertEquals(0, queue.runDue(150L, config, access));
         assertEquals(1, access.explosions);
         assertEquals(1, access.removals);
-        assertEquals(0, queue.ownedTasks());
     }
 
     @Test
@@ -668,18 +634,13 @@ final class AbilitiesTest {
         assertEquals(java.util.Optional.empty(), access.state.detonatingRiderId());
         assertEquals(1, access.explosions);
         assertEquals(0, access.directions.size() + access.fireOffsets.size() + access.removals);
-        assertEquals(1, queue.ownedTasks());
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
         assertEquals(0, queue.runDue(150L, config, access));
         assertEquals(1, access.explosions);
         assertEquals(0, access.directions.size() + access.fireOffsets.size() + access.removals);
-        assertEquals(0, queue.ownedTasks());
         queue.onGhastLoad(ghast, access.state, 150L, access);
         queue.onGhastLoad(ghast, access.state, 150L, access);
         assertEquals(0, queue.runDue(150L, config, access));
         assertEquals(1, access.explosions);
-        assertEquals(0, queue.ownedTasks());
     }
 
     @Test
@@ -736,7 +697,11 @@ final class AbilitiesTest {
         assertEquals(java.util.OptionalLong.of(Long.MAX_VALUE),
                 ((Abilities.DetonationPending) outcome).state().detonateAtTick());
         assertEquals(List.of("replace"), detonation.events);
-        assertEquals(1, queue.ownedTasks());
+        assertEquals(0, queue.runDue(Long.MAX_VALUE - 1L, config, detonation));
+        assertEquals(1, queue.runDue(Long.MAX_VALUE, config, detonation));
+        assertEquals(0, queue.runDue(Long.MAX_VALUE, config, detonation));
+        assertEquals(1, detonation.explosions);
+        assertEquals(1, detonation.removals);
     }
 
     @Test
@@ -788,6 +753,8 @@ final class AbilitiesTest {
                 access.getDeclaredMethod("ghastId", Object.class).getReturnType());
         assertEquals(void.class, access.getDeclaredMethod(
                 "replaceState", Object.class, GhastState.class).getReturnType());
+        assertEquals(void.class, access.getDeclaredMethod(
+                "explode", Object.class, Object.class, double.class, boolean.class).getReturnType());
 
         ClassNode adapter = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
@@ -809,7 +776,6 @@ final class AbilitiesTest {
 
         restartedQueue.onGhastLoad(ghast, access.state, 120L, access);
         restartedQueue.onGhastLoad(ghast, access.state, 120L, access);
-        assertEquals(1, restartedQueue.queuedTasks());
         assertEquals(0, restartedQueue.runDue(139L, config, access));
         access.loaded = false;
         assertEquals(0, restartedQueue.runDue(140L, config, access));
@@ -839,10 +805,8 @@ final class AbilitiesTest {
         queue.onGhastLoad(middleGhast, access.state, 123L, access);
         queue.onGhastLoad(newestGhast, access.state, 125L, access);
 
-        assertEquals(1, queue.queuedTasks());
         assertEquals(1, queue.runDue(140L, config, access));
         assertEquals(List.of(newestGhast), access.explodedGhasts);
-        assertEquals(0, queue.queuedTasks() + queue.deferredTasks());
     }
 
     @Test
@@ -859,10 +823,8 @@ final class AbilitiesTest {
 
         queue.onGhastLoad(staleGhast, access.state, 120L, access);
         assertEquals(0, queue.runDue(140L, config, access));
-        assertEquals(1, queue.deferredTasks());
         queue.onGhastLoad(newestGhast, access.state, 150L, access);
 
-        assertEquals(1, queue.queuedTasks() + queue.deferredTasks());
         access.riderAvailable = true;
         assertEquals(0, queue.onRiderAvailable(RIDER_ID));
         assertEquals(1, queue.runDue(150L, config, access));
@@ -891,7 +853,6 @@ final class AbilitiesTest {
         access.state = replacement;
         queue.onGhastLoad(newestGhast, replacement, 150L, access);
 
-        assertEquals(1, queue.queuedTasks() + queue.deferredTasks());
         assertEquals(0, queue.onRiderAvailable(RIDER_ID));
         access.riderAvailable = true;
         assertEquals(0, queue.runDue(159L, config, access));
@@ -919,10 +880,8 @@ final class AbilitiesTest {
         queue.onGhastLoad(firstGhast, pending, 120L, access);
         queue.onGhastLoad(secondGhast, pending, 120L, access);
 
-        assertEquals(2, queue.queuedTasks());
         assertEquals(2, queue.runDue(140L, config, access));
         assertEquals(Set.of(firstGhast, secondGhast), Set.copyOf(access.explodedGhasts));
-        assertEquals(0, queue.queuedTasks() + queue.deferredTasks());
     }
 
     @Test
@@ -939,16 +898,12 @@ final class AbilitiesTest {
         queue.onGhastLoad(ghast, access.state, 120L, access);
         assertEquals(0, queue.runDue(140L, config, access));
         assertEquals(1, access.riderResolutions);
-        assertEquals(0, queue.queuedTasks());
-        assertEquals(1, queue.deferredTasks());
         assertEquals(0, queue.runDue(200L, config, access));
         assertEquals(1, access.riderResolutions);
 
         access.riderAvailable = true;
         assertEquals(1, queue.onRiderAvailable(RIDER_ID));
         assertEquals(0, queue.onRiderAvailable(RIDER_ID));
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
         assertEquals(1, queue.runDue(200L, config, access));
         assertEquals(2, access.riderResolutions);
         assertEquals(1, access.explosions);
@@ -977,9 +932,6 @@ final class AbilitiesTest {
         queue.onGhastLoad(activeGhast, active, 120L, access);
         queue.onGhastLoad(deferredGhast, due, 120L, access);
         assertEquals(0, queue.runDue(140L, config, access));
-        assertEquals(1, queue.queuedTasks());
-        assertEquals(1, queue.deferredTasks());
-        assertEquals(2, queue.ownedTasks());
         int readsBeforeClear = access.stateReads;
         int resolutionsBeforeClear = access.riderResolutions;
         java.lang.reflect.Method clear;
@@ -992,9 +944,6 @@ final class AbilitiesTest {
         clear.invoke(queue);
         clear.invoke(queue);
 
-        assertEquals(0, queue.queuedTasks());
-        assertEquals(0, queue.deferredTasks());
-        assertEquals(0, queue.ownedTasks());
         access.riderAvailable = true;
         assertEquals(0, queue.onRiderAvailable(RIDER_ID));
         assertEquals(0, queue.runDue(500L, config, access));
@@ -1010,7 +959,6 @@ final class AbilitiesTest {
         RecordingDetonationAccess access = new RecordingDetonationAccess();
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
                 java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
-        access.explosionAccepted = false;
         Config config = configWithOverheat(40, 6.0, 1, 0.4, 2, 1, 8.0,
                 true, true);
         Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
@@ -1026,7 +974,6 @@ final class AbilitiesTest {
         assertEquals(1, access.directions.size());
         assertEquals(1, access.fireOffsets.size());
         assertEquals(1, access.removals);
-        assertEquals(0, queue.queuedTasks() + queue.deferredTasks());
     }
 
     @Test
@@ -1036,6 +983,8 @@ final class AbilitiesTest {
         Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
         GhastState pending = new GhastState(101.0, 100L, 120L, 105L, 300L,
                 java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        Config config = configWithOverheat(40, 6.0, 0, 0.4, 2, 0, 8.0,
+                true, true);
         java.lang.reflect.Method load;
         try {
             load = Abilities.class.getDeclaredMethod("onGhastLoad", Object.class,
@@ -1048,10 +997,16 @@ final class AbilitiesTest {
         load.invoke(null, ghast, java.util.Optional.empty(), 120L, queue, access);
 
         assertEquals(0, access.ghastIdReads);
-        assertEquals(0, queue.ownedTasks());
+        assertEquals(0, queue.runDue(140L, config, access));
+        assertEquals(0, access.explosions + access.removals);
+        access.state = pending;
         load.invoke(null, ghast, java.util.Optional.of(pending), 120L, queue, access);
         assertEquals(1, access.ghastIdReads);
-        assertEquals(1, queue.ownedTasks());
+        assertEquals(0, queue.runDue(139L, config, access));
+        assertEquals(1, queue.runDue(140L, config, access));
+        assertEquals(0, queue.runDue(140L, config, access));
+        assertEquals(1, access.explosions);
+        assertEquals(1, access.removals);
     }
 
     @Test
@@ -1121,98 +1076,87 @@ final class AbilitiesTest {
     }
 
     @Test
-    void equalityCrossingProposesStateWithoutOrdinaryProjectileOrAttachmentCommit() {
+    void equalityCrossingCommitsPendingStateWithoutOrdinaryProjectile() {
         RecordingAccess access = new RecordingAccess();
+        RecordingDetonationAccess detonation = new RecordingDetonationAccess();
+        Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
         Config config = configWithHeat(1.25, 100.0);
         GhastState original = new GhastState(98.75, 100L, 100L, 0L, 300L,
                 java.util.OptionalLong.empty());
 
-        Abilities.FireOutcome outcome = fire(original, 100L, config, access);
+        Abilities.FireOutcome outcome = Abilities.fire(
+                new Object(), new Object(), original, 100L, config, BiomeClass.BASE,
+                access, queue, detonation);
 
-        GhastState proposed = new GhastState(
-                100.0, 100L, 120L, 105L, 300L, java.util.OptionalLong.empty());
-        assertEquals(new Abilities.OverheatCrossing(original, proposed), outcome);
-        assertSame(original, ((Abilities.OverheatCrossing) outcome).originalState());
+        GhastState pending = new GhastState(
+                100.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        assertEquals(new Abilities.DetonationPending(pending), outcome);
         assertEquals(List.of(), access.events);
         assertEquals(0, access.adds + access.replacements);
+        assertEquals(List.of("replace"), detonation.events);
+        assertEquals(pending, detonation.state);
         assertEquals(98.75, original.heat());
     }
 
     @Test
-    void overLimitCrossingProposesStateWithoutOrdinaryProjectileOrAttachmentCommit() {
+    void overLimitCrossingCommitsPendingStateWithoutOrdinaryProjectile() {
         RecordingAccess access = new RecordingAccess();
+        RecordingDetonationAccess detonation = new RecordingDetonationAccess();
+        Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
         Config config = configWithHeat(2.0, 100.0);
         GhastState original = new GhastState(99.0, 100L, 100L, 0L, 300L,
                 java.util.OptionalLong.empty());
 
-        Abilities.FireOutcome outcome = fire(original, 100L, config, access);
+        Abilities.FireOutcome outcome = Abilities.fire(
+                new Object(), new Object(), original, 100L, config, BiomeClass.BASE,
+                access, queue, detonation);
 
-        GhastState proposed = new GhastState(
-                101.0, 100L, 120L, 105L, 300L, java.util.OptionalLong.empty());
-        assertEquals(new Abilities.OverheatCrossing(original, proposed), outcome);
-        assertSame(original, ((Abilities.OverheatCrossing) outcome).originalState());
+        GhastState pending = new GhastState(
+                101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        assertEquals(new Abilities.DetonationPending(pending), outcome);
         assertEquals(List.of(), access.events);
         assertEquals(0, access.adds + access.replacements);
+        assertEquals(List.of("replace"), detonation.events);
+        assertEquals(pending, detonation.state);
         assertEquals(99.0, original.heat());
     }
 
-    @Test
-    void classifiedProductionFireUsesExistingQueueBackedOverheatPathWithoutReclassification()
-            throws Exception {
-        ClassNode abilities = BytecodeTestSupport.classNode(
-                "xyz.pyrehaven.happyartillery.Abilities");
-        MethodNode classified = exactMethod(abilities, "fire",
-                "(Lnet/minecraft/server/level/ServerPlayer;"
-                        + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
-                        + "Lxyz/pyrehaven/happyartillery/GhastState;J"
-                        + "Lxyz/pyrehaven/happyartillery/Config;"
-                        + "Lxyz/pyrehaven/happyartillery/BiomeClass;)"
-                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;");
 
-        assertEquals(0, callsTo(classified,
-                "xyz/pyrehaven/happyartillery/BiomeClass", "classify").size());
-        assertEquals(List.of(
-                        "ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5", "ALOAD 6",
-                        "GETSTATIC Abilities$ServerPlayerFireAccess.INSTANCE "
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerFireAccess;",
-                        "GETSTATIC Abilities.FUSES "
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;",
-                        "GETSTATIC Abilities$ServerPlayerDetonationAccess.INSTANCE "
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerDetonationAccess;",
-                        "INVOKESTATIC Abilities.fire "
-                                + "(Ljava/lang/Object;Ljava/lang/Object;"
-                                + "Lxyz/pyrehaven/happyartillery/GhastState;J"
-                                + "Lxyz/pyrehaven/happyartillery/Config;"
-                                + "Lxyz/pyrehaven/happyartillery/BiomeClass;"
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$FireAccess;"
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;"
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;)"
-                                + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;",
-                        "ARETURN"),
-                instructionShape(classified));
+    @Test
+    void abilitiesExposeOneMinecraftAndOneExplicitCorePerAbility() {
+        assertEquals(2, Stream.of(Abilities.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("fire")).count());
+        assertEquals(2, Stream.of(Abilities.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("cry")).count());
     }
 
     @Test
-    void realFireOverloadReadsExactlyOneConfigSnapshotAndGenericSeamReadsNone() throws Exception {
+    void compositionRootOwnsConfigAndBiomeCaptureWhileBothFireBoundariesReadNeither() throws Exception {
         ClassNode abilities = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities");
         MethodNode real = exactMethod(abilities, "fire",
                 "(Lnet/minecraft/server/level/ServerPlayer;"
                         + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
                         + "Lxyz/pyrehaven/happyartillery/GhastState;J"
-                        + "Lnet/minecraft/resources/ResourceKey;D)"
+                        + "Lxyz/pyrehaven/happyartillery/Config;"
+                        + "Lxyz/pyrehaven/happyartillery/BiomeClass;)"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;");
         MethodNode generic = exactMethod(abilities, "fire",
                 "(Ljava/lang/Object;Ljava/lang/Object;"
                         + "Lxyz/pyrehaven/happyartillery/GhastState;J"
                         + "Lxyz/pyrehaven/happyartillery/Config;"
                         + "Lxyz/pyrehaven/happyartillery/BiomeClass;"
-                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireAccess;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireAccess;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;)"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$FireOutcome;");
 
-        assertEquals(1, callsTo(real, "xyz/pyrehaven/happyartillery/Config", "current").size());
-        assertEquals(1, callsTo(real, "xyz/pyrehaven/happyartillery/BiomeClass", "classify").size());
+        assertEquals(0, callsTo(real, "xyz/pyrehaven/happyartillery/Config", "current").size());
+        assertEquals(0, callsTo(real, "xyz/pyrehaven/happyartillery/BiomeClass", "classify").size());
         assertEquals(0, callsTo(generic, "xyz/pyrehaven/happyartillery/Config", "current").size());
+        assertEquals(0, callsTo(generic, "xyz/pyrehaven/happyartillery/BiomeClass", "classify").size());
         assertEquals(1, callsTo(generic, "xyz/pyrehaven/happyartillery/BiomeClass", "profile").size());
     }
 
@@ -1226,26 +1170,118 @@ final class AbilitiesTest {
                         + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;I)Z");
         assertEquals(0, method.access & Opcodes.ACC_BRIDGE);
 
+        List<MethodInsnNode> calls = instructions(method).stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .toList();
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast",
+                "getSelfAndPassengers").size());
+        Set<String> streamTargets = instructions(method).stream()
+                .filter(InvokeDynamicInsnNode.class::isInstance)
+                .map(InvokeDynamicInsnNode.class::cast)
+                .flatMap(dynamic -> java.util.Arrays.stream(dynamic.bsmArgs))
+                .filter(Handle.class::isInstance)
+                .map(Handle.class::cast)
+                .map(handle -> handle.getOwner() + "." + handle.getName())
+                .collect(Collectors.toSet());
+        assertTrue(streamTargets.contains("net/minecraft/world/entity/Entity.getBoundingBox"));
+        assertTrue(streamTargets.contains("net/minecraft/world/phys/AABB.minmax"));
+        assertEquals(1, callsTo(method, "net/minecraft/world/entity/EntityType", "getSpawnAABB").size());
+        assertEquals(1, callsTo(method, "xyz/pyrehaven/happyartillery/Abilities", "launch").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "<init>").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "setPos").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/server/level/ServerLevel", "addFreshEntity").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/server/level/ServerLevel", "levelEvent").size());
+        assertTrue(calls.indexOf(callsTo(method,
+                "net/minecraft/server/level/ServerLevel", "addFreshEntity").getFirst())
+                < calls.indexOf(callsTo(method,
+                "net/minecraft/server/level/ServerLevel", "levelEvent").getFirst()));
+        assertEquals(1, instructions(method).stream()
+                .filter(IntInsnNode.class::isInstance).map(IntInsnNode.class::cast)
+                .filter(instruction -> instruction.operand == 1016).count());
+        assertTrue(calls.stream().noneMatch(call -> call.name.equals("setDeltaMovement")));
+        List<String> shape = instructionShape(method);
+        int constructor = shape.indexOf("INVOKESPECIAL LargeFireball.<init> "
+                + "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;"
+                + "Lnet/minecraft/world/phys/Vec3;I)V");
         assertEquals(List.of(
-                "ALOAD 2", "INVOKEVIRTUAL HappyGhast.level ()Lnet/minecraft/world/level/Level;",
-                "CHECKCAST net/minecraft/server/level/ServerLevel", "ASTORE 4",
-                "ALOAD 1", "FCONST_1", "INVOKEVIRTUAL ServerPlayer.getViewVector (F)Lnet/minecraft/world/phys/Vec3;",
-                "INVOKEVIRTUAL Vec3.normalize ()Lnet/minecraft/world/phys/Vec3;", "ASTORE 5",
                 "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
-                "ALOAD 4", "ALOAD 2", "ALOAD 5", "ILOAD 3",
-                "INVOKESPECIAL LargeFireball.<init> (Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/phys/Vec3;I)V",
-                "ASTORE 6", "ALOAD 6", "ALOAD 2", "INVOKEVIRTUAL HappyGhast.getX ()D",
-                "ALOAD 5", "GETFIELD Vec3.x D", "LDC 4.0", "DMUL", "DADD",
-                "ALOAD 2", "LDC 0.5", "INVOKEVIRTUAL HappyGhast.getY (D)D", "LDC 0.5", "DADD",
-                "ALOAD 2", "INVOKEVIRTUAL HappyGhast.getZ ()D", "ALOAD 5", "GETFIELD Vec3.z D",
-                "LDC 4.0", "DMUL", "DADD", "INVOKEVIRTUAL LargeFireball.setPos (DDD)V",
-                "ALOAD 4", "ALOAD 6", "INVOKEVIRTUAL ServerLevel.addFreshEntity (Lnet/minecraft/world/entity/Entity;)Z",
-                "IFNE -> 44", "ICONST_0", "IRETURN",
-                "ALOAD 2", "INVOKEVIRTUAL HappyGhast.isSilent ()Z", "IFNE -> 54",
-                "ALOAD 4", "ACONST_NULL", "SIPUSH 1016", "ALOAD 2",
-                "INVOKEVIRTUAL HappyGhast.blockPosition ()Lnet/minecraft/core/BlockPos;", "ICONST_0",
-                "INVOKEVIRTUAL ServerLevel.levelEvent (Lnet/minecraft/world/entity/Entity;ILnet/minecraft/core/BlockPos;I)V",
-                "ICONST_1", "IRETURN"), instructionShape(method));
+                "ALOAD 4", "ALOAD 2", "ALOAD 6",
+                "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
+                "ILOAD 3"), shape.subList(constructor - 7, constructor));
+        int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
+                + "(Lnet/minecraft/world/phys/Vec3;)V");
+        assertEquals(List.of(
+                "ALOAD 7", "ALOAD 6",
+                "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
+                shape.subList(setPosition - 3, setPosition));
+
+        ClassNode abilities = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities");
+        MethodNode launch = exactMethod(abilities, "launch",
+                "(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;"
+                        + "Lnet/minecraft/world/phys/AABB;Lnet/minecraft/world/phys/AABB;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$Launch;");
+        assertEquals(1, callsTo(launch, "net/minecraft/world/phys/AABB", "inflate").size());
+    }
+
+    @Test
+    void launchOriginClearsGhastAndTopBottomPassengersForEveryAimAxis() throws Exception {
+        net.minecraft.world.phys.AABB ghast = new net.minecraft.world.phys.AABB(
+                -2.0, 0.0, -2.0, 2.0, 4.0, 2.0);
+        net.minecraft.world.phys.AABB topRider = new net.minecraft.world.phys.AABB(
+                -0.4, 4.0, -0.4, 0.4, 6.0, 0.4);
+        net.minecraft.world.phys.AABB bottomRider = new net.minecraft.world.phys.AABB(
+                -0.4, -2.0, -0.4, 0.4, 0.0, 0.4);
+        List<net.minecraft.world.phys.AABB> riddenBounds = List.of(ghast, topRider, bottomRider);
+        net.minecraft.world.phys.AABB union = ghast.minmax(topRider).minmax(bottomRider);
+        net.minecraft.world.phys.AABB projectileAtOrigin = new net.minecraft.world.phys.AABB(
+                -0.5, 0.0, -0.5, 0.5, 1.0, 0.5);
+        java.lang.reflect.Method launchMethod = Abilities.class.getDeclaredMethod(
+                "launch", Vec3.class, Vec3.class,
+                net.minecraft.world.phys.AABB.class, net.minecraft.world.phys.AABB.class);
+        List<List<Vec3>> cases = List.of(
+                List.of(new Vec3(0.0, 5.0, 0.0), new Vec3(0.0, 1.0, 0.0)),
+                List.of(new Vec3(0.0, -1.0, 0.0), new Vec3(0.0, -1.0, 0.0)),
+                List.of(new Vec3(0.0, 2.0, 0.0), new Vec3(1.0, 0.0, 0.0)),
+                List.of(new Vec3(0.0, 2.0, 0.0), new Vec3(1.0, 1.0, 1.0)));
+
+        for (List<Vec3> launchCase : cases) {
+            Object launch = launchMethod.invoke(
+                    null, launchCase.get(0), launchCase.get(1), union, projectileAtOrigin);
+            Vec3 origin = (Vec3) launch.getClass().getDeclaredMethod("origin").invoke(launch);
+            Vec3 direction = (Vec3) launch.getClass().getDeclaredMethod("direction").invoke(launch);
+            assertEquals(launchCase.get(1).normalize(), direction);
+            net.minecraft.world.phys.AABB spawned = projectileAtOrigin.move(origin);
+            for (net.minecraft.world.phys.AABB ridden : riddenBounds) {
+                assertFalse(spawned.intersects(ridden), launchCase + " intersects " + ridden);
+            }
+        }
+    }
+
+    @Test
+    void launchRejectsInvalidAimAndStartLoudly() {
+        net.minecraft.world.phys.AABB occupied = new net.minecraft.world.phys.AABB(
+                -2.0, -2.0, -2.0, 2.0, 2.0, 2.0);
+        net.minecraft.world.phys.AABB projectile = new net.minecraft.world.phys.AABB(
+                -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> Abilities.launch(Vec3.ZERO, Vec3.ZERO, occupied, projectile));
+        assertThrows(IllegalArgumentException.class,
+                () -> Abilities.launch(Vec3.ZERO,
+                        new Vec3(Double.NaN, 0.0, 0.0), occupied, projectile));
+        assertThrows(IllegalArgumentException.class,
+                () -> Abilities.launch(new Vec3(Double.POSITIVE_INFINITY, 0.0, 0.0),
+                        new Vec3(1.0, 0.0, 0.0), occupied, projectile));
+        assertThrows(IllegalArgumentException.class,
+                () -> Abilities.launch(new Vec3(20.0, 0.0, 0.0),
+                        new Vec3(1.0, 0.0, 0.0), occupied, projectile));
     }
 
     @Test
@@ -1303,7 +1339,8 @@ final class AbilitiesTest {
             GhastState state, long now, Config config, RecordingAccess access) {
         return Abilities.fire(
                 new Object(), new Object(), state, now, config,
-                BiomeClass.BASE, access);
+                BiomeClass.BASE, access, new Abilities.FuseQueue<>(),
+                new RecordingDetonationAccess());
     }
 
     private static Config configWithCry(boolean enabled, double volume, double cooldownSeconds) {
@@ -1321,8 +1358,14 @@ final class AbilitiesTest {
                 limit, original.firingWindowSeconds(), profile, profile, profile, profile, profile,
                 original.coldMaxTemperature(), original.hotMinTemperature(),
                 original.unknownDimensionUsesTemperature());
+        Config.Overheat originalOverheat = defaults.overheat();
+        Config.Overheat overheat = new Config.Overheat(
+                40, originalOverheat.explosionPower(), originalOverheat.fireballCount(),
+                originalOverheat.fireballSpeed(), originalOverheat.fireballPower(),
+                originalOverheat.fireAttempts(), originalOverheat.fireRadius(),
+                originalOverheat.killsGhast(), originalOverheat.breaksBlocks());
         return new Config(defaults.preset(), defaults.controls(), defaults.fire(), heat,
-                defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
+                defaults.water(), overheat, defaults.cry(), defaults.hud());
     }
 
     private static Config configWithOverheat(
@@ -1354,7 +1397,6 @@ final class AbilitiesTest {
     private static final class RecordingCryAccess implements Abilities.CryAccess<Object, Object> {
         private boolean pilot = true;
         private boolean inWater;
-        private boolean soundAccepted = true;
         private int pilotChecks;
         private int waterChecks;
         private int sounds;
@@ -1376,11 +1418,10 @@ final class AbilitiesTest {
         }
 
         @Override
-        public boolean playCry(Object ghast, double volume) {
+        public void playCry(Object ghast, double volume) {
             sounds++;
             this.volume = volume;
             events.add("sound");
-            return soundAccepted;
         }
 
         @Override
@@ -1437,7 +1478,6 @@ final class AbilitiesTest {
         private GhastState replacedState;
         private boolean loaded = true;
         private boolean riderAvailable = true;
-        private boolean explosionAccepted = true;
         private boolean fireballAccepted = true;
         private boolean removalAccepted = true;
         private RuntimeException replacementFailure;
@@ -1504,7 +1544,7 @@ final class AbilitiesTest {
         }
 
         @Override
-        public boolean explode(Object pilot, Object ghast, double power, boolean breaksBlocks) {
+        public void explode(Object pilot, Object ghast, double power, boolean breaksBlocks) {
             explosions++;
             explodedGhasts.add(ghast);
             explosionBreaksBlocks = breaksBlocks;
@@ -1512,7 +1552,6 @@ final class AbilitiesTest {
             if (explosionFailure != null) {
                 throw explosionFailure;
             }
-            return explosionAccepted;
         }
 
         @Override
