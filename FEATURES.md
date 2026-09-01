@@ -72,12 +72,12 @@ reference only; runtime never parses it. A root `preset` key is a removed settin
 fails transactionally, preserving the active object and existing file bytes.
 `/ha reload` requires gamemaster permission level 2.
 
-Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
+Defaults (seven top-level groups, 35 declared settings and 46 scalar leaves):
 
 | Group | Keys and values |
 |---|---|
 | controls | `fireItem=minecraft:fire_charge`, `cryItem=minecraft:ghast_tear`, `holdToFire=true`, `allowPlainItems=false` |
-| fire | `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
+| fire | `enabled=true`, `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
 | heat | `limit=100.0`, `coolingDelayAfterShotSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldBiomeMaxTemperature=0.3`, `hotBiomeMinTemperature=1.0`, `otherDimensionsUseBiomeTemperature=true` |
 | water | `blocksFiring=true` |
 | overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `firePlacementAttempts=24`, `firePlacementRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
@@ -85,8 +85,8 @@ Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
 | hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85`, `cooling=(noCoolingText=NO COOLING, noCoolingColor=RED, slowMaxPerSecond=0.5, slowColor=GOLD, normalMaxPerSecond=1.0, normalColor=GREEN, fastColor=BLUE)` |
 
 The declared-setting count is the sum of direct members in the seven groups
-(`4 + 2 + 10 + 1 + 9 + 3 + 5 = 34`); recursively expanding five heat profiles and `hud.cooling`
-produces 45 scalar leaves. All configurable numeric values are finite. Negative values are invalid
+(`4 + 3 + 10 + 1 + 9 + 3 + 5 = 35`); recursively expanding five heat profiles and `hud.cooling`
+produces 46 scalar leaves. All configurable numeric values are finite. Negative values are invalid
 except the two biome-temperature thresholds. Zero means no Fire or Cry cooldown, immediate overheat
 fuse, no attempts for count settings, and no passive cooling for a zero-rate heat profile; `heat.limit`
 and each profile's `heatPerShot` remain strictly positive. Nether and End always use their fixed
@@ -139,10 +139,11 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   and can fire or cry. Other riders see the HUD read-only; they have no safe action input while plain
   items are disabled, so the product does not promise unreachable `NOT_PILOT` feedback.
 - On becoming the pilot, `Controls` searches insertion candidates in exact order: hotbar indexes `0..8`,
-  then main-inventory indexes `9..35`. Armor and offhand are not allocation destinations. It reserves two
-  empty candidates before writing either control. With fewer than two, it writes nothing, preserves every
-  inventory byte, records the ride as reconciled to prevent retries/spam, and sends exactly one direct
-  message: `Controls need 2 free slots.` in red.
+  then main-inventory indexes `9..35`. Armor and offhand are not allocation destinations. It reserves the
+  complete enabled set before writing: two slots for Fire and Cry, one for either ability alone, and zero
+  when both are disabled. A short inventory writes nothing, preserves every inventory byte, records the
+  ride as reconciled to prevent retries/spam, and sends exactly `Controls need 2 free slots.` or
+  `Control needs 1 free slot.`. With both disabled it sends no allocation refusal.
 - Controls are fresh configured vanilla-item stacks carrying namespaced markers in vanilla custom data,
   plus display names and glint. Each marker contains control type, owner UUID, and ridden-ghast UUID.
   A marked stack authorizes only its owner during that exact ride. Raw configured items do nothing by
@@ -153,6 +154,12 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   a hand through ordinary Minecraft inventory behavior. Both hands and ridden-entity/item-use callbacks
   route to one handler; `lastHandledTick` permits at most one accepted input per player tick whichever
   callback arrives first.
+- `fire.enabled=false` and `cry.enabled=false` each omit that ability's control and reject both marked and
+  allowed plain-item admission silently. Ability execution checks disabled before water or effects; a
+  disabled Cry used underwater therefore does not claim that surfacing would enable it.
+- Block interaction checks the held stack through `Controls` before vanilla item behavior. Any marked
+  Happy Artillery control returns `FAIL`; ordinary unmarked items return `PASS`. The default Fire Control
+  therefore cannot consume itself as a fire charge or ignite the targeted block.
 - Controls move freely among the owning player's hotbar, main inventory, and offhand. There are no fixed
   slots, stashes, restoration writes, or locked slots. No mount, dismount, reload, death, or recovery path
   overwrites an ordinary ItemStack.
@@ -216,13 +223,14 @@ acceptance evidence without changing the tested candidate bytes.
 ## Abilities and effects
 
 Fire outcomes are sealed as `Fired`, `Detonated`, `DetonationPending`, or `Rejected`. Rejection reasons
-are exactly `IN_WATER`, `ON_COOLDOWN`, `NOT_PILOT`, `DETONATION_PENDING`, and `EFFECT_FAILED`.
-`DetonationPending` is the accepted crossing shot whose future fuse now owns persisted pending state;
+are exactly `DISABLED`, `IN_WATER`, `ON_COOLDOWN`, `NOT_PILOT`, `DETONATION_PENDING`, and
+`EFFECT_FAILED`. `DetonationPending` is the accepted crossing shot whose future fuse now owns persisted pending state;
 `Rejected(DETONATION_PENDING)` is a later fire attempt refused while that state remains pending.
 `NOT_PILOT` remains an authorization-boundary result for automated tests and defensive callback
-admission, not a passenger-facing input promise. Water, pilot, pending, and cooldown gates occur before
-state spend. Ordinary rejection changes no heat/timing. Cooldown, pending, and `NOT_PILOT` are silent;
-`IN_WATER` maps through `Feedback` to one short action-bar line and distinct sound. `EFFECT_FAILED`
+admission, not a passenger-facing input promise. Pilot authorization is checked first, then `DISABLED`
+wins before pending, water, cooldown, effects, or state spend. Ordinary rejection changes no heat/timing.
+Disabled, cooldown, pending, and `NOT_PILOT` are silent; `IN_WATER` maps through `Feedback` to one short
+action-bar line and distinct sound. `EFFECT_FAILED`
 reports an accepted effect path whose observable launch/detonation mutation failed; it has no fallback
 effect path.
 
@@ -310,12 +318,13 @@ Cry:
   control warnings and active status send no more than once per cadence. A due particle or dirty boss
   value cannot consume that action-bar tick. The separate boss/particle work uses a minimum five-tick
   cadence and still converges during continuous fire, keeping total presentation traffic below ten
-  packets in every sliding 20-tick window. Pilot control status has exact
-  priority: if either generated control is absent, show
-  `CONTROL MISSING · DISMOUNT AND REMOUNT`; otherwise, if either is in main inventory rather than a
-  hand-accessible hotbar/offhand location, show `CONTROL IN INVENTORY` or `CONTROLS IN INVENTORY` as
-  appropriate; otherwise show the normal heat/cooling line. Missing wins when one control is absent and
-  the other is merely in inventory. Control warnings are pilot-only and are delivered on the next eligible
+  packets in every sliding 20-tick window. Pilot control status ignores disabled controls and has exact
+  priority: if any enabled generated control is absent, show `CONTROL MISSING · DISMOUNT AND REMOUNT`
+  for one enabled control or `CONTROLS MISSING · DISMOUNT AND REMOUNT` for two; otherwise, if any enabled
+  control is in main inventory rather than a hand-accessible hotbar/offhand location, show
+  `CONTROL IN INVENTORY` or `CONTROLS IN INVENTORY` as appropriate; otherwise show the normal heat/cooling
+  line. Missing wins when one enabled control is absent and another is merely in inventory. Control warnings
+  are pilot-only and are delivered on the next eligible
   action-bar update without waiting behind another presentation channel. Passengers retain heat/status
   presentation.
 - The integration/heat context computes one typed presentation mode for the tick and passes it through the

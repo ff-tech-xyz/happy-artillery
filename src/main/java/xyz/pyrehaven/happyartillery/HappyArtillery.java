@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -22,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +58,7 @@ public final class HappyArtillery implements ModInitializer {
         Objects.requireNonNull(registrar, "registrar");
         registrar.registerGhastState();
         registrar.registerRiderState();
+        registrar.registerUseBlock();
         registrar.registerUseItem();
         registrar.registerUseEntity();
         registrar.registerGhastLoad();
@@ -245,6 +248,7 @@ public final class HappyArtillery implements ModInitializer {
     interface Registrar {
         void registerGhastState();
         void registerRiderState();
+        void registerUseBlock();
         void registerUseItem();
         void registerUseEntity();
         void registerGhastLoad();
@@ -265,6 +269,11 @@ public final class HappyArtillery implements ModInitializer {
 
         @Override public void registerGhastState() { GhastState.register(); }
         @Override public void registerRiderState() { RiderState.register(); }
+
+        @Override
+        public void registerUseBlock() {
+            UseBlockCallback.EVENT.register(HappyArtillery::onUseBlock);
+        }
 
         @Override
         public void registerUseItem() {
@@ -357,6 +366,11 @@ public final class HappyArtillery implements ModInitializer {
         @Override public void clearHud() {
             HUD.clear();
         }
+    }
+
+    private static InteractionResult onUseBlock(
+            Player player, Level level, InteractionHand hand, BlockHitResult hit) {
+        return Controls.blockUseResult(player.getItemInHand(hand));
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {

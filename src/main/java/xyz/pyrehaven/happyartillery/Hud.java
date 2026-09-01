@@ -102,9 +102,9 @@ public final class Hud<R, H> {
             attachmentDelivered = true;
         }
 
-        String actionText = actionText(progress, snapshot, config.hud().cooling());
+        String actionText = actionText(progress, snapshot, config);
         boolean controlWarning = snapshot.pilotControls().isPresent()
-                && !normalControlStatus(snapshot.pilotControls().orElseThrow());
+                && !normalControlStatus(snapshot.pilotControls().orElseThrow(), config);
         boolean persistentAction = controlWarning || snapshot.activeFireControl();
         boolean actionChanged = !actionText.equals(cache.actionBarText());
         boolean actionDue = refreshDue(now, session.lastActionTick, config.hud().refreshTicks());
@@ -113,7 +113,7 @@ public final class Hud<R, H> {
                 && (promptWarning || actionReenabled || actionDue)
                 && (!attachmentDelivered || promptWarning)) {
             Config.Color actionColor = controlWarning
-                    ? (missingControl(snapshot.pilotControls().orElseThrow())
+                    ? (missingControl(snapshot.pilotControls().orElseThrow(), config)
                     ? Config.Color.RED : Config.Color.GOLD)
                     : color;
             access.actionBar(rider, actionText, actionColor);
@@ -205,15 +205,17 @@ public final class Hud<R, H> {
         return customName != null ? customName : Component.literal("HappyGhast");
     }
 
-    private static String actionText(
-            double progress, Snapshot snapshot, Config.Cooling coolingConfig) {
+    private static String actionText(double progress, Snapshot snapshot, Config config) {
         if (snapshot.pilotControls().isPresent()) {
             Controls.InventorySnapshot controls = snapshot.pilotControls().orElseThrow();
-            if (missingControl(controls)) {
-                return "CONTROL MISSING · DISMOUNT AND REMOUNT";
+            if (missingControl(controls, config)) {
+                return matchingControls(controls, config, Controls.ControlLocation.MISSING) == 1
+                        && enabledControlCount(config) == 1
+                        ? "CONTROL MISSING · DISMOUNT AND REMOUNT"
+                        : "CONTROLS MISSING · DISMOUNT AND REMOUNT";
             }
-            int inventoryOnly = (controls.fire() == Controls.ControlLocation.MAIN_INVENTORY_ONLY ? 1 : 0)
-                    + (controls.cry() == Controls.ControlLocation.MAIN_INVENTORY_ONLY ? 1 : 0);
+            int inventoryOnly = matchingControls(
+                    controls, config, Controls.ControlLocation.MAIN_INVENTORY_ONLY);
             if (inventoryOnly == 1) {
                 return "CONTROL IN INVENTORY";
             }
@@ -227,7 +229,7 @@ public final class Hud<R, H> {
         } else {
             Cooling cooling = (Cooling) snapshot.mode();
             status = cooling.perSecond() == 0.0
-                    ? coolingConfig.noCoolingText()
+                    ? config.hud().cooling().noCoolingText()
                     : "COOLING " + formatRate(cooling.perSecond()) + "/s";
         }
         return "HEAT " + Math.round(progress * 100.0) + "% · " + status;
@@ -237,15 +239,24 @@ public final class Hud<R, H> {
         return BigDecimal.valueOf(perSecond).stripTrailingZeros().toPlainString();
     }
 
-    private static boolean missingControl(Controls.InventorySnapshot controls) {
-        return controls.fire() == Controls.ControlLocation.MISSING
-                || controls.cry() == Controls.ControlLocation.MISSING;
+    private static int enabledControlCount(Config config) {
+        return (config.fire().enabled() ? 1 : 0) + (config.cry().enabled() ? 1 : 0);
     }
 
-    private static boolean normalControlStatus(Controls.InventorySnapshot controls) {
-        return !missingControl(controls)
-                && controls.fire() != Controls.ControlLocation.MAIN_INVENTORY_ONLY
-                && controls.cry() != Controls.ControlLocation.MAIN_INVENTORY_ONLY;
+    private static int matchingControls(
+            Controls.InventorySnapshot controls, Config config, Controls.ControlLocation location) {
+        return (config.fire().enabled() && controls.fire() == location ? 1 : 0)
+                + (config.cry().enabled() && controls.cry() == location ? 1 : 0);
+    }
+
+    private static boolean missingControl(Controls.InventorySnapshot controls, Config config) {
+        return matchingControls(controls, config, Controls.ControlLocation.MISSING) > 0;
+    }
+
+    private static boolean normalControlStatus(Controls.InventorySnapshot controls, Config config) {
+        return !missingControl(controls, config)
+                && matchingControls(controls, config,
+                Controls.ControlLocation.MAIN_INVENTORY_ONLY) == 0;
     }
 
     private static double normalized(double heat, double limit) {

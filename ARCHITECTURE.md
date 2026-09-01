@@ -11,7 +11,8 @@ happy-artillery/
 │   │   │   ├── HappyArtillery.java
 │   │   │   │   # Composition root that invokes each owner's registration, reload command, durable
 │   │   │   │   # Overworld-game-time context, sole player tick driver, UUID-resolution access,
-│   │   │   │   # ghast-load callback, and bounded player-availability wake-up; no gameplay policy.
+│   │   │   │   # use/block/entity callbacks, ghast-load callback, and bounded player-availability
+│   │   │   │   # wake-up; no gameplay policy.
 │   │   │   ├── Config.java
 │   │   │   │   # Sole config schema/codec, defaults, individual overrides, validation, and atomic live
 │   │   │   │   # value owner; creates full defaults only when the file is missing and preserves exact
@@ -31,8 +32,8 @@ happy-artillery/
 │   │   │   │   # Sole fire/cry marker codec/helper owner using namespaced vanilla CUSTOM_DATA with
 │   │   │   │   # control type, owner UUID, and ride UUID; preserves unrelated custom data.
 │   │   │   ├── Controls.java
-│   │   │   │   # Sole control owner: atomic free-slot allocation, one bounded active-pilot inventory
-│   │   │   │   # snapshot, held admission, owner/ride cleanup, transfer cleanup, and ride transitions.
+│   │   │   │   # Sole control owner: enabled-aware atomic free-slot allocation, marked block-use policy,
+│   │   │   │   # one bounded active-pilot inventory snapshot, held admission, cleanup, and ride transitions.
 │   │   │   ├── Abilities.java
 │   │   │   │   # Sole fire/cry/detonation gate, truthful effect/removal outcome, collision-clear launch,
 │   │   │   │   # and UUID-only fuse-task owner; resolves entities at execution, isolates due tasks,

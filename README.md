@@ -6,20 +6,20 @@ Happy Artillery runs on the server. Players can join with an unmodded Java clien
 
 ## Controls
 
-When you become the pilot, the first two free slots found in your hotbar and main inventory receive temporary Fire Control and Cry Control items. If fewer than two slots are free, the mod leaves the inventory alone and tells you that two free slots are needed.
+When you become the pilot, the mod allocates one temporary control for each enabled ability. With Fire and Cry enabled, allocation requires two free hotbar or main-inventory slots; one enabled ability requires one; both disabled require none. Allocation is all-or-nothing. The refusal says `Controls need 2 free slots.` or `Control needs 1 free slot.` to match the configured controls.
 
 The generated controls can move normally within their owner's hotbar, main inventory, and offhand. Hold one in either hand to use it:
 
 - Fire Control fires on right-click and supports hold-to-fire by default.
 - Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used underwater.
 
-Controls are tied to their owner and the current ride. Trying to drop one or place it in an external container consumes it. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive a new pair. Ordinary items are never overwritten to make room.
+Controls are tied to their owner and the current ride. A marked control cannot activate a block, so the default Fire Control cannot be consumed as a fire charge or ignite terrain. Trying to drop a control or place it in an external container consumes it. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive the configured control or controls. Ordinary items are never overwritten to make room.
 
 ## Heat, cooling, and overheat
 
 Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water doesn't change cooling. Cry is always blocked underwater; Fire is blocked there by default and follows `water.blocksFiring`.
 
-The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Passengers see the same heat and cooling status without receiving controls.
+The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Missing and inventory warnings consider only enabled controls and use `CONTROL` or `CONTROLS` to match. Passengers see the same heat and cooling status without receiving controls.
 
 Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod attempts direct fire placement only while `mobGriefing` is enabled. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
 
@@ -51,7 +51,7 @@ Admins with gamemaster permission level 2 can apply changes without restarting:
 
 Configuration is strict. Unknown keys, removed keys, malformed values, and invalid ranges fail instead of being ignored. The old root `preset` key has been removed; defaults plus individual overrides are the only configuration model. A failed reload reports the error and keeps the current active configuration without replacing the invalid file.
 
-`fire.shotCooldownSeconds=0` removes the Fire cooldown. Heat and overheat still limit firing. If you
+`fire.enabled=false` disables Fire and omits the Fire Control; `cry.enabled=false` does the same for Cry. Disabled abilities ignore generated and allowed plain-item input without presenting a rejection. `fire.shotCooldownSeconds=0` removes the Fire cooldown. Heat and overheat still limit firing. If you
 used an earlier 1.2.0 draft config, update these names before startup or reload:
 
 - `heat.firingWindowSeconds` → `heat.coolingDelayAfterShotSeconds`

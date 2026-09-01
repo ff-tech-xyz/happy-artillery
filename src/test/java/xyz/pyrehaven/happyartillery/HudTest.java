@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -332,6 +333,91 @@ final class HudTest {
     }
 
     @Test
+    void twoEnabledControlsUsePluralMissingWarningWhenEitherIsMissing() {
+        RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
+        Controls.InventorySnapshot controls = controlSnapshot(
+                Controls.ControlLocation.MISSING,
+                Controls.ControlLocation.HAND_ACCESSIBLE);
+
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
+                Config.defaults(), access);
+
+        assertEquals(List.of("action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"),
+                access.actionEvents());
+    }
+
+    @Test
+    void oneEnabledControlUsesSingularMissingWarning() {
+        Config defaults = Config.defaults();
+        Config config = new Config(
+                defaults.controls(),
+                new Config.Fire(false, defaults.fire().shotCooldownSeconds(),
+                        defaults.fire().explosionPower()),
+                defaults.heat(), defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
+        RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
+        Controls.InventorySnapshot controls = controlSnapshot(
+                Controls.ControlLocation.MAIN_INVENTORY_ONLY,
+                Controls.ControlLocation.MISSING);
+
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
+                config, access);
+
+        assertEquals(List.of("action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"),
+                access.actionEvents());
+    }
+
+    @Test
+    void bothDisabledFallThroughToHeatStatusWithoutControlWarning() {
+        Config defaults = Config.defaults();
+        Config config = new Config(
+                defaults.controls(),
+                new Config.Fire(false, defaults.fire().shotCooldownSeconds(),
+                        defaults.fire().explosionPower()),
+                defaults.heat(), defaults.water(), defaults.overheat(),
+                new Config.Cry(false, defaults.cry().volume(), defaults.cry().cooldownSeconds()),
+                defaults.hud());
+        RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
+        Controls.InventorySnapshot controls = controlSnapshot(
+                Controls.ControlLocation.MISSING,
+                Controls.ControlLocation.MISSING);
+
+        RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
+                config, access);
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
+                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
+                config, access);
+
+        assertEquals(List.of("action:GREEN:HEAT 25% · COOLING 1/s"), access.actionEvents());
+    }
+
+    @Test
+    void disabledFireIsIgnoredBySingularCryInventoryWarning() {
+        Config defaults = Config.defaults();
+        Config config = new Config(
+                defaults.controls(),
+                new Config.Fire(false, defaults.fire().shotCooldownSeconds(),
+                        defaults.fire().explosionPower()),
+                defaults.heat(), defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
+        RecordingAccess access = new RecordingAccess();
+        Hud<UUID, String> hud = new Hud<>(access);
+        Controls.InventorySnapshot controls = controlSnapshot(
+                Controls.ControlLocation.MISSING,
+                Controls.ControlLocation.MAIN_INVENTORY_ONLY);
+
+        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
+                config, access);
+
+        assertEquals(List.of("action:GOLD:CONTROL IN INVENTORY"), access.actionEvents());
+    }
+
+    @Test
     void pilotControlWarningsUseExactPriorityWordingAndNeverLeakToPassengers() {
         List<Controls.InventorySnapshot> controls = List.of(
                 controlSnapshot(Controls.ControlLocation.MISSING,
@@ -343,7 +429,7 @@ final class HudTest {
                 controlSnapshot(Controls.ControlLocation.HAND_ACCESSIBLE,
                         Controls.ControlLocation.HAND_ACCESSIBLE));
         List<String> expected = List.of(
-                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
                 "action:GOLD:CONTROL IN INVENTORY",
                 "action:GOLD:CONTROLS IN INVENTORY",
                 "action:GREEN:HEAT 25% · COOLING 1/s");
@@ -396,8 +482,8 @@ final class HudTest {
                 warning, Config.defaults(), access);
 
         assertEquals(List.of(
-                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
-                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"),
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"),
                 access.actionEvents());
     }
 
@@ -421,7 +507,7 @@ final class HudTest {
                 Config.defaults(), access);
 
         assertTrue(access.presentationEvents().contains(
-                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"), access.events::toString);
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"), access.events::toString);
     }
 
     @Test
@@ -493,7 +579,7 @@ final class HudTest {
                 inventory, Config.defaults(), access);
 
         assertEquals(List.of(
-                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
                 "action:GOLD:CONTROL IN INVENTORY"), access.actionEvents());
     }
 

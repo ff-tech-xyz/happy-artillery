@@ -67,8 +67,8 @@ final class ConfigTest {
 
         assertEquals(new Gson().toJsonTree(Config.defaults()), reference);
         assertEquals(7, reference.size());
-        assertEquals(34, declaredKeyCount(reference));
-        assertEquals(45, nestedLeafCount(reference));
+        assertEquals(35, declaredKeyCount(reference));
+        assertEquals(46, nestedLeafCount(reference));
     }
 
     @Test
@@ -177,6 +177,21 @@ final class ConfigTest {
     }
 
     @Test
+    void fireEnabledDefaultsTrueAndSparseOverridePreservesExactBytes(@TempDir Path directory)
+            throws Exception {
+        assertTrue(Config.defaults().fire().enabled());
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] sparse = "{\n  \"fire\": { \"enabled\": false }\n}\n"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
+
+        Config loaded = Config.load(file);
+
+        assertFalse(loaded.fire().enabled());
+        assertArrayEquals(sparse, Files.readAllBytes(file));
+    }
+
+    @Test
     void defaultsContainTheCompleteSchema() throws ReflectiveOperationException {
         Object defaults = Config.class.getMethod("defaults").invoke(null);
 
@@ -185,7 +200,7 @@ final class ConfigTest {
                         "fireItem", "minecraft:fire_charge", "cryItem", "minecraft:ghast_tear",
                         "holdToFire", true, "allowPlainItems", false),
                 "fire", Map.of(
-                        "shotCooldownSeconds", 0.25, "explosionPower", 1),
+                        "enabled", true, "shotCooldownSeconds", 0.25, "explosionPower", 1),
                 "heat", Map.ofEntries(
                         Map.entry("limit", 100.0), Map.entry("coolingDelayAfterShotSeconds", 1.0),
                         Map.entry("cold", Map.of("heatPerShot", 0.70, "coolPerSecond", 1.0)),
@@ -535,8 +550,8 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(7, serialized.size());
-        assertEquals(34, declaredKeyCount(serialized));
-        assertEquals(45, nestedLeafCount(serialized));
+        assertEquals(35, declaredKeyCount(serialized));
+        assertEquals(46, nestedLeafCount(serialized));
         assertEquals(Set.of("blocksFiring"), serialized.getAsJsonObject("water").keySet());
         assertEquals(Set.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
                 serialized.getAsJsonObject("hud").keySet());
@@ -700,8 +715,8 @@ final class ConfigTest {
             assertEquals(file, target);
             JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
                     .getAsJsonObject();
-            assertEquals(34, declaredKeyCount(serialized));
-            assertEquals(45, nestedLeafCount(serialized));
+            assertEquals(35, declaredKeyCount(serialized));
+            assertEquals(46, nestedLeafCount(serialized));
             assertEquals(new Gson().toJsonTree(Config.defaults().hud().cooling()),
                     serialized.getAsJsonObject("hud").get("cooling"));
             assertEquals(Config.defaults().controls().holdToFire(),

@@ -122,19 +122,20 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals(true, Files.isRegularFile(configPath));
         assertEquals(Config.defaults(), Config.current());
-        assertEquals(Map.of(
-                "ghast-state", 1,
-                "rider-state", 1,
-                "use-item", 1,
-                "use-entity", 1,
-                "ghast-load", 1,
-                "player-available", 1,
-                "player-tick", 1,
-                "server-stop", 1,
-                "reload", 1,
-                "config-validation", 1), registrar.calls);
+        assertEquals(Map.ofEntries(
+                Map.entry("ghast-state", 1),
+                Map.entry("rider-state", 1),
+                Map.entry("use-block", 1),
+                Map.entry("use-item", 1),
+                Map.entry("use-entity", 1),
+                Map.entry("ghast-load", 1),
+                Map.entry("player-available", 1),
+                Map.entry("player-tick", 1),
+                Map.entry("server-stop", 1),
+                Map.entry("reload", 1),
+                Map.entry("config-validation", 1)), registrar.calls);
         assertSame(configPath, registrar.reloadPath);
-        assertEquals(10, registrar.order.size());
+        assertEquals(11, registrar.order.size());
         assertEquals("ghast-state", registrar.order.getFirst());
         assertEquals("config-validation", registrar.order.getLast());
         assertDoesNotThrow(registrar.startupValidation::run);
@@ -512,6 +513,7 @@ final class HappyArtilleryIntegrationTest {
         ClassNode registrar = BytecodeTestSupport.classNode(
                 HappyArtillery.class.getName() + "$FabricRegistrar");
         Map<String, List<String>> expected = Map.of(
+                "registerUseBlock", List.of("net/fabricmc/fabric/api/event/player/UseBlockCallback.EVENT"),
                 "registerUseItem", List.of("net/fabricmc/fabric/api/event/player/UseItemCallback.EVENT"),
                 "registerUseEntity", List.of("net/fabricmc/fabric/api/event/player/UseEntityCallback.EVENT"),
                 "registerGhastLoad", List.of("net/fabricmc/fabric/api/event/lifecycle/v1/ServerEntityEvents.ENTITY_LOAD"),
@@ -1011,6 +1013,7 @@ final class HappyArtilleryIntegrationTest {
 
         @Override public void registerGhastState() { record("ghast-state"); }
         @Override public void registerRiderState() { record("rider-state"); }
+        @Override public void registerUseBlock() { record("use-block"); }
         @Override public void registerUseItem() { record("use-item"); }
         @Override public void registerUseEntity() { record("use-entity"); }
         @Override public void registerGhastLoad() { record("ghast-load"); }

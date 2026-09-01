@@ -417,7 +417,7 @@ public record Config(
     public static Config defaults() {
         return new Config(
                 new Controls("minecraft:fire_charge", "minecraft:ghast_tear", true, false),
-                new Fire(0.25, 1),
+                new Fire(true, 0.25, 1),
                 new Heat(
                         100.0,
                         1.0,
@@ -448,6 +448,7 @@ public record Config(
     }
 
     public record Fire(
+            boolean enabled,
             double shotCooldownSeconds,
             int explosionPower) {
     }

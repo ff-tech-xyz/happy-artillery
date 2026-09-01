@@ -65,16 +65,16 @@ final class AbilitiesTest {
     }
 
     @Test
-    void disabledCryRejectsBeforeCooldownSoundOrStateMutation() {
+    void disabledCryRejectsBeforeWaterCooldownSoundOrStateMutation() {
         RecordingCryAccess access = new RecordingCryAccess();
+        access.inWater = true;
         GhastState state = new GhastState(20.0, 50L, 75L, 0L, 500L,
                 java.util.OptionalLong.of(600L), java.util.Optional.of(RIDER_ID));
 
         Abilities.CryOutcome outcome = cry(state, 100L, configWithCry(false, 10.0, 10.0), access);
 
         assertEquals(new Abilities.CryRejected(Abilities.CryRejection.DISABLED), outcome);
-        assertEquals(1, access.waterChecks);
-        assertEquals(0, access.sounds + access.replacements);
+        assertEquals(0, access.waterChecks + access.sounds + access.replacements);
         assertEquals(500L, state.cryReadyTick());
     }
 
@@ -194,6 +194,20 @@ final class AbilitiesTest {
         Object outcome = fire(state, 100L, access);
 
         assertEquals(new Abilities.Rejected(Abilities.FireRejection.NOT_PILOT), outcome);
+        assertEquals(1, access.pilotChecks);
+        assertEquals(0, access.waterChecks + access.adds + access.replacements);
+    }
+
+    @Test
+    void disabledFireRejectsBeforeWaterEffectOrStateSpend() {
+        RecordingAccess access = new RecordingAccess();
+        access.inWater = true;
+        GhastState state = new GhastState(20.0, 50L, 75L, 0L, 300L,
+                java.util.OptionalLong.of(600L), java.util.Optional.of(RIDER_ID));
+
+        Abilities.FireOutcome outcome = fire(state, 100L, configWithFire(false), access);
+
+        assertEquals(new Abilities.Rejected(Abilities.FireRejection.DISABLED), outcome);
         assertEquals(1, access.pilotChecks);
         assertEquals(0, access.waterChecks + access.adds + access.replacements);
     }
@@ -1772,6 +1786,14 @@ final class AbilitiesTest {
                 new Object(), new Object(), state, now, config,
                 BiomeClass.BASE, access, new Abilities.FuseQueue<>(),
                 new RecordingDetonationAccess());
+    }
+
+    private static Config configWithFire(boolean enabled) {
+        Config defaults = Config.defaults();
+        return new Config(defaults.controls(),
+                new Config.Fire(enabled, defaults.fire().shotCooldownSeconds(),
+                        defaults.fire().explosionPower()),
+                defaults.heat(), defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
     }
 
     private static Config configWithCry(boolean enabled, double volume, double cooldownSeconds) {

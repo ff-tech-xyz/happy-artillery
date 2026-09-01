@@ -20,6 +20,8 @@
   },
   // Fire cooldown uses seconds. Explosion power is an exact integer.
   "fire": {
+    // false disables Fire and prevents the Fire Control from being allocated or admitted.
+    "enabled": true,
     // Finite seconds, minimum 0. Zero means no Fire cooldown.
     "shotCooldownSeconds": 0.25,
     // Exact integer from 0 through 2147483647. Zero gives the fireball no explosion power.

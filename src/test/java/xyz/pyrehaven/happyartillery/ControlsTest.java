@@ -16,6 +16,7 @@ import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -67,6 +68,13 @@ final class ControlsTest {
         HolderLookup.Provider registries = VanillaRegistries.createLookup();
         BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries)
                 .forEach(initializer -> initializer.apply());
+    }
+
+    @Test
+    void markedControlBlocksVanillaBlockUseWhileOrdinaryFireChargePasses() {
+        assertEquals(InteractionResult.FAIL, Controls.blockUseResult(fireControl(OWNER, RIDE)));
+        assertEquals(InteractionResult.PASS,
+                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE)));
     }
 
     @Test
@@ -187,6 +195,76 @@ final class ControlsTest {
             assertEquals("Fire Control", second.getHoverName().getString());
             assertTrue(second.hasFoil());
             assertNotNull(second.get(DataComponents.CONSUMABLE));
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void oneEnabledAbilityAllocatesItsOnlyControlWithOneFreeSlot(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        RecordingInventory inventory = RecordingInventory.filled();
+        inventory.seed(7, ItemStack.EMPTY);
+        try {
+            Files.writeString(file, "{\"fire\":{\"enabled\":false}}");
+            Config.reload(file);
+
+            RiderState mounted = Controls.reconcile(
+                    inventory, RiderState.fresh(), Optional.of(RIDE), inventory);
+
+            assertEquals(Optional.of(RIDE), mounted.riddenGhastId());
+            assertEquals(List.of(7), inventory.writeSlots());
+            assertEquals(Components.Control.CRY,
+                    Components.marker(inventory.peek(7)).marker().orElseThrow().control());
+            assertTrue(inventory.messages.isEmpty());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void bothDisabledCreatesNoControlsAndSendsNoRefusal(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        RecordingInventory inventory = RecordingInventory.filled();
+        try {
+            Files.writeString(file, "{\"fire\":{\"enabled\":false},\"cry\":{\"enabled\":false}}");
+            Config.reload(file);
+
+            RiderState mounted = Controls.reconcile(
+                    inventory, RiderState.fresh(), Optional.of(RIDE), inventory);
+
+            assertEquals(Optional.of(RIDE), mounted.riddenGhastId());
+            assertTrue(inventory.writeSlots().isEmpty());
+            assertTrue(inventory.messages.isEmpty());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void oneEnabledAbilityRefusesAtomicallyWithExactSingularGrammar(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        RecordingInventory inventory = RecordingInventory.filled();
+        try {
+            Files.writeString(file, "{\"cry\":{\"enabled\":false}}");
+            Config.reload(file);
+
+            Controls.reconcile(inventory, RiderState.fresh(), Optional.of(RIDE), inventory);
+
+            assertTrue(inventory.writeSlots().isEmpty());
+            assertEquals(1, inventory.messages.size());
+            Component refusal = inventory.messages.getFirst();
+            assertEquals("Control needs 1 free slot.", refusal.getString());
+            assertEquals(TextColor.fromLegacyFormat(ChatFormatting.RED), refusal.getStyle().getColor());
         } finally {
             Files.writeString(file, new com.google.gson.Gson().toJson(original));
             Config.reload(file);
@@ -410,6 +488,68 @@ final class ControlsTest {
                 assertInstanceOf(Controls.Accepted.class, offhandAccepted).intent());
         assertEquals(11L, mainAccepted.state().lastHandledTick());
         assertEquals(12L, offhandAccepted.state().lastHandledTick());
+    }
+
+    @Test
+    void disabledFireRejectsMarkedAndPlainConfiguredFireInputs(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        try {
+            Files.writeString(file, """
+                    {"controls":{"holdToFire":false,"allowPlainItems":true},
+                     "fire":{"enabled":false}}
+                    """);
+            Config.reload(file);
+            RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+
+            for (ItemStack input : List.of(
+                    fireControl(OWNER, RIDE), new ItemStack(Items.FIRE_CHARGE))) {
+                TestPilot pilot = TestPilot.riding();
+                pilot.main = input;
+
+                Controls.Admission admission = Controls.handleUseItem(
+                        pilot, InteractionHand.MAIN_HAND, state, 11L,
+                        Config.current().controls(), pilot);
+
+                assertInstanceOf(Controls.Ignored.class, admission);
+                assertSame(state, admission.state());
+            }
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
+    }
+
+    @Test
+    void disabledCryRejectsMarkedAndPlainConfiguredCryInputs(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        try {
+            Files.writeString(file, """
+                    {"controls":{"allowPlainItems":true},
+                     "cry":{"enabled":false}}
+                    """);
+            Config.reload(file);
+            RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+
+            for (ItemStack input : List.of(
+                    cryControl(OWNER, RIDE), new ItemStack(Items.GHAST_TEAR))) {
+                TestPilot pilot = TestPilot.riding();
+                pilot.main = input;
+
+                Controls.Admission admission = Controls.handleUseItem(
+                        pilot, InteractionHand.MAIN_HAND, state, 11L,
+                        Config.current().controls(), pilot);
+
+                assertInstanceOf(Controls.Ignored.class, admission);
+                assertSame(state, admission.state());
+            }
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
+        }
     }
 
     @Test

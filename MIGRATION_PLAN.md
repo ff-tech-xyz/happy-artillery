@@ -47,7 +47,7 @@ changes them explicitly.
 
 The current audit intake updates the final target without reopening the completed rebuild:
 
-- Configuration has seven top-level groups, 34 direct declared settings, and 45 recursively expanded
+- Configuration has seven top-level groups, 35 direct declared settings, and 46 recursively expanded
   scalar leaves. Defaults plus individual overrides are the only model. Missing files receive complete
   defaults; existing valid sparse files preserve their exact bytes through load and reload. Root `preset`
   is a removed setting and fails transactionally. The six draft heat/overheat names are rejected with

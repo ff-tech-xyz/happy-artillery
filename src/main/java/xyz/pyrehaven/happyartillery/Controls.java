@@ -9,6 +9,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
@@ -25,8 +26,12 @@ import java.util.UUID;
 
 /** Sole owner of generated controls, bounded inventory policy, and pilot admission. */
 public final class Controls {
-    private static final Component ALLOCATION_REFUSAL = Component.literal("Controls need 2 free slots.")
-            .withStyle(ChatFormatting.RED);
+    private static Component allocationRefusal(int requiredSlots) {
+        String noun = requiredSlots == 1 ? "Control needs" : "Controls need";
+        return Component.literal(noun + " " + requiredSlots + " free "
+                + (requiredSlots == 1 ? "slot." : "slots."))
+                .withStyle(ChatFormatting.RED);
+    }
     private static final int HOTBAR_END = 8;
     private static final int MAIN_END = 35;
     private static final int OFFHAND = 40;
@@ -71,28 +76,33 @@ public final class Controls {
             return state.withRide(Optional.empty());
         }
         UUID rideId = pilotRideId.orElseThrow();
-        int first = -1;
-        int second = -1;
-        for (int slot = 0; slot <= MAIN_END; slot++) {
-            if (access.read(inventory, slot).isEmpty()) {
-                if (first < 0) {
-                    first = slot;
-                } else {
-                    second = slot;
-                    break;
-                }
-            }
-        }
+        Config config = Config.current();
+        Config.Controls settings = config.controls();
+        int requiredSlots = (config.fire().enabled() ? 1 : 0) + (config.cry().enabled() ? 1 : 0);
         RiderState mounted = state.withRide(Optional.of(rideId));
-        if (second < 0) {
-            access.message(inventory, ALLOCATION_REFUSAL);
+        if (requiredSlots == 0) {
             return mounted;
         }
-        Config.Controls settings = Config.current().controls();
-        ItemStack fire = fireControl(settings, ownerId, rideId);
-        ItemStack cry = cryControl(settings, ownerId, rideId);
-        access.write(inventory, first, fire);
-        access.write(inventory, second, cry);
+        int[] freeSlots = new int[requiredSlots];
+        int found = 0;
+        for (int slot = 0; slot <= MAIN_END && found < requiredSlots; slot++) {
+            if (access.read(inventory, slot).isEmpty()) {
+                freeSlots[found++] = slot;
+            }
+        }
+        if (found < requiredSlots) {
+            access.message(inventory, allocationRefusal(requiredSlots));
+            return mounted;
+        }
+        ItemStack fire = config.fire().enabled() ? fireControl(settings, ownerId, rideId) : null;
+        ItemStack cry = config.cry().enabled() ? cryControl(settings, ownerId, rideId) : null;
+        int destination = 0;
+        if (fire != null) {
+            access.write(inventory, freeSlots[destination++], fire);
+        }
+        if (cry != null) {
+            access.write(inventory, freeSlots[destination], cry);
+        }
         return mounted;
     }
 
@@ -214,6 +224,11 @@ public final class Controls {
                 && (destinationOwnerId == null || !marker.ownerId().equals(destinationOwnerId));
     }
 
+    static InteractionResult blockUseResult(ItemStack stack) {
+        return Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent()
+                ? InteractionResult.FAIL : InteractionResult.PASS;
+    }
+
     static ObservedUse observeUse(LivingEntity entity) {
         return observeUse(entity, LivingEntityUseObservation.INSTANCE);
     }
@@ -303,17 +318,20 @@ public final class Controls {
             P player, CallbackSource source, ItemStack input, UUID rideId,
             Config.Controls settings, Optional<InventorySnapshot> snapshot,
             ControlAccess<P, G> access) {
+        Config config = Config.current();
         UUID ownerId = access.playerId(player);
         Components.MarkerRead markerRead = Components.marker(input);
         Optional<Components.Marker> marker = markerRead.marker();
-        boolean markedFire = marker.filter(value -> value.control() == Components.Control.FIRE
+        boolean markedFire = config.fire().enabled()
+                && marker.filter(value -> value.control() == Components.Control.FIRE
                 && value.ownerId().equals(ownerId) && value.rideId().equals(rideId)).isPresent();
-        boolean markedCry = marker.filter(value -> value.control() == Components.Control.CRY
+        boolean markedCry = config.cry().enabled()
+                && marker.filter(value -> value.control() == Components.Control.CRY
                 && value.ownerId().equals(ownerId) && value.rideId().equals(rideId)).isPresent();
-        boolean plainFire = settings.allowPlainItems() && markerRead.isAbsent()
-                && isConfiguredItem(input, settings.fireItem());
-        boolean plainCry = settings.allowPlainItems() && markerRead.isAbsent()
-                && isConfiguredItem(input, settings.cryItem());
+        boolean plainFire = config.fire().enabled() && settings.allowPlainItems()
+                && markerRead.isAbsent() && isConfiguredItem(input, settings.fireItem());
+        boolean plainCry = config.cry().enabled() && settings.allowPlainItems()
+                && markerRead.isAbsent() && isConfiguredItem(input, settings.cryItem());
         if (plainFire && plainCry) {
             plainFire = false;
             plainCry = false;

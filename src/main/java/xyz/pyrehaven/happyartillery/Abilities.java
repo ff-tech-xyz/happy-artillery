@@ -85,6 +85,9 @@ public final class Abilities {
         if (!access.isPilot(pilot, ghast)) {
             return new Rejected(FireRejection.NOT_PILOT);
         }
+        if (!config.fire().enabled()) {
+            return new Rejected(FireRejection.DISABLED);
+        }
         if (state.detonateAtTick().isPresent()) {
             return new Rejected(FireRejection.DETONATION_PENDING);
         }
@@ -313,11 +316,11 @@ public final class Abilities {
         if (!access.isPilot(pilot, ghast)) {
             return new CryRejected(CryRejection.NOT_PILOT);
         }
-        if (access.inWater(ghast)) {
-            return new CryRejected(CryRejection.IN_WATER);
-        }
         if (!config.cry().enabled()) {
             return new CryRejected(CryRejection.DISABLED);
+        }
+        if (access.inWater(ghast)) {
+            return new CryRejected(CryRejection.IN_WATER);
         }
         if (now < state.cryReadyTick()) {
             return new CryRejected(CryRejection.ON_COOLDOWN);
@@ -608,6 +611,7 @@ public final class Abilities {
 
     enum FireRejection {
         NOT_PILOT,
+        DISABLED,
         DETONATION_PENDING,
         IN_WATER,
         ON_COOLDOWN,
