@@ -13,8 +13,9 @@ happy-artillery/
 │   │   │   │   # Overworld-game-time context, sole player tick driver, UUID-resolution access,
 │   │   │   │   # ghast-load callback, and bounded player-availability wake-up; no gameplay policy.
 │   │   │   ├── Config.java
-│   │   │   │   # Sole config schema/codec, defaults, individual overrides, validation, atomic live
-│   │   │   │   # value, load, complete-schema rewrite, and reload owner; removed settings fail.
+│   │   │   │   # Sole config schema/codec, defaults, individual overrides, validation, and atomic live
+│   │   │   │   # value owner; creates full defaults only when the file is missing and preserves exact
+│   │   │   │   # bytes for successful existing sparse loads/reloads; removed/renamed settings fail.
 │   │   │   ├── BiomeClass.java
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
@@ -59,8 +60,9 @@ happy-artillery/
 │       └── java/xyz/pyrehaven/happyartillery/
 │           ├── ConfigTest.java
 │           │   # Config defaults, individual overrides, removed/unknown-key rejection, validation,
-│           │   # cooling-theme thresholds/colors, round-trip,
-│           │   # rewrite, registry-lifecycle resolution, and reload-failure contract.
+│           │   # rename diagnostics, path-aware type errors, cooling-theme thresholds/colors,
+│           │   # sparse-byte preservation, missing-file publication, reference parity,
+│           │   # registry-lifecycle resolution, and reload-failure contract.
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.
 │           ├── HeatTest.java
@@ -88,7 +90,11 @@ happy-artillery/
 ├── FEATURES.md
 │   # Settled 1.2.0 behavior and compatibility/regression contract.
 ├── MIGRATION_PLAN.md
-│   # Historical rebuild record and pointer to the current audit-repair execution intake.
+│   # Historical rebuild record; not a second active behavior or execution authority.
+├── docs/
+│   └── happy-artillery-config.jsonc
+│       # Documentation-only annotated admin reference kept in parity with Config defaults; runtime
+│       # remains strict JSON and does not parse this file.
 ├── README.md
 │   # Installation, controls, configuration, Geyser support, and supported-version documentation.
 ├── CHANGELOG.md
