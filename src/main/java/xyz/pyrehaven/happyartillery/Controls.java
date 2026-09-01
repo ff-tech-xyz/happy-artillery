@@ -202,16 +202,15 @@ public final class Controls {
         Objects.requireNonNull(destination, "destination");
         UUID destinationOwnerId = destination.container instanceof Inventory inventory
                 ? inventory.player.getUUID() : null;
-        consumeExternalControl(destination.getItem(), destinationOwnerId);
+        if (shouldConsumeExternalControl(destination.getItem(), destinationOwnerId)) {
+            destination.set(ItemStack.EMPTY);
+        }
     }
 
-    static boolean consumeExternalControl(ItemStack stack, UUID destinationOwnerId) {
+    static boolean shouldConsumeExternalControl(ItemStack stack, UUID destinationOwnerId) {
         Components.Marker marker = Components.marker(stack).marker().orElse(null);
-        if (marker == null || destinationOwnerId != null && marker.ownerId().equals(destinationOwnerId)) {
-            return false;
-        }
-        stack.setCount(0);
-        return true;
+        return marker != null
+                && (destinationOwnerId == null || !marker.ownerId().equals(destinationOwnerId));
     }
 
     static ObservedUse observeUse(LivingEntity entity) {

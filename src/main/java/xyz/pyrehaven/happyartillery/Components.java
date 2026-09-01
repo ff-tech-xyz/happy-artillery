@@ -70,12 +70,17 @@ public final class Components {
     }
 
     static MarkerRead marker(ItemStack stack) {
+        return marker(stack, CustomData::copyTag);
+    }
+
+    static MarkerRead marker(ItemStack stack, CustomDataReader reader) {
         Objects.requireNonNull(stack, "stack");
-        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
-        if (customData == null) {
+        Objects.requireNonNull(reader, "reader");
+        if (stack.isEmpty() || !stack.has(DataComponents.CUSTOM_DATA)) {
             return Absent.INSTANCE;
         }
-        CompoundTag data = customData.copyTag();
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        CompoundTag data = reader.copy(Objects.requireNonNull(customData, "customData"));
         boolean attempted = data.contains(TYPE_TAG) || data.contains(OWNER_TAG) || data.contains(RIDE_TAG);
         if (!attempted) {
             return Absent.INSTANCE;
@@ -94,6 +99,11 @@ public final class Components {
         } catch (IllegalArgumentException malformedUuid) {
             return Malformed.INSTANCE;
         }
+    }
+
+    @FunctionalInterface
+    interface CustomDataReader {
+        CompoundTag copy(CustomData customData);
     }
 
     static boolean matches(ItemStack stack, UUID ownerId, UUID rideId) {

@@ -523,20 +523,38 @@ final class ControlsTest {
     }
 
     @Test
-    void externalMutationPreservesOnlyOwningPlayerInventoryAndConsumesEveryOtherDestination() {
+    void externalMutationPreservesOnlyOwningPlayerInventoryAndSelectsEveryOtherDestination() {
         ItemStack ownerDestination = Controls.fireControl(OWNER, RIDE);
         ItemStack otherPlayer = Controls.fireControl(OWNER, RIDE);
         ItemStack chest = Controls.fireControl(OWNER, RIDE);
         ItemStack ordinary = new ItemStack(Items.DIAMOND);
 
-        assertFalse(Controls.consumeExternalControl(ownerDestination, OWNER));
-        assertTrue(Controls.consumeExternalControl(otherPlayer, UUID.randomUUID()));
-        assertTrue(Controls.consumeExternalControl(chest, null));
-        assertFalse(Controls.consumeExternalControl(ordinary, null));
+        assertFalse(Controls.shouldConsumeExternalControl(ownerDestination, OWNER));
+        assertTrue(Controls.shouldConsumeExternalControl(otherPlayer, UUID.randomUUID()));
+        assertTrue(Controls.shouldConsumeExternalControl(chest, null));
+        assertFalse(Controls.shouldConsumeExternalControl(ordinary, null));
         assertFalse(ownerDestination.isEmpty());
-        assertTrue(otherPlayer.isEmpty());
-        assertTrue(chest.isEmpty());
+        assertFalse(otherPlayer.isEmpty());
+        assertFalse(chest.isEmpty());
         assertFalse(ordinary.isEmpty());
+    }
+
+    @Test
+    void markerPreflightAvoidsCustomDataCopyForEmptyAndOrdinaryStacks() {
+        java.util.concurrent.atomic.AtomicInteger copies = new java.util.concurrent.atomic.AtomicInteger();
+        Components.CustomDataReader reader = customData -> {
+            copies.incrementAndGet();
+            return customData.copyTag();
+        };
+
+        assertSame(Components.Absent.INSTANCE, Components.marker(ItemStack.EMPTY, reader));
+        assertSame(Components.Absent.INSTANCE,
+                Components.marker(new ItemStack(Items.DIAMOND), reader));
+        assertEquals(0, copies.get());
+
+        assertTrue(Components.marker(Controls.fireControl(OWNER, RIDE), reader)
+                instanceof Components.Valid);
+        assertEquals(1, copies.get());
     }
 
     @Test
@@ -562,8 +580,9 @@ final class ControlsTest {
 
         Controls.consumeExternalControl(destination);
 
-        assertSame(live, destination.getItem());
-        assertTrue(live.isEmpty());
+        assertNotSame(live, destination.getItem());
+        assertSame(ItemStack.EMPTY, destination.getItem());
+        assertEquals(2, live.getCount());
         assertTrue(chest.getItem(0).isEmpty());
 
         ItemStack ordinary = new ItemStack(Items.DIAMOND, 3);
