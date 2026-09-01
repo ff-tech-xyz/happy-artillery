@@ -1,0 +1,145 @@
+// DOCUMENTATION ONLY. Do not copy this file verbatim into the runtime config.
+// Happy Artillery reads strict JSON, not JSONC. Runtime files reject comments, trailing commas,
+// trailing content, duplicate keys, unknown keys, wrong value types, nulls, and arrays.
+// Existing valid runtime files may be sparse: omitted known settings use the defaults below.
+// Minimal sparse runtime JSON example: {"water":{"blocksFiring":false}}
+// Zero Fire cooldown example: {"fire":{"shotCooldownSeconds":0}}
+// Old-name example: heat.firingWindowSeconds is rejected; use heat.coolingDelayAfterShotSeconds.
+// All decimal settings must be finite. Unless stated otherwise, numeric zero is accepted.
+{
+  // Control item identifiers must use namespace:path syntax and resolve after startup.
+  "controls": {
+    // Vanilla item identifier used for the generated Fire Control.
+    "fireItem": "minecraft:fire_charge",
+    // Vanilla item identifier used for the generated Cry Control.
+    "cryItem": "minecraft:ghast_tear",
+    // true repeats Fire while the control remains in use; false requires separate uses.
+    "holdToFire": true,
+    // true admits matching plain items; false requires generated ride-bound controls.
+    "allowPlainItems": false
+  },
+  // Fire cooldown uses seconds. Explosion power is an exact integer.
+  "fire": {
+    // Finite seconds, minimum 0. Zero means no Fire cooldown.
+    "shotCooldownSeconds": 0.25,
+    // Exact integer from 0 through 2147483647. Zero gives the fireball no explosion power.
+    "explosionPower": 1
+  },
+  // Heat values are finite. Profile thresholds are inclusive at their named boundary.
+  "heat": {
+    // Heat capacity, strictly greater than 0. Reaching this value triggers overheat.
+    "limit": 100.0,
+    // Finite seconds, minimum 0. Zero allows passive cooling immediately after a shot.
+    "coolingDelayAfterShotSeconds": 1.0,
+    // Used when biome temperature is at or below coldBiomeMaxTemperature.
+    "cold": {
+      // Heat added per accepted shot, strictly greater than 0.
+      "heatPerShot": 0.70,
+      // Heat removed per second, minimum 0. Zero disables passive cooling for this profile.
+      "coolPerSecond": 1.0
+    },
+    // Used between the inclusive cold and hot temperature boundaries.
+    "base": {
+      // Heat added per accepted shot, strictly greater than 0.
+      "heatPerShot": 1.25,
+      // Heat removed per second, minimum 0. Zero disables passive cooling for this profile.
+      "coolPerSecond": 0.6
+    },
+    // Used when biome temperature is at or above hotBiomeMinTemperature.
+    "hot": {
+      // Heat added per accepted shot, strictly greater than 0.
+      "heatPerShot": 2.00,
+      // Heat removed per second, minimum 0. Zero disables passive cooling for this profile.
+      "coolPerSecond": 0.5
+    },
+    // The Nether always uses this fixed profile, regardless of biome temperature or the toggle below.
+    "nether": {
+      // Heat added per accepted shot, strictly greater than 0.
+      "heatPerShot": 3.00,
+      // Heat removed per second, minimum 0. Zero disables passive cooling for this profile.
+      "coolPerSecond": 0.0
+    },
+    // The End always uses this fixed profile, regardless of biome temperature or the toggle below.
+    "end": {
+      // Heat added per accepted shot, strictly greater than 0.
+      "heatPerShot": 0.70,
+      // Heat removed per second, minimum 0. Zero disables passive cooling for this profile.
+      "coolPerSecond": 1.0
+    },
+    // Finite biome temperature. Values at or below this boundary use the cold profile.
+    // It must be lower than hotBiomeMinTemperature and may be negative or zero.
+    "coldBiomeMaxTemperature": 0.3,
+    // Finite biome temperature. Values at or above this boundary use the hot profile.
+    // It must be higher than coldBiomeMaxTemperature and may be negative or zero.
+    "hotBiomeMinTemperature": 1.0,
+    // true classifies Overworld and custom non-Nether/non-End dimensions by biome temperature.
+    // false makes those dimensions use base. Nether and End remain fixed either way.
+    "otherDimensionsUseBiomeTemperature": true
+  },
+  // Water affects ability admission, not passive cooling.
+  "water": {
+    // true blocks Fire underwater. Cry remains blocked underwater regardless of this setting.
+    "blocksFiring": true
+  },
+  // Overheat counts and tick values are exact integers. Other numeric values are finite.
+  "overheat": {
+    // Exact integer ticks from 0 through 2147483647. Zero detonates immediately.
+    "fuseTicks": 0,
+    // Explosion power, minimum 0. Zero creates an explosion with no configured power.
+    "explosionPower": 6.0,
+    // Exact integer from 0 through 2147483647. Zero emits no overheat fireballs.
+    "fireballCount": 24,
+    // Fireball speed in blocks per tick, minimum 0. Zero creates stationary fireballs.
+    "fireballSpeed": 0.4,
+    // Exact integer from 0 through 2147483647. Zero gives emitted fireballs no explosion power.
+    "fireballPower": 2,
+    // Exact integer from 0 through 2147483647. Zero performs no direct fire-placement attempts.
+    "firePlacementAttempts": 24,
+    // Placement radius in blocks, minimum 0. Zero limits attempts to the center position.
+    "firePlacementRadius": 8.0,
+    // true removes the Happy Ghast after detonation; false leaves it alive.
+    "killsGhast": true,
+    // true permits the central explosion and direct fire placement to affect terrain.
+    // Vanilla mobGriefing still governs block effects. Emitted fireballs keep vanilla behavior.
+    "breaksBlocks": true
+  },
+  // Cry is a pilot ability and remains unavailable underwater.
+  "cry": {
+    // false disables Cry; true admits it when the other ability checks pass.
+    "enabled": true,
+    // Sound volume, minimum 0. Zero makes the accepted Cry silent.
+    "volume": 10.0,
+    // Cooldown in seconds, minimum 0. Zero means no Cry cooldown.
+    "cooldownSeconds": 10.0
+  },
+  // HUD thresholds are inclusive. Color names must be uppercase RED, GOLD, GREEN, or BLUE.
+  "hud": {
+    // true shows the boss bar; false disables that display.
+    "bossBar": true,
+    // true shows action-bar status; false disables that display.
+    "actionBar": true,
+    // Exact integer ticks from 4 through 2147483647. Zero is not accepted.
+    "refreshTicks": 4,
+    // Exact integer percent from 0 through 100, inclusive. Zero warns at any heat level.
+    "warningFromPercent": 85,
+    // Cooling presentation is selected from the effective cooling rate.
+    "cooling": {
+      // Text shown when the effective cooling rate is zero. Blank text is accepted.
+      "noCoolingText": "NO COOLING",
+      // Boss-bar color at zero cooling. Must be RED, GOLD, GREEN, or BLUE.
+      "noCoolingColor": "RED",
+      // Heat per second, minimum 0. Rates at or below this inclusive boundary use slowColor.
+      // It must be lower than normalMaxPerSecond.
+      "slowMaxPerSecond": 0.5,
+      // Boss-bar color for the slow band. Must be RED, GOLD, GREEN, or BLUE.
+      "slowColor": "GOLD",
+      // Heat per second, minimum 0. Rates above slowMaxPerSecond and at or below this
+      // inclusive boundary use normalColor.
+      "normalMaxPerSecond": 1.0,
+      // Boss-bar color for the normal band. Must be RED, GOLD, GREEN, or BLUE.
+      "normalColor": "GREEN",
+      // Boss-bar color above normalMaxPerSecond. Must be RED, GOLD, GREEN, or BLUE.
+      "fastColor": "BLUE"
+    }
+  }
+}

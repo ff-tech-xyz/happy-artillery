@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ConfigTest {
+    private static final Path ANNOTATED_REFERENCE =
+            Path.of("docs", "happy-artillery-config.jsonc");
+
     @TempDir
     Path resetDirectory;
 
@@ -52,6 +55,58 @@ final class ConfigTest {
         Config restored = Config.load(file);
         assertEquals(Config.defaults(), restored);
         assertSame(restored, Config.current());
+    }
+
+    @Test
+    void annotatedAdminReferenceMatchesRuntimeDefaults() throws IOException {
+        String withoutCommentLines = Files.readString(ANNOTATED_REFERENCE)
+                .lines()
+                .filter(line -> !line.stripLeading().startsWith("//"))
+                .collect(java.util.stream.Collectors.joining("\n"));
+        JsonObject reference = JsonParser.parseString(withoutCommentLines).getAsJsonObject();
+
+        assertEquals(new Gson().toJsonTree(Config.defaults()), reference);
+        assertEquals(7, reference.size());
+        assertEquals(34, declaredKeyCount(reference));
+        assertEquals(45, nestedLeafCount(reference));
+    }
+
+    @Test
+    void runtimeLoaderRejectsTheAnnotatedReferenceBecauseCommentsAreForbidden() {
+        assertThrows(IllegalArgumentException.class, () -> Config.load(ANNOTATED_REFERENCE));
+    }
+
+    @Test
+    void architectureDeclaresTheAnnotatedReferenceAtItsExactPath() throws IOException {
+        String architecture = Files.readString(Path.of("ARCHITECTURE.md"));
+
+        assertTrue(architecture.matches(
+                "(?s).*├── docs/\\R│   └── happy-artillery-config\\.jsonc.*"));
+    }
+
+    @Test
+    void annotatedReferenceExplainsStrictRuntimeUseAndAdminBoundaries() throws IOException {
+        String reference = Files.readString(ANNOTATED_REFERENCE);
+
+        assertTrue(reference.lines()
+                .filter(line -> line.contains("//"))
+                .allMatch(line -> line.stripLeading().startsWith("//")));
+        assertTrue(reference.contains("DOCUMENTATION ONLY"));
+        assertTrue(reference.contains("Do not copy this file verbatim into the runtime config"));
+        assertTrue(reference.contains("strict JSON, not JSONC"));
+        assertTrue(reference.contains("trailing commas"));
+        assertTrue(reference.contains("duplicate keys"));
+        assertTrue(reference.contains("unknown keys"));
+        assertTrue(reference.contains("wrong value types"));
+        assertTrue(reference.contains("arrays"));
+        assertTrue(reference.contains("Minimal sparse runtime JSON example"));
+        assertTrue(reference.contains("Zero Fire cooldown example"));
+        assertTrue(reference.contains("heat.firingWindowSeconds is rejected; use heat.coolingDelayAfterShotSeconds"));
+        assertTrue(reference.contains("The Nether always uses this fixed profile"));
+        assertTrue(reference.contains("The End always uses this fixed profile"));
+        assertTrue(reference.contains("Overworld and custom non-Nether/non-End dimensions"));
+        assertTrue(reference.contains("inclusive boundary"));
+        assertTrue(reference.contains("RED, GOLD, GREEN, or BLUE"));
     }
 
     @Test

@@ -34,7 +34,14 @@ Install the mod and Fabric API on the server. Clients do not install Happy Artil
 
 ## Configuration
 
-Happy Artillery creates `config/happy-artillery.json` from its defaults. Server owners can override individual settings for controls, fire, heat profiles, underwater fire blocking, overheat, Cry, and the HUD. The full schema and default values are documented in [FEATURES.md](FEATURES.md#configuration).
+Happy Artillery creates `config/happy-artillery.json` from its defaults when the file is missing.
+Existing valid files can contain only the settings you want to override; load and reload leave their
+exact bytes alone. The full defaults, units, ranges, and examples are in the
+[annotated admin reference](docs/happy-artillery-config.jsonc).
+
+The reference is documentation, not a runtime config. Happy Artillery reads strict JSON: comments,
+trailing commas or content, duplicate or unknown keys, wrong value types, nulls, and arrays fail
+instead of being ignored. Don't copy the JSONC file verbatim into `config/happy-artillery.json`.
 
 Admins with gamemaster permission level 2 can apply changes without restarting:
 
@@ -43,6 +50,18 @@ Admins with gamemaster permission level 2 can apply changes without restarting:
 ```
 
 Configuration is strict. Unknown keys, removed keys, malformed values, and invalid ranges fail instead of being ignored. The old root `preset` key has been removed; defaults plus individual overrides are the only configuration model. A failed reload reports the error and keeps the current active configuration without replacing the invalid file.
+
+`fire.shotCooldownSeconds=0` removes the Fire cooldown. Heat and overheat still limit firing. If you
+used an earlier 1.2.0 draft config, update these names before startup or reload:
+
+- `heat.firingWindowSeconds` → `heat.coolingDelayAfterShotSeconds`
+- `heat.coldMaxTemperature` → `heat.coldBiomeMaxTemperature`
+- `heat.hotMinTemperature` → `heat.hotBiomeMinTemperature`
+- `heat.unknownDimensionUsesTemperature` → `heat.otherDimensionsUseBiomeTemperature`
+- `overheat.fireAttempts` → `overheat.firePlacementAttempts`
+- `overheat.fireRadius` → `overheat.firePlacementRadius`
+
+The old names fail with the replacement named; they aren't accepted as aliases.
 
 `hud.refreshTicks` has a minimum of `4`. The `hud.cooling` section controls the zero-rate text and color (`noCoolingText`, `noCoolingColor`) and the slow, normal, and fast cooling bands (`slowMaxPerSecond`, `slowColor`, `normalMaxPerSecond`, `normalColor`, `fastColor`).
 

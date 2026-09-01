@@ -65,8 +65,11 @@ and manual acceptance pass.
 Config is feature-grouped nested immutable values held in one `AtomicReference` and read at call time.
 Validated defaults are the only baseline; an operator supplies individual known-key overrides. Missing
 files receive the complete defaults, while existing valid sparse files retain their exact bytes through
-load and reload. A root `preset` key is a removed setting: startup or reload fails transactionally,
-preserving the active object and existing file bytes.
+load and reload. Runtime files are strict JSON and reject comments, trailing commas/content, duplicate
+or unknown keys, wrong types, nulls, and arrays. The checked-in
+[`docs/happy-artillery-config.jsonc`](docs/happy-artillery-config.jsonc) file is an annotated admin
+reference only; runtime never parses it. A root `preset` key is a removed setting: startup or reload
+fails transactionally, preserving the active object and existing file bytes.
 `/ha reload` requires gamemaster permission level 2.
 
 Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
@@ -83,9 +86,15 @@ Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
 
 The declared-setting count is the sum of direct members in the seven groups
 (`4 + 2 + 10 + 1 + 9 + 3 + 5 = 34`); recursively expanding five heat profiles and `hud.cooling`
-produces 45 scalar leaves. `hud.cooling` thresholds are finite, non-negative, and strictly increasing
-(`slowMaxPerSecond < normalMaxPerSecond`); colors are valid vanilla boss-bar color names.
-`hud.refreshTicks` must be at least 4.
+produces 45 scalar leaves. All configurable numeric values are finite. Negative values are invalid
+except the two biome-temperature thresholds. Zero means no Fire or Cry cooldown, immediate overheat
+fuse, no attempts for count settings, and no passive cooling for a zero-rate heat profile; `heat.limit`
+and each profile's `heatPerShot` remain strictly positive. Nether and End always use their fixed
+profiles. `otherDimensionsUseBiomeTemperature` controls temperature classification for the Overworld
+and custom non-Nether/non-End dimensions, with cold and hot boundaries inclusive.
+`hud.cooling` thresholds are finite, non-negative, and strictly increasing
+(`slowMaxPerSecond < normalMaxPerSecond`); each band includes its upper threshold, and colors are the
+uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` must be at least 4.
 
 ## Persistent state and time
 

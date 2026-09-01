@@ -48,8 +48,12 @@ changes them explicitly.
 The current audit intake updates the final target without reopening the completed rebuild:
 
 - Configuration has seven top-level groups, 34 direct declared settings, and 45 recursively expanded
-  scalar leaves. Defaults plus individual overrides are the only model. Root `preset` is a removed
-  setting and fails transactionally.
+  scalar leaves. Defaults plus individual overrides are the only model. Missing files receive complete
+  defaults; existing valid sparse files preserve their exact bytes through load and reload. Root `preset`
+  is a removed setting and fails transactionally. The six draft heat/overheat names are rejected with
+  their canonical replacements, Fire cooldown accepts zero, and full dotted paths identify type errors.
+  `docs/happy-artillery-config.jsonc` is the documentation-only annotated reference; runtime remains
+  strict JSON and never parses it.
 - `hud.cooling` supplies configurable zero/slow/normal/fast text and vanilla colors. HUD receives one
   typed mode: firing-window status or the selected profile rate; water does not affect cooling.
   It does not re-derive timing or biome policy, and action cadence and packet bounds remain unchanged.

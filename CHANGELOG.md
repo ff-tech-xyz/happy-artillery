@@ -20,7 +20,10 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 - Updated support to Minecraft 26.2 with Fabric Loader 0.19.3 or newer, Fabric API, and Java 21 or newer.
 - Happy Artillery remains server-side. Unmodded Java clients and Bedrock players joining through Geyser are supported.
 - Added `/ha reload` for admins with gamemaster permission level 2.
-- Configuration now uses defaults plus individual overrides only. The removed root `preset` key, unknown keys, malformed values, and invalid ranges fail clearly; a failed reload keeps the active configuration and invalid file unchanged.
+- Configuration now uses defaults plus individual overrides only. Existing valid sparse files stay sparse through startup and `/ha reload`; the removed root `preset` key, unknown keys, malformed values, and invalid ranges fail clearly without replacing the active configuration or invalid file.
+- Added an annotated admin reference with every default, unit, range, and accepted zero behavior. Runtime configuration remains strict JSON.
+- Renamed draft heat and overheat settings for clearer purpose. Servers carrying an earlier 1.2.0 draft config must update the old names; startup and reload name the required replacement.
+- Fire cooldown can now be set to zero for continuous admission while heat and overheat continue to govern firing.
 - Added configurable zero, slow, normal, and fast cooling text/color bands under `hud.cooling`. `hud.refreshTicks` must be at least 4.
 
 ## [1.1.2.2] - 2026-08-04 (pre-release)
