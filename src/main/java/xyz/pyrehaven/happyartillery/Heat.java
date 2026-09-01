@@ -12,30 +12,21 @@ public final class Heat {
     public static GhastState advance(
             GhastState state,
             long now,
-            Config.HeatProfile profile,
-            boolean inWater,
-            Config.Water water) {
+            Config.HeatProfile profile) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(profile, "profile");
-        Objects.requireNonNull(water, "water");
         requireNonNegativeFinite("state.heat", state.heat());
         requirePositiveFinite("profile.heatPerShot", profile.heatPerShot());
         requireNonNegativeFinite("profile.coolPerSecond", profile.coolPerSecond());
-        requireNonNegativeFinite("water.coolPerSecond", water.coolPerSecond());
-        requireNonNegativeFinite("water.floor", water.floor());
         if (now <= state.heatAnchorTick()) {
             return state;
         }
 
-        long coolingStart = inWater
-                ? state.heatAnchorTick()
-                : Math.max(state.heatAnchorTick(), state.firingWindowEndTick());
-        double coolingRate = inWater ? water.coolPerSecond() : profile.coolPerSecond();
+        long coolingStart = Math.max(state.heatAnchorTick(), state.firingWindowEndTick());
         double elapsedTicks = now > coolingStart ? (double) now - coolingStart : 0.0;
-        double coolingFloor = inWater ? Math.max(water.floor(), 0.0) : 0.0;
         double cooledHeat = Math.min(
                 state.heat(),
-                Math.max(coolingFloor, state.heat() - coolingRate * elapsedTicks / 20.0));
+                Math.max(0.0, state.heat() - profile.coolPerSecond() * elapsedTicks / 20.0));
         return new GhastState(
                 cooledHeat,
                 now,
@@ -50,13 +41,11 @@ public final class Heat {
             GhastState state,
             long now,
             Config.HeatProfile profile,
-            Config.Heat heat,
-            boolean inWater,
-            Config.Water water) {
+            Config.Heat heat) {
         Objects.requireNonNull(heat, "heat");
         requirePositiveFinite("heat.limit", heat.limit());
         requireNonNegativeFinite("heat.firingWindowSeconds", heat.firingWindowSeconds());
-        GhastState advanced = advance(state, now, profile, inWater, water);
+        GhastState advanced = advance(state, now, profile);
         double shotHeat = advanced.heat() + profile.heatPerShot();
         requireFinite("shot heat", shotHeat);
         long shotWindowEnd = firingWindowDeadline(now, heat.firingWindowSeconds());

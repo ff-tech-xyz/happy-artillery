@@ -10,7 +10,7 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 - Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is always blocked underwater.
 - Dropping a generated control or moving it into an external container consumes it. Lost controls stay missing until the pilot dismounts and rides again.
 - Removed the ammunition pool and passive refill. Firing is now limited by cooldown, heat, and overheat behavior.
-- Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location, water exposure, and firing state.
+- Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location and firing state; water cooling has been removed.
 - Every rider now sees the ghast's heat HUD. It reports firing, configured no-cooling text, or the effective cooling rate; only the pilot receives controls.
 - Normal shots use vanilla large fireballs launched clear of the ridden ghast and its passengers.
 - `overheat.breaksBlocks=false` keeps the central explosion from damaging terrain and skips direct fire placement. When enabled, the central explosion and direct fire placement still obey `mobGriefing`. Emitted vanilla fireballs keep their normal impact behavior in either mode.

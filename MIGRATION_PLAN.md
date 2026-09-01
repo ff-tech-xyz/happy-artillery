@@ -6,10 +6,8 @@ The ground-up 1.2.0 rebuild and the disposable movable-control migration describ
 complete. This is a historical record, not an active execution plan. The canonical target behavior is
 `FEATURES.md`, and the annotated proposed ownership tree is `ARCHITECTURE.md`.
 
-The sole current execution intake is
-`.hermes/plans/2026-08-31_034734-happy-artillery-audit-repair-and-preset-removal.md`. It owns the audit
-repair sequence, RED/GREEN requirements, review gates, exact-head deployment, and manual handoff. Work
-must not treat the retired phases below as a second queue of instructions.
+The `.hermes/plans/` files are historical implementation intake. They do not override the current
+behavior in `FEATURES.md`, and the retired phases below are not a second queue of instructions.
 
 ## Completed rebuild
 
@@ -49,11 +47,11 @@ changes them explicitly.
 
 The current audit intake updates the final target without reopening the completed rebuild:
 
-- Configuration has seven top-level groups, 36 direct declared settings, and 47 recursively expanded
+- Configuration has seven top-level groups, 34 direct declared settings, and 45 recursively expanded
   scalar leaves. Defaults plus individual overrides are the only model. Root `preset` is a removed
   setting and fails transactionally.
 - `hud.cooling` supplies configurable zero/slow/normal/fast text and vanilla colors. HUD receives one
-  typed mode: active water cooling, otherwise firing-window status, otherwise the selected profile rate.
+  typed mode: firing-window status or the selected profile rate; water does not affect cooling.
   It does not re-derive timing or biome policy, and action cadence and packet bounds remain unchanged.
 - `Abilities.FuseQueue` owns UUID-only tasks, resolves entities at execution, removes stale attachment
   ownership, isolates each due task, and never creates an unconditional permanent 20 Hz retry loop.

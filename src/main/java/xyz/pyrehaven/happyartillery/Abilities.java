@@ -96,7 +96,7 @@ public final class Abilities {
             return new Rejected(FireRejection.ON_COOLDOWN);
         }
         Heat.ShotResult shot = Heat.addShot(
-                state, now, biomeClass.profile(config), config.heat(), inWater, config.water());
+                state, now, biomeClass.profile(config), config.heat());
         GhastState heated = shot.state();
         GhastState committed = new GhastState(
                 heated.heat(),

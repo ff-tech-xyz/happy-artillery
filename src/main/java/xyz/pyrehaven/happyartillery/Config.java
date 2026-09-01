@@ -175,6 +175,14 @@ public record Config(
         if (explicit.has("preset")) {
             throw new IllegalArgumentException("Removed config setting: preset");
         }
+        if (explicit.has("water") && explicit.get("water").isJsonObject()) {
+            JsonObject water = explicit.getAsJsonObject("water");
+            for (String key : Set.of("coolPerSecond", "floor")) {
+                if (water.has(key)) {
+                    throw new IllegalArgumentException("Removed config setting: water." + key);
+                }
+            }
+        }
         if (!explicit.has("controls") || !explicit.get("controls").isJsonObject()) {
             return;
         }
@@ -285,12 +293,6 @@ public record Config(
             throw new IllegalArgumentException("Cold temperature must be below hot temperature");
         }
 
-        requireNonNegative("water.coolPerSecond", water.coolPerSecond());
-        requireNonNegative("water.floor", water.floor());
-        if (water.floor() > heat.limit()) {
-            throw new IllegalArgumentException("Water floor cannot exceed heat limit");
-        }
-
         requireRange("overheat.fuseTicks", overheat.fuseTicks(), 0, Integer.MAX_VALUE);
         requireNonNegative("overheat.explosionPower", overheat.explosionPower());
         requireRange("overheat.fireballCount", overheat.fireballCount(), 0, Integer.MAX_VALUE);
@@ -395,7 +397,7 @@ public record Config(
                         0.3,
                         1.0,
                         true),
-                new Water(5.0, 0.0, true),
+                new Water(true),
                 new Overheat(0, 6.0, 24, 0.4, 2, 24, 8.0, true, true),
                 new Cry(true, 10.0, 10.0),
                 new Hud(true, true, 4, 85,
@@ -434,7 +436,7 @@ public record Config(
     public record HeatProfile(double heatPerShot, double coolPerSecond) {
     }
 
-    public record Water(double coolPerSecond, double floor, boolean blocksFiring) {
+    public record Water(boolean blocksFiring) {
     }
 
     public record Overheat(

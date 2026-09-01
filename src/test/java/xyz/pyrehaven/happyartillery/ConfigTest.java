@@ -47,7 +47,7 @@ final class ConfigTest {
     @AfterEach
     void restoreValidatedDefaults() throws Exception {
         Path file = resetDirectory.resolve("reset-defaults.json");
-        Files.writeString(file, new Gson().toJson(Config.defaults()));
+        Files.deleteIfExists(file);
         Config restored = Config.load(file);
         assertEquals(Config.defaults(), restored);
         assertSame(restored, Config.current());
@@ -74,6 +74,18 @@ final class ConfigTest {
                 () -> Config.Controls.class.getDeclaredMethod("crySlot"));
         assertThrows(NoSuchMethodException.class,
                 () -> Config.Controls.class.getDeclaredMethod("lockControlSlots"));
+    }
+
+    @Test
+    void waterSchemaContainsOnlyTheFiringGate() {
+        assertEquals(List.of("blocksFiring"),
+                Stream.of(Config.Water.class.getRecordComponents())
+                        .map(RecordComponent::getName).toList());
+        assertEquals(1, Config.Water.class.getDeclaredConstructors().length);
+        assertThrows(NoSuchMethodException.class,
+                () -> Config.Water.class.getDeclaredMethod("coolPerSecond"));
+        assertThrows(NoSuchMethodException.class,
+                () -> Config.Water.class.getDeclaredMethod("floor"));
     }
 
     @Test
@@ -127,7 +139,7 @@ final class ConfigTest {
                         Map.entry("end", Map.of("heatPerShot", 0.70, "coolPerSecond", 1.0)),
                         Map.entry("coldMaxTemperature", 0.3), Map.entry("hotMinTemperature", 1.0),
                         Map.entry("unknownDimensionUsesTemperature", true)),
-                "water", Map.of("coolPerSecond", 5.0, "floor", 0.0, "blocksFiring", true),
+                "water", Map.of("blocksFiring", true),
                 "overheat", Map.ofEntries(
                         Map.entry("fuseTicks", 0), Map.entry("explosionPower", 6.0),
                         Map.entry("fireballCount", 24), Map.entry("fireballSpeed", 0.4),
@@ -344,6 +356,24 @@ final class ConfigTest {
         assertArrayEquals(invalid, Files.readAllBytes(file));
     }
 
+    @ParameterizedTest(name = "removed water.{0} is rejected")
+    @MethodSource("removedWaterCoolingSettings")
+    void removedWaterCoolingSettingFailsClearlyWithoutChangingStateOrBytes(
+            String key, String value, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = ("{\"water\":{\"" + key + "\":" + value + "}}")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Removed config setting: water." + key, failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
     @Test
     void completeSerializationRoundTripsAllDeclaredAndNestedKeys(@TempDir Path directory)
             throws Exception {
@@ -355,8 +385,9 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(7, serialized.size());
-        assertEquals(36, declaredKeyCount(serialized));
-        assertEquals(47, nestedLeafCount(serialized));
+        assertEquals(34, declaredKeyCount(serialized));
+        assertEquals(45, nestedLeafCount(serialized));
+        assertEquals(Set.of("blocksFiring"), serialized.getAsJsonObject("water").keySet());
         assertEquals(Set.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
                 serialized.getAsJsonObject("hud").keySet());
         assertEquals(Set.of(
@@ -385,7 +416,7 @@ final class ConfigTest {
                 {
                   "fire": {"explosionPower": 0},
                   "heat": {"firingWindowSeconds": 0},
-                  "water": {"coolPerSecond": 0, "floor": 100},
+                  "water": {"blocksFiring": false},
                   "overheat": {
                     "fuseTicks": 0, "explosionPower": 0, "fireballCount": 0,
                     "fireballSpeed": 0, "fireballPower": 0, "fireAttempts": 0,
@@ -401,7 +432,7 @@ final class ConfigTest {
                 """);
 
         Config lower = Config.load(file);
-        assertEquals(100.0, lower.water().floor());
+        assertEquals(false, lower.water().blocksFiring());
         assertEquals(0, lower.hud().warningFromPercent());
 
         Files.writeString(file, "{\"hud\":{\"warningFromPercent\":100}}");
@@ -521,8 +552,8 @@ final class ConfigTest {
             assertEquals(file, target);
             JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
                     .getAsJsonObject();
-            assertEquals(36, declaredKeyCount(serialized));
-            assertEquals(47, nestedLeafCount(serialized));
+            assertEquals(34, declaredKeyCount(serialized));
+            assertEquals(45, nestedLeafCount(serialized));
             assertEquals(new Gson().toJsonTree(Config.defaults().hud().cooling()),
                     serialized.getAsJsonObject("hud").get("cooling"));
             assertEquals(false, serialized.getAsJsonObject("controls")
@@ -627,6 +658,12 @@ final class ConfigTest {
                 Arguments.of("fireSlot", "2"),
                 Arguments.of("crySlot", "6"),
                 Arguments.of("lockControlSlots", "false"));
+    }
+
+    private static Stream<Arguments> removedWaterCoolingSettings() {
+        return Stream.of(
+                Arguments.of("coolPerSecond", "5.0"),
+                Arguments.of("floor", "0.0"));
     }
 
     private static Stream<Arguments> individualCoolingOverrides() {

@@ -119,12 +119,11 @@ public final class HappyArtillery implements ModInitializer {
         G ghast = pilot.riddenGhast().orElseThrow();
         Config config = access.config();
         BiomeClass biomeClass = access.classify(ghast, config);
-        boolean inWater = access.inWater(ghast);
         GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
         Controls.Admission admission = access.controls(
                 pilot.player(), pilot.state(), now, config, snapshot);
-        processPilot(access, riders, pilot, now, config, biomeClass, inWater,
+        processPilot(access, riders, pilot, now, config, biomeClass,
                 state, advanced, admission, snapshot);
     }
 
@@ -132,7 +131,7 @@ public final class HappyArtillery implements ModInitializer {
     private static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
             PlayerView<P, G> pilot, long now, Config config, BiomeClass biomeClass,
-            boolean inWater, GhastState state, GhastState advanced, Controls.Admission admission,
+            GhastState state, GhastState advanced, Controls.Admission admission,
             Controls.InventorySnapshot snapshot) {
         G ghast = pilot.riddenGhast().orElseThrow();
         Object ghastId = access.ghastId(ghast);
@@ -152,7 +151,7 @@ public final class HappyArtillery implements ModInitializer {
             }
             post = access.ghastState(ghast);
         }
-        Hud.Mode mode = presentationMode(inWater, post, now, config, biomeClass);
+        Hud.Mode mode = presentationMode(post, now, config, biomeClass);
         for (PlayerView<P, G> rider : riders) {
             if (rider.riddenGhast().isPresent()
                     && ghastId.equals(access.ghastId(rider.riddenGhast().orElseThrow()))) {
@@ -168,13 +167,10 @@ public final class HappyArtillery implements ModInitializer {
     }
 
     static Hud.Mode presentationMode(
-            boolean inWater, GhastState state, long now, Config config, BiomeClass biomeClass) {
+            GhastState state, long now, Config config, BiomeClass biomeClass) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(biomeClass, "biomeClass");
-        if (inWater) {
-            return new Hud.Cooling(config.water().coolPerSecond());
-        }
         if (now <= state.firingWindowEndTick()) {
             return Hud.Firing.FIRING;
         }
@@ -193,7 +189,7 @@ public final class HappyArtillery implements ModInitializer {
         GhastState ghastState(G ghast);
         GhastState advance(
                 G ghast, GhastState state, long now, Config config,
-                BiomeClass biomeClass, boolean inWater);
+                BiomeClass biomeClass);
         Controls.InventorySnapshot snapshot(P pilot, G ghast);
         Controls.Admission controls(
                 P pilot, RiderState state, long now, Config config,
@@ -410,9 +406,8 @@ public final class HappyArtillery implements ModInitializer {
         }
         G ghast = pilot.riddenGhast().orElseThrow();
         BiomeClass biomeClass = access.classify(ghast, config);
-        boolean inWater = access.inWater(ghast);
         GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
         if (!advanced.equals(state)) {
             access.replaceGhastState(ghast, advanced);
         }
@@ -503,8 +498,8 @@ public final class HappyArtillery implements ModInitializer {
         @Override
         public GhastState advance(
                 HappyGhast ghast, GhastState state, long now,
-                Config config, BiomeClass biomeClass, boolean inWater) {
-            return Heat.advance(state, now, biomeClass.profile(config), inWater, config.water());
+                Config config, BiomeClass biomeClass) {
+            return Heat.advance(state, now, biomeClass.profile(config));
         }
 
         @Override

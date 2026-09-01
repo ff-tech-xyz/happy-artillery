@@ -21,7 +21,7 @@ happy-artillery/
 │   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus independent
 │   │   │   │   # fire-ready and cry-ready ticks, plus paired pending-detonation deadline/rider identity.
 │   │   │   ├── Heat.java
-│   │   │   │   # Pure heat authority: anchored, non-double-counted water/passive cooling, firing window,
+│   │   │   │   # Pure heat authority: anchored, non-double-counted profile cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
 │   │   │   ├── RiderState.java
 │   │   │   │   # Immutable persistent player attachment value/codec for ridden-ghast identity,
@@ -64,7 +64,7 @@ happy-artillery/
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.
 │           ├── HeatTest.java
-│           │   # Curves, anchored non-double cooling, firing window, water ordering, restart/unload gaps,
+│           │   # Curves, anchored non-double cooling, firing window, restart/unload gaps,
 │           │   # and exact detonation-edge tests.
 │           ├── PersistenceTest.java
 │           │   # Ghast/Rider fresh values, codecs, immutable attachment replacement, durable tick anchors,

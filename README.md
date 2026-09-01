@@ -17,7 +17,7 @@ Controls are tied to their owner and the current ride. Trying to drop one or pla
 
 ## Heat, cooling, and overheat
 
-Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water cools the ghast directly. Cry is always blocked underwater; Fire is blocked there by default and follows `water.blocksFiring`.
+Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water doesn't change cooling. Cry is always blocked underwater; Fire is blocked there by default and follows `water.blocksFiring`.
 
 The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Passengers see the same heat and cooling status without receiving controls.
 
@@ -34,7 +34,7 @@ Install the mod and Fabric API on the server. Clients do not install Happy Artil
 
 ## Configuration
 
-Happy Artillery creates `config/happy-artillery.json` from its defaults. Server owners can override individual settings for controls, fire, heat profiles, water cooling, overheat, Cry, and the HUD. The full schema and default values are documented in [FEATURES.md](FEATURES.md#configuration).
+Happy Artillery creates `config/happy-artillery.json` from its defaults. Server owners can override individual settings for controls, fire, heat profiles, underwater fire blocking, overheat, Cry, and the HUD. The full schema and default values are documented in [FEATURES.md](FEATURES.md#configuration).
 
 Admins with gamemaster permission level 2 can apply changes without restarting:
 

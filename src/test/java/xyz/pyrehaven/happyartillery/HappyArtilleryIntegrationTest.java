@@ -75,7 +75,20 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void presentationModeUsesWaterThenInclusiveFiringThenCapturedProfileRate() {
+    void presentationModeIgnoresWaterStatusAndUsesFiringThenProfileRate() {
+        Config config = Config.defaults();
+        GhastState cooling = new GhastState(
+                40.0, 90L, 100L, 0L, 0L,
+                java.util.OptionalLong.empty(), Optional.empty());
+
+        assertEquals(new Hud.Cooling(config.heat().base().coolPerSecond()),
+                HappyArtillery.presentationMode(cooling, 101L, config, BiomeClass.BASE));
+        assertEquals(Hud.Firing.FIRING,
+                HappyArtillery.presentationMode(cooling, 100L, config, BiomeClass.BASE));
+    }
+
+    @Test
+    void presentationModeUsesInclusiveFiringThenCapturedProfileRate() {
         Config defaults = Config.defaults();
         Config config = new Config(
                 defaults.controls(), defaults.fire(),
@@ -86,20 +99,18 @@ final class HappyArtilleryIntegrationTest {
                         new Config.HeatProfile(0.7, 0.0),
                         defaults.heat().coldMaxTemperature(), defaults.heat().hotMinTemperature(),
                         defaults.heat().unknownDimensionUsesTemperature()),
-                new Config.Water(4.25, defaults.water().floor(), defaults.water().blocksFiring()),
+                new Config.Water(defaults.water().blocksFiring()),
                 defaults.overheat(), defaults.cry(), defaults.hud());
         GhastState state = new GhastState(
                 40.0, 90L, 100L, 0L, 0L,
                 java.util.OptionalLong.empty(), Optional.empty());
 
-        assertEquals(new Hud.Cooling(4.25),
-                HappyArtillery.presentationMode(true, state, 99L, config, BiomeClass.END));
         assertEquals(Hud.Firing.FIRING,
-                HappyArtillery.presentationMode(false, state, 100L, config, BiomeClass.NETHER));
+                HappyArtillery.presentationMode(state, 100L, config, BiomeClass.NETHER));
         assertEquals(new Hud.Cooling(0.75),
-                HappyArtillery.presentationMode(false, state, 101L, config, BiomeClass.NETHER));
+                HappyArtillery.presentationMode(state, 101L, config, BiomeClass.NETHER));
         assertEquals(new Hud.Cooling(0.0),
-                HappyArtillery.presentationMode(false, state, 101L, config, BiomeClass.END));
+                HappyArtillery.presentationMode(state, 101L, config, BiomeClass.END));
     }
 
     @Test
@@ -333,10 +344,8 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, access.classifications);
         assertEquals(2, access.ghastProcesses);
         assertEquals(1, access.fireCalls);
-        assertEquals(List.of(true), access.advancedInWater);
-        assertEquals(1, access.inWaterCalls);
-        assertEquals(List.of(new Hud.Cooling(access.configured.water().coolPerSecond()),
-                new Hud.Cooling(access.configured.water().coolPerSecond())), access.renderedModes);
+        assertEquals(0, access.inWaterCalls);
+        assertEquals(List.of(Hud.Firing.FIRING, Hud.Firing.FIRING), access.renderedModes);
         assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
         assertEquals(true, access.order.indexOf("fuses") > access.order.lastIndexOf("hud:passenger"));
@@ -389,7 +398,7 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals(1, access.configReads);
         assertEquals(1, access.classifications);
-        assertEquals(1, access.inWaterCalls);
+        assertEquals(0, access.inWaterCalls);
         assertEquals(List.of(new Hud.Cooling(0.75), new Hud.Cooling(0.75)), access.renderedModes);
         assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
     }
@@ -734,7 +743,6 @@ final class HappyArtilleryIntegrationTest {
         private GhastState authoritativeState;
         private final List<String> hudSnapshots = new ArrayList<>();
         private final List<Hud.Mode> renderedModes = new ArrayList<>();
-        private final List<Boolean> advancedInWater = new ArrayList<>();
         private final List<Boolean> activeFireControls = new ArrayList<>();
         private final List<String> removedHud = new ArrayList<>();
         private final List<String> recovered = new ArrayList<>();
@@ -855,10 +863,9 @@ final class HappyArtilleryIntegrationTest {
         }
         @Override public GhastState advance(
                 String ghast, GhastState state, long now, Config config,
-                BiomeClass biomeClass, boolean inWater) {
+                BiomeClass biomeClass) {
             assertSame(expectedConfig, config);
             assertSame(configuredBiome, biomeClass);
-            advancedInWater.add(inWater);
             return new GhastState(5.0, now, advancedFiringWindowEnd, 0L, 0L,
                     java.util.OptionalLong.empty(), Optional.empty());
         }

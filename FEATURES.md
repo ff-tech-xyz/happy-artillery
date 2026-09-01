@@ -7,10 +7,9 @@ specification overrides the earlier G1-G9 questions. Released 1.1.2.2 behavior a
 it is useful regression evidence; defects are not compatibility requirements.
 
 The current branch contains a runnable 1.2.0 candidate. `MIGRATION_PLAN.md` records the completed
-rebuild; the current audit-repair execution intake is
-`.hermes/plans/2026-08-31_034734-happy-artillery-audit-repair-and-preset-removal.md`.
-The candidate is not release-ready until that intake's exact-head review, deployment, and manual
-acceptance gates pass.
+rebuild, and the `.hermes/plans/` files are historical implementation intake. This file is the
+canonical behavior contract. The candidate is not release-ready until exact-head review, deployment,
+and manual acceptance pass.
 
 ## Product boundary
 
@@ -69,21 +68,21 @@ successful load rewrites the complete schema. A root `preset` key is a removed s
 reload fails transactionally, preserving the active object and existing file bytes.
 `/ha reload` requires gamemaster permission level 2.
 
-Defaults (seven top-level groups, 36 declared settings and 47 scalar leaves):
+Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
 
 | Group | Keys and values |
 |---|---|
 | controls | `fireItem=minecraft:fire_charge`, `cryItem=minecraft:ghast_tear`, `holdToFire=true`, `allowPlainItems=false` |
 | fire | `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
 | heat | `limit=100.0`, `firingWindowSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldMaxTemperature=0.3`, `hotMinTemperature=1.0`, `unknownDimensionUsesTemperature=true` |
-| water | `coolPerSecond=5.0`, `floor=0.0`, `blocksFiring=true` |
+| water | `blocksFiring=true` |
 | overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `fireAttempts=24`, `fireRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
 | cry | `enabled=true`, `volume=10.0`, `cooldownSeconds=10.0` |
 | hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85`, `cooling=(noCoolingText=NO COOLING, noCoolingColor=RED, slowMaxPerSecond=0.5, slowColor=GOLD, normalMaxPerSecond=1.0, normalColor=GREEN, fastColor=BLUE)` |
 
 The declared-setting count is the sum of direct members in the seven groups
-(`4 + 2 + 10 + 3 + 9 + 3 + 5 = 36`); recursively expanding five heat profiles and `hud.cooling`
-produces 47 scalar leaves. `hud.cooling` thresholds are finite, non-negative, and strictly increasing
+(`4 + 2 + 10 + 1 + 9 + 3 + 5 = 34`); recursively expanding five heat profiles and `hud.cooling`
+produces 45 scalar leaves. `hud.cooling` thresholds are finite, non-negative, and strictly increasing
 (`slowMaxPerSecond < normalMaxPerSecond`); colors are valid vanilla boss-bar color names.
 `hud.refreshTicks` must be at least 4.
 
@@ -99,10 +98,9 @@ produces 47 scalar leaves. `hud.cooling` thresholds are finite, non-negative, an
 - `RiderState` is an immutable persistent player attachment containing only the ridden-ghast UUID,
   `lastHandledTick`, and serializable HUD dirty-cache data. It stores no ItemStack, inventory index,
   restoration data, or second control-state model.
-- `Heat.advance` applies cooling only over the not-yet-accounted interval and always moves
-  `heatAnchorTick` to `now`. Passive cooling uses
-  `max(0, now - max(heatAnchorTick, firingWindowEndTick))`; water cooling instead uses
-  `max(0, now - heatAnchorTick)` and therefore keeps its ordering priority. A shot first advances to
+- `Heat.advance` applies profile cooling only over the not-yet-accounted interval and always moves
+  `heatAnchorTick` to `now`. Cooling uses
+  `max(0, now - max(heatAnchorTick, firingWindowEndTick))`. A shot first advances to
   `now`, adds heat, and extends `firingWindowEndTick`. Repeated driver calls cannot subtract the same
   elapsed interval twice. An unloaded ghast catches up once on return; Nether heat remains unchanged.
 
@@ -195,9 +193,9 @@ acceptance evidence without changing the tested candidate bytes.
   Other dimensions use biome base temperature when enabled: `<=0.3` COLD, `>=1.0` HOT, otherwise BASE.
   An id such as `nether_expanded` is not Nether merely because of its text.
 - The driver classifies once per riding ghast/tick and shares that context with transition and HUD code.
-- Heat is one pure authority. Its order is water cooling; no-cooling biome; firing-window hold; passive
-  cooling. Water can cool in a no-cooling custom dimension and reaches floor 0. Passive Nether cooling
-  never occurs. No cooling occurs until the one-second firing window has elapsed.
+- Heat is one pure authority. Its order is no-cooling profile, firing-window hold, then passive
+  profile cooling. Water exposure does not change cooling. Passive Nether cooling never occurs.
+  No cooling occurs until the one-second firing window has elapsed.
 - Shot heat is COLD/END 0.70, BASE 1.25, HOT 2.00, NETHER 3.00. Limit is 100. `Heat.addShot` performs
   the codebase's only heat-limit comparison and reports detonation on the exact crossing shot.
 - At the default limit of 100, the sustained exact-crossing shot counts are 143 cold/end, 80 base,
@@ -310,8 +308,7 @@ Cry:
   action-bar update without waiting behind another presentation channel. Passengers retain heat/status
   presentation.
 - The integration/heat context computes one typed presentation mode for the tick and passes it through the
-  sole typed HUD path. Precedence is explicit: active water cooling produces
-  `COOLING(water.coolPerSecond)`; otherwise an active firing window produces `FIRING`; otherwise the mode
+  sole typed HUD path. Precedence is explicit: an active firing window produces `FIRING`; otherwise the mode
   is `COOLING(currentProfile.coolPerSecond)`. `Hud` receives that mode and rate together and does not infer
   firing state, biome, dimension, or cooling policy. A zero rate in `COOLING` mode displays configured
   `hud.cooling.noCoolingText` with `noCoolingColor`. Every positive cooling rate displays the
@@ -366,7 +363,7 @@ Bedrock mount/fire/dismount without ghost items. Verify vanilla normal-fire `mob
 and real `LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat
 and an in-flight vanilla fireball across restart; paused cooldown/fuse while stopped; one-time unload
 catch-up with no repeated cooling; single-digit HUD packet updates per rider/second; bounded per-online-
-player idle work; effective-rate zero/slow/normal/fast/water HUD text and color; UUID-only fuse isolation;
+player idle work; effective-rate zero/slow/normal/fast HUD text and color; UUID-only fuse isolation;
 external slot-owned removal; and README/jar version agreement. Automated seams may cover these contracts
 earlier, but no Java/Bedrock, mod-compatibility, packet-capture, restart, or gameplay evidence is credited
 until the complete graph is runnable.
