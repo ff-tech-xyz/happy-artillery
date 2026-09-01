@@ -233,7 +233,7 @@ final class HappyArtilleryIntegrationTest {
         assertSame(previous, Config.current());
         org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
         assertEquals(List.of(
-                "failure:Happy Artillery config reload failed: Invalid value type for bossBar"),
+                "failure:Happy Artillery config reload failed: Invalid value type for hud.bossBar"),
                 feedback.messages);
     }
 

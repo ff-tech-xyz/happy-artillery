@@ -362,6 +362,40 @@ final class ConfigTest {
         assertArrayEquals(invalid, Files.readAllBytes(file));
     }
 
+    @Test
+    void nestedHeatLeafTypeErrorNamesFullPathWithoutChangingStateOrBytes(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = "{\"heat\":{\"cold\":{\"heatPerShot\":false}}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Invalid value type for heat.cold.heatPerShot", failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @ParameterizedTest(name = "wrong type names {0}")
+    @MethodSource("additionalDottedTypeErrors")
+    void otherNestedTypeErrorsNameFullPathsWithoutChangingStateOrBytes(
+            String path, String invalidJson, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = invalidJson.getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Invalid value type for " + path, failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
     @ParameterizedTest(name = "removed controls.{0} is rejected")
     @MethodSource("removedControlSettings")
     void removedControlSettingFailsClearlyWithoutChangingStateOrBytes(
@@ -710,6 +744,14 @@ final class ConfigTest {
             String path, String rawValue, String invalidJson, @TempDir Path directory)
             throws Exception {
         assertRejectedWithoutMutation(directory, invalidJson, path + " accepted " + rawValue);
+    }
+
+    private static Stream<Arguments> additionalDottedTypeErrors() {
+        return Stream.of(
+                Arguments.of("controls.holdToFire",
+                        "{\"controls\":{\"holdToFire\":{}}}"),
+                Arguments.of("hud.cooling.slowColor",
+                        "{\"hud\":{\"cooling\":{\"slowColor\":false}}}"));
     }
 
     private static Stream<Arguments> removedControlSettings() {

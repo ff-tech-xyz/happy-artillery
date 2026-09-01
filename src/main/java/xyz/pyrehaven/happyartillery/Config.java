@@ -79,7 +79,7 @@ public record Config(
         rejectUnknownKeys(JSON.toJsonTree(defaults()).getAsJsonObject(), explicit, "");
         validateIntegerLeaves(explicit);
         JsonObject complete = JSON.toJsonTree(defaults()).getAsJsonObject();
-        mergeKnown(complete, explicit);
+        mergeKnown(complete, explicit, "");
         Config loaded = JSON.fromJson(complete, Config.class);
         validate(loaded);
         return new Candidate(loaded, false);
@@ -267,19 +267,20 @@ public record Config(
     }
 
 
-    private static void mergeKnown(JsonObject target, JsonObject explicit) {
+    private static void mergeKnown(JsonObject target, JsonObject explicit, String parentPath) {
         for (String key : target.keySet()) {
             if (!explicit.has(key)) {
                 continue;
             }
+            String path = parentPath.isEmpty() ? key : parentPath + "." + key;
             JsonElement targetValue = target.get(key);
             JsonElement explicitValue = explicit.get(key);
             if (targetValue.isJsonObject() && explicitValue.isJsonObject()) {
-                mergeKnown(targetValue.getAsJsonObject(), explicitValue.getAsJsonObject());
+                mergeKnown(targetValue.getAsJsonObject(), explicitValue.getAsJsonObject(), path);
             } else if (sameScalarType(targetValue, explicitValue)) {
                 target.add(key, explicitValue);
             } else {
-                throw new IllegalArgumentException("Invalid value type for " + key);
+                throw new IllegalArgumentException("Invalid value type for " + path);
             }
         }
     }
