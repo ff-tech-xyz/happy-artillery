@@ -119,11 +119,13 @@ public final class HappyArtillery implements ModInitializer {
         G ghast = pilot.riddenGhast().orElseThrow();
         Config config = access.config();
         BiomeClass biomeClass = access.classify(ghast, config);
+        boolean inWater = access.inWater(ghast);
         GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
         Controls.Admission admission = access.controls(
                 pilot.player(), pilot.state(), now, config, snapshot);
-        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission, snapshot);
+        processPilot(access, riders, pilot, now, config, biomeClass, inWater,
+                state, advanced, admission, snapshot);
     }
 
     static <P, G> void processPilot(
@@ -133,15 +135,17 @@ public final class HappyArtillery implements ModInitializer {
         G ghast = pilot.riddenGhast().orElseThrow();
         Objects.requireNonNull(config, "config");
         BiomeClass biomeClass = access.classify(ghast, config);
+        boolean inWater = access.inWater(ghast);
         GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
-        processPilot(access, riders, pilot, now, config, biomeClass, state, advanced, admission, snapshot);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
+        processPilot(access, riders, pilot, now, config, biomeClass, inWater,
+                state, advanced, admission, snapshot);
     }
 
     private static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
             PlayerView<P, G> pilot, long now, Config config, BiomeClass biomeClass,
-            GhastState state, GhastState advanced, Controls.Admission admission,
+            boolean inWater, GhastState state, GhastState advanced, Controls.Admission admission,
             Controls.InventorySnapshot snapshot) {
         G ghast = pilot.riddenGhast().orElseThrow();
         Object ghastId = access.ghastId(ghast);
@@ -161,6 +165,7 @@ public final class HappyArtillery implements ModInitializer {
             }
             post = access.ghastState(ghast);
         }
+        Hud.Mode mode = presentationMode(inWater, post, now, config, biomeClass);
         for (PlayerView<P, G> rider : riders) {
             if (rider.riddenGhast().isPresent()
                     && ghastId.equals(access.ghastId(rider.riddenGhast().orElseThrow()))) {
@@ -168,11 +173,25 @@ public final class HappyArtillery implements ModInitializer {
                         ? new PlayerView<>(
                                 rider.player(), acceptedPilotState, rider.riddenGhast(), rider.pilot())
                         : rider;
-                access.render(renderView, ghast, post, now, config, biomeClass,
+                access.render(renderView, ghast, post, now, config, mode,
                         rider == pilot ? Optional.of(snapshot) : Optional.empty(),
                         rider == pilot && activeFireControl);
             }
         }
+    }
+
+    static Hud.Mode presentationMode(
+            boolean inWater, GhastState state, long now, Config config, BiomeClass biomeClass) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(biomeClass, "biomeClass");
+        if (inWater) {
+            return new Hud.Cooling(config.water().coolPerSecond());
+        }
+        if (now <= state.firingWindowEndTick()) {
+            return Hud.Firing.FIRING;
+        }
+        return new Hud.Cooling(biomeClass.profile(config).coolPerSecond());
     }
 
     interface DriverAccess<P, G> {
@@ -181,10 +200,13 @@ public final class HappyArtillery implements ModInitializer {
         PlayerView<P, G> inspectPlayer(P player);
         void runDueFuses(long now);
         Object ghastId(G ghast);
+        boolean inWater(G ghast);
         Config config();
         BiomeClass classify(G ghast, Config config);
         GhastState ghastState(G ghast);
-        GhastState advance(G ghast, GhastState state, long now, Config config, BiomeClass biomeClass);
+        GhastState advance(
+                G ghast, GhastState state, long now, Config config,
+                BiomeClass biomeClass, boolean inWater);
         Controls.InventorySnapshot snapshot(P pilot, G ghast);
         Controls.Admission controls(
                 P pilot, RiderState state, long now, Config config,
@@ -201,7 +223,7 @@ public final class HappyArtillery implements ModInitializer {
         Abilities.CryOutcome cry(P pilot, G ghast, GhastState state, long now, Config config);
         void render(
                 PlayerView<P, G> rider, G ghast, GhastState state, long now,
-                Config config, BiomeClass biomeClass,
+                Config config, Hud.Mode mode,
                 Optional<Controls.InventorySnapshot> pilotSnapshot,
                 boolean activeFireControl);
     }
@@ -401,8 +423,9 @@ public final class HappyArtillery implements ModInitializer {
         }
         G ghast = pilot.riddenGhast().orElseThrow();
         BiomeClass biomeClass = access.classify(ghast, config);
+        boolean inWater = access.inWater(ghast);
         GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass);
+        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
         if (!advanced.equals(state)) {
             access.replaceGhastState(ghast, advanced);
         }
@@ -462,6 +485,11 @@ public final class HappyArtillery implements ModInitializer {
         }
 
         @Override
+        public boolean inWater(HappyGhast ghast) {
+            return ghast.isInWater();
+        }
+
+        @Override
         public Config config() {
             return Config.current();
         }
@@ -488,8 +516,8 @@ public final class HappyArtillery implements ModInitializer {
         @Override
         public GhastState advance(
                 HappyGhast ghast, GhastState state, long now,
-                Config config, BiomeClass biomeClass) {
-            return Heat.advance(state, now, biomeClass.profile(config), ghast.isInWater(), config.water());
+                Config config, BiomeClass biomeClass, boolean inWater) {
+            return Heat.advance(state, now, biomeClass.profile(config), inWater, config.water());
         }
 
         @Override
@@ -568,19 +596,16 @@ public final class HappyArtillery implements ModInitializer {
         @Override
         public void render(
                 PlayerView<ServerPlayer, HappyGhast> rider, HappyGhast ghast,
-                GhastState state, long now, Config config, BiomeClass biomeClass,
+                GhastState state, long now, Config config, Hud.Mode mode,
                 Optional<Controls.InventorySnapshot> pilotSnapshot,
                 boolean activeFireControl) {
-            Hud.Status status = biomeClass == BiomeClass.NETHER
-                    ? Hud.Status.NO_COOLING
-                    : now <= state.firingWindowEndTick() ? Hud.Status.FIRING : Hud.Status.COOLING;
             if (!(ghast.level() instanceof net.minecraft.server.level.ServerLevel level)) {
                 throw new IllegalArgumentException("HUD requires a loaded server Happy Ghast");
             }
             RiderState updated = HUD.update(
                     rider.player().getUUID(), rider.player(), ghast.getUUID(), rider.state(), now,
                     new Hud.Snapshot(
-                            state.heat(), biomeClass, status, pilotSnapshot, activeFireControl),
+                            state.heat(), mode, pilotSnapshot, activeFireControl),
                     config, Hud.minecraftPresentation(level, ghast));
             if (!updated.equals(rider.state())) {
                 replaceRiderState(rider.player(), updated);

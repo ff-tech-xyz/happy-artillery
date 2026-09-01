@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -77,13 +78,11 @@ public final class Hud<R, H> {
                     cache.bossProgress(), cache.bossColor(), "", Long.MIN_VALUE);
         }
         double progress = normalized(snapshot.heat(), config.heat().limit());
-        Color color = color(progress, snapshot.biomeClass(), config.hud().warningFromPercent());
+        Config.Color color = color(progress, snapshot.mode(), config.hud());
         double warning = warningThreshold(config.hud().warningFromPercent());
-        boolean aboveWarning = progress >= warning;
-        if (aboveWarning && !session.warningAbove) {
+        if (progress >= warning) {
             session.warningPending = true;
         }
-        session.warningAbove = aboveWarning;
         H display = session.display;
         if (display != null && !config.hud().bossBar()) {
             access.removeViewer(display, rider);
@@ -103,7 +102,7 @@ public final class Hud<R, H> {
             attachmentDelivered = true;
         }
 
-        String actionText = actionText(progress, snapshot);
+        String actionText = actionText(progress, snapshot, config.hud().cooling());
         boolean controlWarning = snapshot.pilotControls().isPresent()
                 && !normalControlStatus(snapshot.pilotControls().orElseThrow());
         boolean persistentAction = controlWarning || snapshot.activeFireControl();
@@ -113,9 +112,10 @@ public final class Hud<R, H> {
         if (session.actionEnabled && (persistentAction || actionChanged)
                 && (promptWarning || actionReenabled || actionDue)
                 && (!attachmentDelivered || promptWarning)) {
-            Color actionColor = controlWarning
-                    ? (missingControl(snapshot.pilotControls().orElseThrow()) ? Color.RED : Color.GOLD)
-                    : snapshot.biomeClass() == BiomeClass.NETHER ? Color.RED : color;
+            Config.Color actionColor = controlWarning
+                    ? (missingControl(snapshot.pilotControls().orElseThrow())
+                    ? Config.Color.RED : Config.Color.GOLD)
+                    : color;
             access.actionBar(rider, actionText, actionColor);
             cache = new RiderState.HudCache(
                     cache.bossProgress(), cache.bossColor(), actionText, now);
@@ -129,8 +129,8 @@ public final class Hud<R, H> {
                     || refreshDue(now, session.lastRefreshTick,
                     Math.max(AUXILIARY_MIN_CADENCE_TICKS, config.hud().refreshTicks()));
             if (auxiliaryDue) {
-                for (int offset = 0; offset < 3; offset++) {
-                    int channel = (session.nextChannel + offset) % 3;
+                for (int offset = 0; offset < 4; offset++) {
+                    int channel = (session.nextChannel + offset) % 4;
                     boolean delivered = false;
                     if (channel == 0 && session.warningPending) {
                         access.warningParticle(rider);
@@ -150,9 +150,13 @@ public final class Hud<R, H> {
                                 cache.bossProgress(), color.name(),
                                 cache.actionBarText(), cache.lastActionBarTick());
                         delivered = true;
+                    } else if (channel == 3 && display != null
+                            && !access.hasCurrentName(display)) {
+                        access.setName(display);
+                        delivered = true;
                     }
                     if (delivered) {
-                        session.nextChannel = (channel + 1) % 3;
+                        session.nextChannel = (channel + 1) % 4;
                         break;
                     }
                 }
@@ -208,7 +212,8 @@ public final class Hud<R, H> {
         return customName != null ? customName : Component.literal("HappyGhast");
     }
 
-    private static String actionText(double progress, Snapshot snapshot) {
+    private static String actionText(
+            double progress, Snapshot snapshot, Config.Cooling coolingConfig) {
         if (snapshot.pilotControls().isPresent()) {
             Controls.InventorySnapshot controls = snapshot.pilotControls().orElseThrow();
             if (missingControl(controls)) {
@@ -223,10 +228,20 @@ public final class Hud<R, H> {
                 return "CONTROLS IN INVENTORY";
             }
         }
-        if (snapshot.biomeClass() == BiomeClass.NETHER) {
-            return "NETHER · NO COOLING";
+        String status;
+        if (snapshot.mode() == Firing.FIRING) {
+            status = "FIRING";
+        } else {
+            Cooling cooling = (Cooling) snapshot.mode();
+            status = cooling.perSecond() == 0.0
+                    ? coolingConfig.noCoolingText()
+                    : "COOLING " + formatRate(cooling.perSecond()) + "/s";
         }
-        return "HEAT " + Math.round(progress * 100.0) + "% · " + snapshot.status().label;
+        return "HEAT " + Math.round(progress * 100.0) + "% · " + status;
+    }
+
+    private static String formatRate(double perSecond) {
+        return BigDecimal.valueOf(perSecond).stripTrailingZeros().toPlainString();
     }
 
     private static boolean missingControl(Controls.InventorySnapshot controls) {
@@ -244,16 +259,26 @@ public final class Hud<R, H> {
         return Math.max(0.0, Math.min(1.0, heat / limit));
     }
 
-    private static Color color(double progress, BiomeClass biomeClass, int warningFromPercent) {
-        double warning = warningThreshold(warningFromPercent);
+    private static Config.Color color(double progress, Mode mode, Config.Hud hud) {
+        double warning = warningThreshold(hud.warningFromPercent());
         if (progress >= warning) {
-            return Color.RED;
+            return Config.Color.RED;
         }
-        return switch (biomeClass) {
-            case COLD -> Color.BLUE;
-            case HOT, NETHER -> Color.GOLD;
-            case BASE, END -> Color.GREEN;
-        };
+        if (mode == Firing.FIRING) {
+            return Config.Color.GREEN;
+        }
+        double rate = ((Cooling) mode).perSecond();
+        Config.Cooling cooling = hud.cooling();
+        if (rate == 0.0) {
+            return cooling.noCoolingColor();
+        }
+        if (rate <= cooling.slowMaxPerSecond()) {
+            return cooling.slowColor();
+        }
+        if (rate <= cooling.normalMaxPerSecond()) {
+            return cooling.normalColor();
+        }
+        return cooling.fastColor();
     }
 
     private static double warningThreshold(int warningFromPercent) {
@@ -273,43 +298,28 @@ public final class Hud<R, H> {
     }
 
     public record Snapshot(
-            double heat, BiomeClass biomeClass, Status status,
-            Optional<Controls.InventorySnapshot> pilotControls,
+            double heat, Mode mode, Optional<Controls.InventorySnapshot> pilotControls,
             boolean activeFireControl) {
-        public Snapshot(double heat, BiomeClass biomeClass, Status status) {
-            this(heat, biomeClass, status, Optional.empty(), false);
-        }
-
-        public Snapshot(
-                double heat, BiomeClass biomeClass, Status status,
-                Optional<Controls.InventorySnapshot> pilotControls) {
-            this(heat, biomeClass, status, pilotControls, false);
-        }
-
         public Snapshot {
-            Objects.requireNonNull(biomeClass, "biomeClass");
-            Objects.requireNonNull(status, "status");
+            Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(pilotControls, "pilotControls");
         }
     }
 
-    public enum Status {
-        COOLING,
-        FIRING,
-        NO_COOLING;
-
-        private final String label;
-
-        Status() {
-            label = name().replace('_', ' ');
-        }
+    public sealed interface Mode permits Firing, Cooling {
     }
 
-    public enum Color {
-        RED,
-        GOLD,
-        BLUE,
-        GREEN
+    public enum Firing implements Mode {
+        FIRING
+    }
+
+    public record Cooling(double perSecond) implements Mode {
+        public Cooling {
+            if (!Double.isFinite(perSecond) || perSecond < 0.0) {
+                throw new IllegalArgumentException(
+                        "Cooling rate must be finite and non-negative: " + perSecond);
+            }
+        }
     }
 
     interface ViewerAccess<R, H> {
@@ -317,15 +327,19 @@ public final class Hud<R, H> {
     }
 
     interface PresentationAccess<R, H> extends ViewerAccess<R, H> {
-        H createBossBar(double progress, Color color);
+        H createBossBar(double progress, Config.Color color);
 
         void addViewer(H handle, R rider);
 
         void setProgress(H handle, double progress);
 
-        void setColor(H handle, Color color);
+        void setColor(H handle, Config.Color color);
 
-        void actionBar(R rider, String text, Color color);
+        boolean hasCurrentName(H handle);
+
+        void setName(H handle);
+
+        void actionBar(R rider, String text, Config.Color color);
 
         void warningParticle(R rider);
     }
@@ -341,7 +355,7 @@ public final class Hud<R, H> {
         }
 
         @Override
-        public ServerBossEvent createBossBar(double progress, Color color) {
+        public ServerBossEvent createBossBar(double progress, Config.Color color) {
             ServerBossEvent bar = new ServerBossEvent(
                     UUID.randomUUID(), bossBarName(ghast.getCustomName()), bossColor(color),
                     BossEvent.BossBarOverlay.PROGRESS);
@@ -360,8 +374,18 @@ public final class Hud<R, H> {
         }
 
         @Override
-        public void setColor(ServerBossEvent handle, Color color) {
+        public void setColor(ServerBossEvent handle, Config.Color color) {
             handle.setColor(bossColor(color));
+        }
+
+        @Override
+        public boolean hasCurrentName(ServerBossEvent handle) {
+            return handle.getName().equals(bossBarName(ghast.getCustomName()));
+        }
+
+        @Override
+        public void setName(ServerBossEvent handle) {
+            handle.setName(bossBarName(ghast.getCustomName()));
         }
 
         @Override
@@ -370,7 +394,7 @@ public final class Hud<R, H> {
         }
 
         @Override
-        public void actionBar(ServerPlayer rider, String text, Color color) {
+        public void actionBar(ServerPlayer rider, String text, Config.Color color) {
             rider.sendOverlayMessage(Component.literal(text).withStyle(textColor(color)));
         }
 
@@ -381,7 +405,7 @@ public final class Hud<R, H> {
                     8, 0.5, 0.5, 0.5, 0.01);
         }
 
-        private static BossEvent.BossBarColor bossColor(Color color) {
+        private static BossEvent.BossBarColor bossColor(Config.Color color) {
             return switch (color) {
                 case RED -> BossEvent.BossBarColor.RED;
                 case GOLD -> BossEvent.BossBarColor.YELLOW;
@@ -390,7 +414,7 @@ public final class Hud<R, H> {
             };
         }
 
-        private static ChatFormatting textColor(Color color) {
+        private static ChatFormatting textColor(Config.Color color) {
             return switch (color) {
                 case RED -> ChatFormatting.RED;
                 case GOLD -> ChatFormatting.GOLD;
@@ -417,7 +441,6 @@ public final class Hud<R, H> {
         private long lastActionTick;
         private boolean refreshed;
         private boolean actionEnabled;
-        private boolean warningAbove;
         private boolean warningPending;
         private int nextChannel;
 
@@ -433,7 +456,6 @@ public final class Hud<R, H> {
             lastActionTick = now;
             refreshed = false;
             actionEnabled = enabled;
-            warningAbove = false;
             warningPending = false;
             nextChannel = 0;
         }

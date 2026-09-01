@@ -74,6 +74,34 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void presentationModeUsesWaterThenInclusiveFiringThenCapturedProfileRate() {
+        Config defaults = Config.defaults();
+        Config config = new Config(
+                defaults.controls(), defaults.fire(),
+                new Config.Heat(
+                        defaults.heat().limit(), defaults.heat().firingWindowSeconds(),
+                        defaults.heat().cold(), defaults.heat().base(), defaults.heat().hot(),
+                        new Config.HeatProfile(3.0, 0.75),
+                        new Config.HeatProfile(0.7, 0.0),
+                        defaults.heat().coldMaxTemperature(), defaults.heat().hotMinTemperature(),
+                        defaults.heat().unknownDimensionUsesTemperature()),
+                new Config.Water(4.25, defaults.water().floor(), defaults.water().blocksFiring()),
+                defaults.overheat(), defaults.cry(), defaults.hud());
+        GhastState state = new GhastState(
+                40.0, 90L, 100L, 0L, 0L,
+                java.util.OptionalLong.empty(), Optional.empty());
+
+        assertEquals(new Hud.Cooling(4.25),
+                HappyArtillery.presentationMode(true, state, 99L, config, BiomeClass.END));
+        assertEquals(Hud.Firing.FIRING,
+                HappyArtillery.presentationMode(false, state, 100L, config, BiomeClass.NETHER));
+        assertEquals(new Hud.Cooling(0.75),
+                HappyArtillery.presentationMode(false, state, 101L, config, BiomeClass.NETHER));
+        assertEquals(new Hud.Cooling(0.0),
+                HappyArtillery.presentationMode(false, state, 101L, config, BiomeClass.END));
+    }
+
+    @Test
     void missingConfigIsCreatedAndLoadedBeforeEachRegistrationExactlyOnce() throws Exception {
         RecordingRegistrar registrar = new RecordingRegistrar();
         Path configPath = tempDir.resolve("happy-artillery.json");
@@ -276,6 +304,7 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void riddenGhastUsesOnePilotConfigAndBiomeThenSharesPostTransitionHudSnapshot() {
         RecordingDriver access = RecordingDriver.ridden();
+        access.configuredInWater = true;
 
         HappyArtillery.tick(access);
 
@@ -284,8 +313,36 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, access.classifications);
         assertEquals(2, access.ghastProcesses);
         assertEquals(1, access.fireCalls);
+        assertEquals(List.of(true), access.advancedInWater);
+        assertEquals(1, access.inWaterCalls);
+        assertEquals(List.of(new Hud.Cooling(access.configured.water().coolPerSecond()),
+                new Hud.Cooling(access.configured.water().coolPerSecond())), access.renderedModes);
+        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
         assertEquals(true, access.order.indexOf("fuses") > access.order.lastIndexOf("hud:passenger"));
+    }
+
+    @Test
+    void capturedPassiveModeIsComputedOnceAndSharedByPilotAndPassenger() {
+        Config defaults = Config.defaults();
+        Config config = new Config(
+                defaults.controls(), defaults.fire(),
+                new Config.Heat(
+                        defaults.heat().limit(), defaults.heat().firingWindowSeconds(),
+                        defaults.heat().cold(), defaults.heat().base(), defaults.heat().hot(),
+                        new Config.HeatProfile(3.0, 0.75), defaults.heat().end(),
+                        defaults.heat().coldMaxTemperature(), defaults.heat().hotMinTemperature(),
+                        defaults.heat().unknownDimensionUsesTemperature()),
+                defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
+        RecordingDriver access = RecordingDriver.passive(config, BiomeClass.NETHER);
+
+        HappyArtillery.tick(access);
+
+        assertEquals(1, access.configReads);
+        assertEquals(1, access.classifications);
+        assertEquals(1, access.inWaterCalls);
+        assertEquals(List.of(new Hud.Cooling(0.75), new Hud.Cooling(0.75)), access.renderedModes);
+        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
     }
 
     @Test
@@ -331,6 +388,7 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void callbackAdmissionUsesOneExplicitConfigThroughThePilotTransition() {
         RecordingDriver access = RecordingDriver.ridden();
+        access.configuredInWater = true;
         HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
         HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
         Config config = access.config();
@@ -341,8 +399,32 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals(1, access.configReads);
         assertEquals(1, access.fireCalls);
+        assertEquals(List.of(true), access.advancedInWater);
+        assertEquals(1, access.inWaterCalls);
+        assertEquals(List.of(new Hud.Cooling(config.water().coolPerSecond()),
+                new Hud.Cooling(config.water().coolPerSecond())), access.renderedModes);
+        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
         assertEquals(List.of(true, false), access.activeFireControls);
+    }
+
+    @Test
+    void acceptedFireRefreshesAuthoritativeStateBeforeSharingOneFiringMode() {
+        RecordingDriver access = RecordingDriver.ridden();
+        access.advancedFiringWindowEnd = 40L;
+        HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
+        HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
+        Config config = access.config();
+
+        HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
+                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
+                access.snapshot("pilot", "ghast"));
+
+        assertEquals(1, access.fireCalls);
+        assertEquals(2, access.ghastProcesses);
+        assertEquals(List.of(Hud.Firing.FIRING, Hud.Firing.FIRING), access.renderedModes);
+        assertSame(Hud.Firing.FIRING, access.renderedModes.getFirst());
+        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
     }
 
     @Test
@@ -571,6 +653,91 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void bothPilotEntriesThreadOneCapturedWaterBooleanThroughAdvanceAndPostActionMode()
+            throws IOException {
+        ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
+        String access = "L" + ROOT + "$DriverAccess;";
+        String riders = "Ljava/util/List;L" + ROOT + "$PlayerView;J";
+        String snapshot = "L" + PACKAGE + "Controls$InventorySnapshot;";
+        MethodNode tickEntry = method(root, "processPilot",
+                "(" + access + riders + snapshot + ")V");
+        MethodNode explicitConfigEntry = method(root, "processPilot",
+                "(" + access + riders + "L" + PACKAGE + "Config;L" + PACKAGE
+                        + "Controls$Admission;" + snapshot + ")V");
+        String advanceDescriptor = "(Ljava/lang/Object;L" + PACKAGE + "GhastState;JL"
+                + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;Z)L" + PACKAGE + "GhastState;";
+
+        for (MethodNode entry : List.of(tickEntry, explicitConfigEntry)) {
+            List<MethodInsnNode> calls = methodCalls(entry);
+            List<MethodInsnNode> waterCalls = calls.stream()
+                    .filter(call -> call.owner.equals(ROOT + "$DriverAccess")
+                            && call.name.equals("inWater"))
+                    .toList();
+            assertEquals(1, waterCalls.size(), entry.desc);
+            MethodInsnNode waterCall = waterCalls.getFirst();
+            AbstractInsnNode waterStore = nextReal(waterCall);
+            assertEquals(Opcodes.ISTORE, waterStore.getOpcode(), entry.desc);
+            int waterLocal = ((VarInsnNode) waterStore).var;
+
+            MethodInsnNode advance = calls.stream()
+                    .filter(call -> call.owner.equals(ROOT + "$DriverAccess")
+                            && call.name.equals("advance"))
+                    .findFirst().orElseThrow();
+            assertEquals(advanceDescriptor, advance.desc);
+            assertEquals(Opcodes.ILOAD, advance.getPrevious().getOpcode());
+            assertEquals(waterLocal, ((VarInsnNode) advance.getPrevious()).var);
+
+            MethodInsnNode postAction = calls.stream()
+                    .filter(call -> call.owner.equals(ROOT) && call.name.equals("processPilot")
+                            && call.desc.contains(";ZL" + PACKAGE + "GhastState;"))
+                    .findFirst().orElseThrow();
+            List<VarInsnNode> postLoads = previousVariableLoads(postAction, 11);
+            assertEquals(Opcodes.ILOAD, postLoads.get(6).getOpcode());
+            assertEquals(waterLocal, postLoads.get(6).var);
+        }
+
+        MethodNode postAction = method(root, "processPilot",
+                "(" + access + riders + "L" + PACKAGE + "Config;L" + PACKAGE
+                        + "BiomeClass;ZL" + PACKAGE + "GhastState;L" + PACKAGE
+                        + "GhastState;L" + PACKAGE + "Controls$Admission;" + snapshot + ")V");
+        MethodInsnNode presentation = methodCalls(postAction).stream()
+                .filter(call -> call.owner.equals(ROOT) && call.name.equals("presentationMode"))
+                .findFirst().orElseThrow();
+        List<VarInsnNode> presentationLoads = previousVariableLoads(presentation, 5);
+        assertEquals(List.of(Opcodes.ILOAD, Opcodes.ALOAD, Opcodes.LLOAD,
+                        Opcodes.ALOAD, Opcodes.ALOAD),
+                presentationLoads.stream().map(AbstractInsnNode::getOpcode).toList());
+        assertEquals(7, presentationLoads.getFirst().var);
+        assertEquals(14, presentationLoads.get(1).var);
+
+        ClassNode driver = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
+        MethodNode productionAdvance = method(driver, "advance",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
+                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE
+                        + "BiomeClass;Z)L" + PACKAGE + "GhastState;");
+        assertEquals(0, methodCalls(productionAdvance).stream()
+                .filter(call -> call.name.equals("isInWater")).count());
+        MethodInsnNode heatAdvance = methodCalls(productionAdvance).stream()
+                .filter(call -> call.owner.equals(PACKAGE + "Heat") && call.name.equals("advance"))
+                .findFirst().orElseThrow();
+        assertEquals("(L" + PACKAGE + "GhastState;JL" + PACKAGE
+                        + "Config$HeatProfile;ZL" + PACKAGE + "Config$Water;)L" + PACKAGE
+                        + "GhastState;",
+                heatAdvance.desc);
+        AbstractInsnNode suppliedWater = heatAdvance.getPrevious().getPrevious().getPrevious();
+        assertEquals(Opcodes.ILOAD, suppliedWater.getOpcode());
+        assertEquals(7, ((VarInsnNode) suppliedWater).var);
+
+        MethodNode productionObservation = method(driver, "inWater",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)Z");
+        assertEquals(List.of(
+                        "net/minecraft/world/entity/animal/happyghast/HappyGhast.isInWater()Z"),
+                methodCalls(productionObservation).stream()
+                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
+    }
+
+    @Test
     void productionRiderLossAndRenderStayConnectedToTypedHudBoundaries() throws IOException {
         ClassNode driverOwner = BytecodeTestSupport.classNode(
                 HappyArtillery.class.getName() + "$MinecraftDriverAccess");
@@ -595,7 +762,7 @@ final class HappyArtilleryIntegrationTest {
         MethodNode render = method(driverOwner, "render",
                 "(L" + ROOT + "$PlayerView;"
                         + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
-                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;"
+                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "Hud$Mode;"
                         + "Ljava/util/Optional;Z)V");
         assertEquals(1, methodCalls(render).stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
                 && call.name.equals("minecraftPresentation")).count());
@@ -738,11 +905,17 @@ final class HappyArtilleryIntegrationTest {
 
         private int configReads;
         private int classifications;
+        private int inWaterCalls;
         private int snapshotCalls;
         private int ghastProcesses;
         private int fireCalls;
         private int cryCalls;
         private Config expectedConfig;
+        private Config configured = Config.defaults();
+        private BiomeClass configuredBiome = BiomeClass.HOT;
+        private boolean acceptedFire = true;
+        private boolean configuredInWater;
+        private long advancedFiringWindowEnd = 41L;
         private final boolean consumedFailure;
         private final boolean dedupRegression;
         private boolean pilotless;
@@ -751,6 +924,8 @@ final class HappyArtilleryIntegrationTest {
         private boolean onlinePlayersForbidden;
         private GhastState authoritativeState;
         private final List<String> hudSnapshots = new ArrayList<>();
+        private final List<Hud.Mode> renderedModes = new ArrayList<>();
+        private final List<Boolean> advancedInWater = new ArrayList<>();
         private final List<Boolean> activeFireControls = new ArrayList<>();
         private final List<String> removedHud = new ArrayList<>();
         private final List<String> recovered = new ArrayList<>();
@@ -783,6 +958,15 @@ final class HappyArtilleryIntegrationTest {
 
         private static RecordingDriver ridden() {
             return new RecordingDriver(List.of("pilot", "passenger"));
+        }
+
+        private static RecordingDriver passive(Config config, BiomeClass biomeClass) {
+            RecordingDriver access = ridden();
+            access.configured = config;
+            access.configuredBiome = biomeClass;
+            access.acceptedFire = false;
+            access.advancedFiringWindowEnd = 40L;
+            return access;
         }
 
         private static RecordingDriver consumedFailure() {
@@ -839,15 +1023,19 @@ final class HappyArtilleryIntegrationTest {
         }
         @Override public void runDueFuses(long now) { order.add("fuses"); }
         @Override public Object ghastId(String ghast) { return ghast; }
+        @Override public boolean inWater(String ghast) {
+            inWaterCalls++;
+            return configuredInWater;
+        }
         @Override public Config config() {
             configReads++;
-            expectedConfig = Config.defaults();
+            expectedConfig = configured;
             return expectedConfig;
         }
         @Override public BiomeClass classify(String ghast, Config config) {
             assertSame(expectedConfig, config);
             classifications++;
-            return BiomeClass.HOT;
+            return configuredBiome;
         }
         @Override public GhastState ghastState(String ghast) {
             ghastProcesses++;
@@ -857,10 +1045,12 @@ final class HappyArtilleryIntegrationTest {
             return GhastState.fresh();
         }
         @Override public GhastState advance(
-                String ghast, GhastState state, long now, Config config, BiomeClass biomeClass) {
+                String ghast, GhastState state, long now, Config config,
+                BiomeClass biomeClass, boolean inWater) {
             assertSame(expectedConfig, config);
-            assertSame(BiomeClass.HOT, biomeClass);
-            return new GhastState(5.0, now, now, 0L, 0L,
+            assertSame(configuredBiome, biomeClass);
+            advancedInWater.add(inWater);
+            return new GhastState(5.0, now, advancedFiringWindowEnd, 0L, 0L,
                     java.util.OptionalLong.empty(), Optional.empty());
         }
         @Override public Controls.InventorySnapshot snapshot(String pilot, String ghast) {
@@ -876,6 +1066,9 @@ final class HappyArtilleryIntegrationTest {
                 return Controls.handleUseItem(
                         pilot, InteractionHand.MAIN_HAND, state, now,
                         config.controls(), RegressionControlAccess.INSTANCE);
+            }
+            if (!acceptedFire) {
+                return new Controls.Ignored(state);
             }
             return new Controls.Accepted(Controls.ControlIntent.FIRE, state);
         }
@@ -924,11 +1117,11 @@ final class HappyArtilleryIntegrationTest {
 
         @Override public void render(
                 HappyArtillery.PlayerView<String, String> rider, String ghast,
-                GhastState state, long now, Config config, BiomeClass biomeClass,
+                GhastState state, long now, Config config, Hud.Mode mode,
                 Optional<Controls.InventorySnapshot> pilotSnapshot,
                 boolean activeFireControl) {
             assertSame(expectedConfig, config);
-            assertSame(BiomeClass.HOT, biomeClass);
+            renderedModes.add(mode);
             if (rider.pilot()) {
                 assertSame(inventorySnapshot, pilotSnapshot.orElseThrow());
             } else {
@@ -940,7 +1133,8 @@ final class HappyArtilleryIntegrationTest {
             if (dedupRegression) {
                 RiderState updated = hud.update(
                         rider.player(), rider.player(), ghast, rider.state(), now,
-                        new Hud.Snapshot(state.heat(), biomeClass, Hud.Status.COOLING),
+                        new Hud.Snapshot(state.heat(), new Hud.Cooling(1.0),
+                                Optional.empty(), false),
                         config, NoopPresentationAccess.INSTANCE);
                 if (!updated.equals(rider.state())) {
                     replaceRiderState(rider.player(), updated);
@@ -974,12 +1168,14 @@ final class HappyArtilleryIntegrationTest {
     private enum NoopPresentationAccess implements Hud.PresentationAccess<String, String> {
         INSTANCE;
 
-        @Override public String createBossBar(double progress, Hud.Color color) { return "bar"; }
+        @Override public String createBossBar(double progress, Config.Color color) { return "bar"; }
         @Override public void addViewer(String handle, String rider) { }
         @Override public void setProgress(String handle, double progress) { }
-        @Override public void setColor(String handle, Hud.Color color) { }
+        @Override public void setColor(String handle, Config.Color color) { }
+        @Override public boolean hasCurrentName(String handle) { return true; }
+        @Override public void setName(String handle) { }
         @Override public void removeViewer(String handle, String rider) { }
-        @Override public void actionBar(String rider, String text, Hud.Color color) { }
+        @Override public void actionBar(String rider, String text, Config.Color color) { }
         @Override public void warningParticle(String rider) { }
     }
 
@@ -1094,6 +1290,29 @@ final class HappyArtilleryIntegrationTest {
         }
         assertEquals(count, operands.size());
         return operands;
+    }
+
+    private static AbstractInsnNode nextReal(AbstractInsnNode instruction) {
+        AbstractInsnNode next = instruction.getNext();
+        while (next != null && next.getOpcode() < 0) {
+            next = next.getNext();
+        }
+        return next;
+    }
+
+    private static List<VarInsnNode> previousVariableLoads(AbstractInsnNode boundary, int count) {
+        List<VarInsnNode> loads = new ArrayList<>();
+        for (AbstractInsnNode instruction = boundary.getPrevious();
+                instruction != null && loads.size() < count; instruction = instruction.getPrevious()) {
+            if (instruction instanceof VarInsnNode variable
+                    && (instruction.getOpcode() == Opcodes.ALOAD
+                    || instruction.getOpcode() == Opcodes.ILOAD
+                    || instruction.getOpcode() == Opcodes.LLOAD)) {
+                loads.add(0, variable);
+            }
+        }
+        assertEquals(count, loads.size());
+        return loads;
     }
 
     private static List<MethodInsnNode> methodCalls(MethodNode method) {
