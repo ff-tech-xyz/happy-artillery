@@ -1,58 +1,50 @@
 # Happy Artillery
 
-> **Rebuild groundwork:** this branch intentionally contains no working gameplay. `FEATURES.md`
-> preserves the required behavior and `ARCHITECTURE.md` defines the clean implementation structure.
-> Do not deploy its jar as a release.
+Happy Artillery turns the Happy Ghast into a rideable siege machine. Pilots can fire vanilla fireballs, use a Ghast Cry, and push the ghast into a dangerous overheat. Every rider gets a HUD showing the ghast's current heat and cooling state.
 
-Happy Artillery turns the Happy Ghast into a rideable siege machine. Once you are in the saddle, the ghast can launch fireballs, let out a scream, and overheat if you push it too hard.
+Happy Artillery runs on the server. Players can join with an unmodded Java client or through Geyser on Bedrock.
 
-The mod runs on the server, so players do not need to install it on their clients to join and use it.
+## Controls
 
-## What it does
+When you become the pilot, the first two free slots found in your hotbar and main inventory receive temporary Fire Control and Cry Control items. If fewer than two slots are free, the mod leaves the inventory alone and tells you that two free slots are needed.
 
-- Adds fireball controls while riding a Happy Ghast.
-- Adds a Ghast Cry ability with its own cooldown.
-- Gives each Happy Ghast an ammo pool that refills over time.
-- Tracks heat while you fire. Keep shooting for too long and the ghast overheats in a messy burst of fireballs.
-- Changes heat behavior by biome and dimension. Hot places are riskier, cold places cool faster, and the Nether is exactly as bad an idea as it sounds.
-- Lets server owners tune the numbers in `config/happy-artillery.json`.
+The generated controls can move normally within their owner's hotbar, main inventory, and offhand. Hold one in either hand to use it:
 
-## How to use it
+- Fire Control fires on right-click and supports hold-to-fire by default.
+- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used underwater.
 
-Mount a Happy Ghast and use the control slots in your hotbar:
+Controls are tied to their owner and the current ride. Trying to drop one or place it in an external container consumes it. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive a new pair. Ordinary items are never overwritten to make room.
 
-- Slot 5 becomes Fire Control. Right-click with it to shoot a fireball.
-- Slot 6 becomes Cry Control. Right-click with it to make the ghast scream.
+## Heat, cooling, and overheat
 
-If a control slot is empty, the mod creates a temporary Fire Charge or Ghast Tear for you. If there is already an item in the slot, the mod marks it as the control while you are riding and cleans it up when you dismount.
+Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water cools the ghast directly. Cry is always blocked underwater; Fire is blocked there by default and follows `water.blocksFiring`.
 
-## Heat and ammo
+The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Passengers see the same heat and cooling status without receiving controls.
 
-Every shot costs ammo and adds heat. Ammo refills passively, but heat depends on where you are flying.
-
-| Area | Default behavior |
-|---|---|
-| Normal biomes | Standard heat gain and cooling |
-| Hot biomes | More heat per shot and slower cooling |
-| Cold biomes / End | Less heat per shot and faster cooling |
-| Nether | High heat and no passive cooling |
-
-Water cools a ghast quickly, but you cannot fire while submerged.
+Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod may place fire. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
 
 ## Requirements
 
-- Minecraft `26.1.2` / `26.2` line, with current releases also published for `1.21.11`
+- Minecraft `26.2`
 - Fabric Loader `0.19.3` or newer
 - Fabric API
-- Java 21+
+- Java 21 or newer
 
-Install it on the server. Clients do not need the mod.
+Install the mod and Fabric API on the server. Clients do not install Happy Artillery.
 
 ## Configuration
 
-A default config is created at `config/happy-artillery.json` on first launch. Server owners can adjust ammo, cooldowns, heat limits, biome behavior, explosion power, water cooling, and cry volume.
+Happy Artillery creates `config/happy-artillery.json` from its defaults. Server owners can override individual settings for controls, fire, heat profiles, water cooling, overheat, Cry, and the HUD. The full schema and default values are documented in [FEATURES.md](FEATURES.md#configuration).
 
-Changes take effect after a server restart.
+Admins with gamemaster permission level 2 can apply changes without restarting:
+
+```text
+/ha reload
+```
+
+Configuration is strict. Unknown keys, removed keys, malformed values, and invalid ranges fail instead of being ignored. The old root `preset` key has been removed; defaults plus individual overrides are the only configuration model. A failed reload reports the error and keeps the current active configuration without replacing the invalid file.
+
+`hud.refreshTicks` has a minimum of `4`. The `hud.cooling` section controls the zero-rate text and color (`noCoolingText`, `noCoolingColor`) and the slow, normal, and fast cooling bands (`slowMaxPerSecond`, `slowColor`, `normalMaxPerSecond`, `normalColor`, `fastColor`).
 
 ## Building from source
 
@@ -71,4 +63,4 @@ Built jars are written to `build/libs/`.
 ## Credits
 
 - OG Moo-cow, author
-- PyreHaven, https://pyrehaven.xyz
+- [PyreHaven](https://pyrehaven.xyz)
