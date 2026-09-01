@@ -46,9 +46,9 @@ public record Config(
     }
 
     public static Config load(Path path) throws IOException {
-        Config loaded = readCandidate(path);
-        publish(path, loaded, Config::replaceAtomically);
-        return loaded;
+        Candidate candidate = readCandidate(path);
+        publish(path, candidate, Config::replaceAtomically);
+        return candidate.config();
     }
 
     public static Config reload(Path path) throws IOException {
@@ -61,17 +61,17 @@ public record Config(
 
     static Config reload(
             Path path, Predicate<String> registeredItem, AtomicMove move) throws IOException {
-        Config candidate = readCandidate(path);
-        resolveConfiguredItems(candidate, registeredItem);
+        Candidate candidate = readCandidate(path);
+        resolveConfiguredItems(candidate.config(), registeredItem);
         publish(path, candidate, move);
-        return candidate;
+        return candidate.config();
     }
 
-    private static Config readCandidate(Path path) throws IOException {
+    private static Candidate readCandidate(Path path) throws IOException {
         if (Files.notExists(path)) {
             Config defaults = defaults();
             validate(defaults);
-            return defaults;
+            return new Candidate(defaults, true);
         }
         JsonObject explicit = parseStrictObject(Files.readString(path));
         rejectRenamedSettings(explicit);
@@ -82,11 +82,15 @@ public record Config(
         mergeKnown(complete, explicit);
         Config loaded = JSON.fromJson(complete, Config.class);
         validate(loaded);
-        return loaded;
+        return new Candidate(loaded, false);
     }
 
-    private static void publish(Path path, Config config, AtomicMove move) throws IOException {
-        String serialized = JSON.toJson(config) + System.lineSeparator();
+    private static void publish(Path path, Candidate candidate, AtomicMove move) throws IOException {
+        if (!candidate.missing()) {
+            ACTIVE.set(candidate.config());
+            return;
+        }
+        String serialized = JSON.toJson(candidate.config()) + System.lineSeparator();
         Path target = path.toAbsolutePath();
         Path parent = target.getParent();
         Files.createDirectories(parent);
@@ -95,7 +99,7 @@ public record Config(
             temporary = Files.createTempFile(parent, target.getFileName() + ".", ".tmp");
             Files.writeString(temporary, serialized);
             move.replace(temporary, target);
-            ACTIVE.set(config);
+            ACTIVE.set(candidate.config());
         } finally {
             if (temporary != null) {
                 try {
@@ -497,6 +501,9 @@ public record Config(
             double normalMaxPerSecond,
             Color normalColor,
             Color fastColor) {
+    }
+
+    private record Candidate(Config config, boolean missing) {
     }
 
     public enum Color {

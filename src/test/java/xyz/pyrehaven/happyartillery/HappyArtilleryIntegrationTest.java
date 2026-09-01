@@ -155,8 +155,7 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals("Missing configured item controls.fireItem: " + missing, failure.getMessage());
         assertEquals(1, registrar.calls.get("config-validation"));
-        assertEquals(new com.google.gson.Gson().toJsonTree(Config.current()),
-                com.google.gson.JsonParser.parseString(Files.readString(configPath)));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(configured, Files.readAllBytes(configPath));
     }
 
     @Test
@@ -182,11 +181,13 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
-    void successfulReloadRewritesSwapsReportsOnceAndReturnsBrigadierSuccess() throws Exception {
+    void successfulReloadPreservesSparseBytesSwapsReportsOnceAndReturnsBrigadierSuccess() throws Exception {
         Path configPath = tempDir.resolve("happy-artillery.json");
         Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(configPath);
-        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":true}}");
+        byte[] sparse = "{\"controls\":{\"holdToFire\":true}}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(configPath, sparse);
         RecordingReloadFeedback feedback = new RecordingReloadFeedback();
 
         int result = HappyArtillery.executeReload(configPath, feedback);
@@ -194,8 +195,7 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, result);
         assertNotSame(previous, Config.current());
         assertEquals(true, Config.current().controls().holdToFire());
-        assertEquals(new com.google.gson.Gson().toJsonTree(Config.current()),
-                com.google.gson.JsonParser.parseString(Files.readString(configPath)));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(sparse, Files.readAllBytes(configPath));
         assertEquals(List.of("success:Happy Artillery config reloaded."), feedback.messages);
     }
 

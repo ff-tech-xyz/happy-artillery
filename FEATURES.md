@@ -50,22 +50,23 @@ and manual acceptance pass.
 - Passengers receive the same ghast heat/status HUD read-only. Only the controlling first passenger
   receives marked controls, advances state, or triggers abilities. No passenger action or feedback
   input is promised while marked controls are pilot-only and plain items are disabled.
-- Startup config has a strict transaction boundary. A missing file is created from validated defaults,
-  and missing known keys inherit defaults before a successful full-schema rewrite. An existing file
-  with malformed JSON, unknown or removed keys, invalid identifier syntax, non-finite
-  number, impossible range, or cross-field violation aborts startup loudly; it is never replaced with
+- Startup config has a strict transaction boundary. A missing file is created atomically from validated
+  complete defaults. An existing valid file overlays its supplied known keys onto defaults in memory and
+  preserves its exact bytes. Malformed JSON, unknown or removed keys, invalid identifier syntax, non-finite
+  number, impossible range, or cross-field violation aborts startup loudly; the file is never replaced with
   defaults. Unknown keys are rejected recursively with their full path. Item identifier syntax is checked
   while parsing, and configured registry entries are resolved at the later server lifecycle point after
-  mod initializers. `/ha reload` parses, validates, and resolves a candidate before the atomic swap:
-  failure reports the error and leaves both the prior valid in-memory value and invalid file untouched.
-  Every successful load rewrites the complete known schema.
+  mod initializers. `/ha reload` parses, validates, and resolves a candidate before swapping the active
+  value: failure leaves both the prior valid in-memory object and invalid file untouched, while a successful
+  reload of an existing valid file preserves its exact bytes.
 
 ## Configuration
 
 Config is feature-grouped nested immutable values held in one `AtomicReference` and read at call time.
-Validated defaults are the only baseline; an operator supplies individual known-key overrides. Every
-successful load rewrites the complete schema. A root `preset` key is a removed setting: startup or
-reload fails transactionally, preserving the active object and existing file bytes.
+Validated defaults are the only baseline; an operator supplies individual known-key overrides. Missing
+files receive the complete defaults, while existing valid sparse files retain their exact bytes through
+load and reload. A root `preset` key is a removed setting: startup or reload fails transactionally,
+preserving the active object and existing file bytes.
 `/ha reload` requires gamemaster permission level 2.
 
 Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):

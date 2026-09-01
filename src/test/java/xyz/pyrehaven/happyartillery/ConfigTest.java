@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -172,6 +173,21 @@ final class ConfigTest {
     }
 
     @Test
+    void existingSparseStartupLoadPreservesExactBytes(@TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] sparse = "{\n  \"controls\": { \"holdToFire\": false }\n}\n"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
+
+        Config loaded = Config.load(file);
+
+        assertEquals(false, loaded.controls().holdToFire());
+        assertEquals(Config.defaults().overheat(), loaded.overheat());
+        assertSame(loaded, Config.current());
+        assertArrayEquals(sparse, Files.readAllBytes(file));
+    }
+
+    @Test
     void failedReloadPreservesExactActiveObjectAndInvalidBytes(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
@@ -189,12 +205,14 @@ final class ConfigTest {
     }
 
     @Test
-    void successfulReloadRewritesCompleteSchemaAndAtomicallySwaps(@TempDir Path directory)
+    void successfulSparseReloadPreservesExactBytesAndAtomicallySwaps(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
         Files.writeString(file, "{\"controls\":{\"holdToFire\":false}}");
         Config previous = Config.load(file);
-        Files.writeString(file, "{\"overheat\":{\"explosionPower\":9.0}}");
+        byte[] sparse = "{\n  \"overheat\": { \"explosionPower\": 9.0 }\n}\n"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
 
         Config reloaded = Config.reload(file);
 
@@ -202,32 +220,36 @@ final class ConfigTest {
         assertSame(reloaded, Config.current());
         assertEquals(9.0, reloaded.overheat().explosionPower());
         assertEquals(24, reloaded.overheat().fireballCount());
-        assertEquals(new Gson().toJsonTree(reloaded),
-                JsonParser.parseString(Files.readString(file)));
+        assertArrayEquals(sparse, Files.readAllBytes(file));
+
+        Config repeated = Config.reload(file);
+
+        assertEquals(reloaded, repeated);
+        assertSame(repeated, Config.current());
+        assertArrayEquals(sparse, Files.readAllBytes(file));
     }
 
     @Test
-    void partialKnownKeysOverlayDefaultsAndRewriteOnlyPresetFreeSchema(@TempDir Path directory)
+    void partialKnownKeysOverlayDefaultsAndPreserveSparseBytes(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"overheat\":{\"explosionPower\":9.0}}");
+        byte[] sparse = "{\"overheat\":{\"explosionPower\":9.0}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
 
         Config loaded = Config.load(file);
-        JsonObject rewritten = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
 
         assertEquals(9.0, loaded.overheat().explosionPower());
         assertEquals(Config.defaults().overheat().fireballCount(),
                 loaded.overheat().fireballCount());
-        assertEquals(Set.of("controls", "fire", "heat", "water", "overheat", "cry", "hud"),
-                rewritten.keySet());
-        assertEquals(new Gson().toJsonTree(loaded), rewritten);
+        assertArrayEquals(sparse, Files.readAllBytes(file));
     }
 
     @Test
-    void everyCoolingLeafOverridesIndividuallyAndRewritesUppercaseEnums(@TempDir Path directory)
+    void everyCoolingLeafOverridesIndividuallyAndPreservesSparseUppercaseEnums(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, """
+        byte[] sparse = """
                 {"hud":{"cooling":{
                   "noCoolingText":"STILL",
                   "noCoolingColor":"BLUE",
@@ -237,11 +259,12 @@ final class ConfigTest {
                   "normalColor":"GOLD",
                   "fastColor":"RED"
                 }}}
-                """);
+                """.getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
 
         Config loaded = Config.load(file);
-        JsonObject rewritten = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-        JsonObject cooling = rewritten.getAsJsonObject("hud").getAsJsonObject("cooling");
+        JsonObject written = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        JsonObject cooling = written.getAsJsonObject("hud").getAsJsonObject("cooling");
 
         assertEquals(new Config.Cooling(
                         "STILL", Config.Color.BLUE, 0.25, Config.Color.GREEN,
@@ -257,7 +280,7 @@ final class ConfigTest {
         assertEquals("GREEN", cooling.get("slowColor").getAsString());
         assertEquals("GOLD", cooling.get("normalColor").getAsString());
         assertEquals("RED", cooling.get("fastColor").getAsString());
-        assertEquals(new Gson().toJsonTree(loaded), rewritten);
+        assertArrayEquals(sparse, Files.readAllBytes(file));
     }
 
     @ParameterizedTest(name = "hud.cooling.{0} overrides independently")
@@ -266,15 +289,15 @@ final class ConfigTest {
             String key, String rawValue, Config.Cooling expected, @TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file,
-                "{\"hud\":{\"cooling\":{\"" + key + "\":" + rawValue + "}}}");
+        byte[] sparse = ("{\"hud\":{\"cooling\":{\"" + key + "\":" + rawValue + "}}}")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
 
         Config loaded = Config.load(file);
 
         assertEquals(expected, loaded.hud().cooling());
         assertEquals(Config.defaults().controls(), loaded.controls());
-        assertEquals(new Gson().toJsonTree(loaded),
-                JsonParser.parseString(Files.readString(file)));
+        assertArrayEquals(sparse, Files.readAllBytes(file));
     }
 
     @Test
@@ -576,13 +599,11 @@ final class ConfigTest {
     }
 
     @Test
-    void replacementFailurePreservesExactLiveObjectTargetBytesAndCleansTemporaryFile(
+    void missingFileReplacementFailurePreservesExactLiveObjectAndCleansTemporaryFile(
             @TempDir Path directory) throws Exception {
+        Path baseline = directory.resolve("baseline.json");
+        Config previous = Config.load(baseline);
         Path file = directory.resolve("happy-artillery.json");
-        Config previous = Config.load(file);
-        byte[] candidateBytes = "{\"controls\":{\"holdToFire\":false}}"
-                .getBytes(StandardCharsets.UTF_8);
-        Files.write(file, candidateBytes);
         IOException replacementFailure = new IOException("replacement failed");
 
         AtomicMove failingMove = (temporary, target) -> {
@@ -594,8 +615,8 @@ final class ConfigTest {
             assertEquals(45, nestedLeafCount(serialized));
             assertEquals(new Gson().toJsonTree(Config.defaults().hud().cooling()),
                     serialized.getAsJsonObject("hud").get("cooling"));
-            assertEquals(false, serialized.getAsJsonObject("controls")
-                    .get("holdToFire").getAsBoolean());
+            assertEquals(Config.defaults().controls().holdToFire(),
+                    serialized.getAsJsonObject("controls").get("holdToFire").getAsBoolean());
             throw replacementFailure;
         };
 
@@ -604,9 +625,9 @@ final class ConfigTest {
 
         assertSame(replacementFailure, failure);
         assertSame(previous, Config.current());
-        assertArrayEquals(candidateBytes, Files.readAllBytes(file));
+        assertFalse(Files.exists(file));
         try (Stream<Path> files = Files.list(directory)) {
-            assertEquals(List.of(file), files.toList());
+            assertEquals(List.of(baseline), files.toList());
         }
     }
 
