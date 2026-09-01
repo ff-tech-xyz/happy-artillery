@@ -44,11 +44,11 @@ public final class Heat {
             Config.Heat heat) {
         Objects.requireNonNull(heat, "heat");
         requirePositiveFinite("heat.limit", heat.limit());
-        requireNonNegativeFinite("heat.firingWindowSeconds", heat.firingWindowSeconds());
+        requireNonNegativeFinite("heat.coolingDelayAfterShotSeconds", heat.coolingDelayAfterShotSeconds());
         GhastState advanced = advance(state, now, profile);
         double shotHeat = advanced.heat() + profile.heatPerShot();
         requireFinite("shot heat", shotHeat);
-        long shotWindowEnd = firingWindowDeadline(now, heat.firingWindowSeconds());
+        long shotWindowEnd = firingWindowDeadline(now, heat.coolingDelayAfterShotSeconds());
         long firingWindowEnd = Math.max(advanced.firingWindowEndTick(), shotWindowEnd);
         GhastState updated = new GhastState(
                 shotHeat,

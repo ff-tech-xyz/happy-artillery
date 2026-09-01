@@ -522,7 +522,7 @@ final class AbilitiesTest {
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
                 java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
         access.fireballAccepted = false;
-        access.fireAttempts.addAll(List.of(
+        access.firePlacementAttempts.addAll(List.of(
                 Abilities.FireAttempt.SKIPPED,
                 Abilities.FireAttempt.REJECTED));
         Config config = configWithOverheat(0, 6.0, 2, 0.4, 2, 2, 8.0,
@@ -1764,14 +1764,14 @@ final class AbilitiesTest {
         Config.Heat original = defaults.heat();
         Config.HeatProfile profile = new Config.HeatProfile(heatPerShot, 0.0);
         Config.Heat heat = new Config.Heat(
-                limit, original.firingWindowSeconds(), profile, profile, profile, profile, profile,
-                original.coldMaxTemperature(), original.hotMinTemperature(),
-                original.unknownDimensionUsesTemperature());
+                limit, original.coolingDelayAfterShotSeconds(), profile, profile, profile, profile, profile,
+                original.coldBiomeMaxTemperature(), original.hotBiomeMinTemperature(),
+                original.otherDimensionsUseBiomeTemperature());
         Config.Overheat originalOverheat = defaults.overheat();
         Config.Overheat overheat = new Config.Overheat(
                 40, originalOverheat.explosionPower(), originalOverheat.fireballCount(),
                 originalOverheat.fireballSpeed(), originalOverheat.fireballPower(),
-                originalOverheat.fireAttempts(), originalOverheat.fireRadius(),
+                originalOverheat.firePlacementAttempts(), originalOverheat.firePlacementRadius(),
                 originalOverheat.killsGhast(), originalOverheat.breaksBlocks());
         return new Config(defaults.controls(), defaults.fire(), heat,
                 defaults.water(), overheat, defaults.cry(), defaults.hud());
@@ -1779,12 +1779,12 @@ final class AbilitiesTest {
 
     private static Config configWithOverheat(
             int fuseTicks, double explosionPower, int fireballCount, double fireballSpeed,
-            int fireballPower, int fireAttempts, double fireRadius, boolean killsGhast,
+            int fireballPower, int firePlacementAttempts, double firePlacementRadius, boolean killsGhast,
             boolean breaksBlocks) {
         Config defaults = Config.defaults();
         Config.Overheat overheat = new Config.Overheat(
                 fuseTicks, explosionPower, fireballCount, fireballSpeed, fireballPower,
-                fireAttempts, fireRadius, killsGhast, breaksBlocks);
+                firePlacementAttempts, firePlacementRadius, killsGhast, breaksBlocks);
         return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), overheat, defaults.cry(), defaults.hud());
     }
@@ -1902,7 +1902,7 @@ final class AbilitiesTest {
         private int explosions;
         private boolean explosionBreaksBlocks;
         private int removals;
-        private final List<Abilities.FireAttempt> fireAttempts = new ArrayList<>();
+        private final List<Abilities.FireAttempt> firePlacementAttempts = new ArrayList<>();
         private final List<net.minecraft.world.phys.Vec3> directions = new ArrayList<>();
         private final List<net.minecraft.world.phys.Vec3> fireOffsets = new ArrayList<>();
         private final List<Object> explodedGhasts = new ArrayList<>();
@@ -2003,9 +2003,9 @@ final class AbilitiesTest {
                 Object ghast, net.minecraft.world.phys.Vec3 offset) {
             fireOffsets.add(offset);
             events.add("fire");
-            return fireAttempts.isEmpty()
+            return firePlacementAttempts.isEmpty()
                     ? Abilities.FireAttempt.ACCEPTED
-                    : fireAttempts.removeFirst();
+                    : firePlacementAttempts.removeFirst();
         }
 
         @Override

@@ -292,18 +292,18 @@ public final class HeatTest {
     }
 
 
-    private static Config.Heat heat(double limit, double firingWindowSeconds) {
+    private static Config.Heat heat(double limit, double coolingDelayAfterShotSeconds) {
         Config.Heat defaults = Config.defaults().heat();
         return new Config.Heat(
                 limit,
-                firingWindowSeconds,
+                coolingDelayAfterShotSeconds,
                 defaults.cold(),
                 defaults.base(),
                 defaults.hot(),
                 defaults.nether(),
                 defaults.end(),
-                defaults.coldMaxTemperature(),
-                defaults.hotMinTemperature(),
-                defaults.unknownDimensionUsesTemperature());
+                defaults.coldBiomeMaxTemperature(),
+                defaults.hotBiomeMinTemperature(),
+                defaults.otherDimensionsUseBiomeTemperature());
     }
 }

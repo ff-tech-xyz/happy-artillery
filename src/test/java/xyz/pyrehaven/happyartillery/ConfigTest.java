@@ -131,20 +131,21 @@ final class ConfigTest {
                 "fire", Map.of(
                         "shotCooldownSeconds", 0.25, "explosionPower", 1),
                 "heat", Map.ofEntries(
-                        Map.entry("limit", 100.0), Map.entry("firingWindowSeconds", 1.0),
+                        Map.entry("limit", 100.0), Map.entry("coolingDelayAfterShotSeconds", 1.0),
                         Map.entry("cold", Map.of("heatPerShot", 0.70, "coolPerSecond", 1.0)),
                         Map.entry("base", Map.of("heatPerShot", 1.25, "coolPerSecond", 0.6)),
                         Map.entry("hot", Map.of("heatPerShot", 2.00, "coolPerSecond", 0.5)),
                         Map.entry("nether", Map.of("heatPerShot", 3.00, "coolPerSecond", 0.0)),
                         Map.entry("end", Map.of("heatPerShot", 0.70, "coolPerSecond", 1.0)),
-                        Map.entry("coldMaxTemperature", 0.3), Map.entry("hotMinTemperature", 1.0),
-                        Map.entry("unknownDimensionUsesTemperature", true)),
+                        Map.entry("coldBiomeMaxTemperature", 0.3),
+                        Map.entry("hotBiomeMinTemperature", 1.0),
+                        Map.entry("otherDimensionsUseBiomeTemperature", true)),
                 "water", Map.of("blocksFiring", true),
                 "overheat", Map.ofEntries(
                         Map.entry("fuseTicks", 0), Map.entry("explosionPower", 6.0),
                         Map.entry("fireballCount", 24), Map.entry("fireballSpeed", 0.4),
-                        Map.entry("fireballPower", 2), Map.entry("fireAttempts", 24),
-                        Map.entry("fireRadius", 8.0), Map.entry("killsGhast", true),
+                        Map.entry("fireballPower", 2), Map.entry("firePlacementAttempts", 24),
+                        Map.entry("firePlacementRadius", 8.0), Map.entry("killsGhast", true),
                         Map.entry("breaksBlocks", true)),
                 "cry", Map.of("enabled", true, "volume", 10.0, "cooldownSeconds", 10.0),
                 "hud", Map.of("bossBar", true, "actionBar", true,
@@ -374,6 +375,43 @@ final class ConfigTest {
         assertArrayEquals(invalid, Files.readAllBytes(file));
     }
 
+    @ParameterizedTest(name = "renamed {0} points to {1}")
+    @MethodSource("renamedSettings")
+    void renamedSettingFailsClearlyWithoutChangingStateOrBytes(
+            String oldPath, String newPath, String value, @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        String[] parts = oldPath.split("\\.", 2);
+        byte[] invalid = ("{\"" + parts[0] + "\":{\"" + parts[1] + "\":" + value + "}}")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Renamed config setting: " + oldPath + "; use " + newPath,
+                failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
+    @ParameterizedTest(name = "wrong-type {0} remains a type error")
+    @MethodSource("renamedSettingGroups")
+    void renamedSettingDetectionDoesNotReplaceGroupTypeErrors(String group, @TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Config previous = Config.load(file);
+        byte[] invalid = ("{\"" + group + "\":false}").getBytes(StandardCharsets.UTF_8);
+        Files.write(file, invalid);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.reload(file));
+
+        assertEquals("Invalid value type for " + group, failure.getMessage());
+        assertSame(previous, Config.current());
+        assertArrayEquals(invalid, Files.readAllBytes(file));
+    }
+
     @Test
     void completeSerializationRoundTripsAllDeclaredAndNestedKeys(@TempDir Path directory)
             throws Exception {
@@ -415,12 +453,12 @@ final class ConfigTest {
         Files.writeString(file, """
                 {
                   "fire": {"explosionPower": 0},
-                  "heat": {"firingWindowSeconds": 0},
+                  "heat": {"coolingDelayAfterShotSeconds": 0},
                   "water": {"blocksFiring": false},
                   "overheat": {
                     "fuseTicks": 0, "explosionPower": 0, "fireballCount": 0,
-                    "fireballSpeed": 0, "fireballPower": 0, "fireAttempts": 0,
-                    "fireRadius": 0
+                    "fireballSpeed": 0, "fireballPower": 0, "firePlacementAttempts": 0,
+                    "firePlacementRadius": 0
                   },
                   "cry": {"volume": 0, "cooldownSeconds": 0},
                   "hud": {
@@ -666,6 +704,21 @@ final class ConfigTest {
                 Arguments.of("floor", "0.0"));
     }
 
+    private static Stream<Arguments> renamedSettings() {
+        return Stream.of(
+                Arguments.of("heat.firingWindowSeconds", "heat.coolingDelayAfterShotSeconds", "1.0"),
+                Arguments.of("heat.coldMaxTemperature", "heat.coldBiomeMaxTemperature", "0.3"),
+                Arguments.of("heat.hotMinTemperature", "heat.hotBiomeMinTemperature", "1.0"),
+                Arguments.of("heat.unknownDimensionUsesTemperature",
+                        "heat.otherDimensionsUseBiomeTemperature", "true"),
+                Arguments.of("overheat.fireAttempts", "overheat.firePlacementAttempts", "24"),
+                Arguments.of("overheat.fireRadius", "overheat.firePlacementRadius", "8.0"));
+    }
+
+    private static Stream<Arguments> renamedSettingGroups() {
+        return Stream.of(Arguments.of("heat"), Arguments.of("overheat"));
+    }
+
     private static Stream<Arguments> individualCoolingOverrides() {
         Config.Cooling defaults = Config.defaults().hud().cooling();
         return Stream.of(
@@ -756,7 +809,7 @@ final class ConfigTest {
                         "{\"hud\":{\"refreshTicks\":1}}"),
                 Arguments.of("HUD refresh just below the four-tick packet floor",
                         "{\"hud\":{\"refreshTicks\":3}}"),
-                Arguments.of("crossed temperatures", "{\"heat\":{\"coldMaxTemperature\":1.0,\"hotMinTemperature\":1.0}}"),
+                Arguments.of("crossed temperatures", "{\"heat\":{\"coldBiomeMaxTemperature\":1.0,\"hotBiomeMinTemperature\":1.0}}"),
                 Arguments.of("water floor above heat limit", "{\"water\":{\"floor\":101}}"));
     }
 
@@ -806,7 +859,7 @@ final class ConfigTest {
                 "overheat.fuseTicks",
                 "overheat.fireballCount",
                 "overheat.fireballPower",
-                "overheat.fireAttempts",
+                "overheat.firePlacementAttempts",
                 "hud.refreshTicks",
                 "hud.warningFromPercent"
         };

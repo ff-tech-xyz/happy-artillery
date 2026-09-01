@@ -47,17 +47,20 @@ final class BiomeClassTest {
     void unknownDimensionPolicyAndThresholdsAreReadAtEachCallAfterReload(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
-        Files.writeString(file, "{\"heat\":{\"unknownDimensionUsesTemperature\":false}}");
+        Files.writeString(file, "{\"heat\":{\"otherDimensionsUseBiomeTemperature\":false}}");
         Config.load(file);
         ResourceKey<Level> custom = dimension("example:moon");
 
+        assertEquals(BiomeClass.BASE, BiomeClass.classify(Level.OVERWORLD, -100.0, Config.current()));
         assertEquals(BiomeClass.BASE, BiomeClass.classify(custom, -100.0, Config.current()));
+        assertEquals(BiomeClass.NETHER, BiomeClass.classify(Level.NETHER, -100.0, Config.current()));
+        assertEquals(BiomeClass.END, BiomeClass.classify(Level.END, 100.0, Config.current()));
 
         Files.writeString(file, """
                 {"heat":{
-                  "unknownDimensionUsesTemperature":true,
-                  "coldMaxTemperature":-2.0,
-                  "hotMinTemperature":2.0
+                  "otherDimensionsUseBiomeTemperature":true,
+                  "coldBiomeMaxTemperature":-2.0,
+                  "hotBiomeMinTemperature":2.0
                 }}
                 """);
         Config.reload(file);

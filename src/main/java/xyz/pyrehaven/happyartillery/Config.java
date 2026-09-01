@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,6 +74,7 @@ public record Config(
             return defaults;
         }
         JsonObject explicit = parseStrictObject(Files.readString(path));
+        rejectRenamedSettings(explicit);
         rejectRemovedSettings(explicit);
         rejectUnknownKeys(JSON.toJsonTree(defaults()).getAsJsonObject(), explicit, "");
         validateIntegerLeaves(explicit);
@@ -171,6 +173,31 @@ public record Config(
         return array;
     }
 
+    private static void rejectRenamedSettings(JsonObject explicit) {
+        Map<String, Map<String, String>> renames = Map.of(
+                "heat", Map.of(
+                        "firingWindowSeconds", "coolingDelayAfterShotSeconds",
+                        "coldMaxTemperature", "coldBiomeMaxTemperature",
+                        "hotMinTemperature", "hotBiomeMinTemperature",
+                        "unknownDimensionUsesTemperature", "otherDimensionsUseBiomeTemperature"),
+                "overheat", Map.of(
+                        "fireAttempts", "firePlacementAttempts",
+                        "fireRadius", "firePlacementRadius"));
+        for (var group : renames.entrySet()) {
+            if (!explicit.has(group.getKey()) || !explicit.get(group.getKey()).isJsonObject()) {
+                continue;
+            }
+            JsonObject values = explicit.getAsJsonObject(group.getKey());
+            for (var rename : group.getValue().entrySet()) {
+                if (values.has(rename.getKey())) {
+                    throw new IllegalArgumentException("Renamed config setting: "
+                            + group.getKey() + "." + rename.getKey() + "; use "
+                            + group.getKey() + "." + rename.getValue());
+                }
+            }
+        }
+    }
+
     private static void rejectRemovedSettings(JsonObject explicit) {
         if (explicit.has("preset")) {
             throw new IllegalArgumentException("Removed config setting: preset");
@@ -213,7 +240,7 @@ public record Config(
         requireExactInteger(explicit, "overheat", "fuseTicks");
         requireExactInteger(explicit, "overheat", "fireballCount");
         requireExactInteger(explicit, "overheat", "fireballPower");
-        requireExactInteger(explicit, "overheat", "fireAttempts");
+        requireExactInteger(explicit, "overheat", "firePlacementAttempts");
         requireExactInteger(explicit, "hud", "refreshTicks");
         requireExactInteger(explicit, "hud", "warningFromPercent");
     }
@@ -281,15 +308,15 @@ public record Config(
         requireRange("fire.explosionPower", fire.explosionPower(), 0, Integer.MAX_VALUE);
 
         requirePositive("heat.limit", heat.limit());
-        requireNonNegative("heat.firingWindowSeconds", heat.firingWindowSeconds());
+        requireNonNegative("heat.coolingDelayAfterShotSeconds", heat.coolingDelayAfterShotSeconds());
         validateProfile("heat.cold", heat.cold());
         validateProfile("heat.base", heat.base());
         validateProfile("heat.hot", heat.hot());
         validateProfile("heat.nether", heat.nether());
         validateProfile("heat.end", heat.end());
-        requireFinite("heat.coldMaxTemperature", heat.coldMaxTemperature());
-        requireFinite("heat.hotMinTemperature", heat.hotMinTemperature());
-        if (heat.coldMaxTemperature() >= heat.hotMinTemperature()) {
+        requireFinite("heat.coldBiomeMaxTemperature", heat.coldBiomeMaxTemperature());
+        requireFinite("heat.hotBiomeMinTemperature", heat.hotBiomeMinTemperature());
+        if (heat.coldBiomeMaxTemperature() >= heat.hotBiomeMinTemperature()) {
             throw new IllegalArgumentException("Cold temperature must be below hot temperature");
         }
 
@@ -298,8 +325,8 @@ public record Config(
         requireRange("overheat.fireballCount", overheat.fireballCount(), 0, Integer.MAX_VALUE);
         requireNonNegative("overheat.fireballSpeed", overheat.fireballSpeed());
         requireRange("overheat.fireballPower", overheat.fireballPower(), 0, Integer.MAX_VALUE);
-        requireRange("overheat.fireAttempts", overheat.fireAttempts(), 0, Integer.MAX_VALUE);
-        requireNonNegative("overheat.fireRadius", overheat.fireRadius());
+        requireRange("overheat.firePlacementAttempts", overheat.firePlacementAttempts(), 0, Integer.MAX_VALUE);
+        requireNonNegative("overheat.firePlacementRadius", overheat.firePlacementRadius());
 
         requireNonNegative("cry.volume", cry.volume());
         requireNonNegative("cry.cooldownSeconds", cry.cooldownSeconds());
@@ -422,15 +449,15 @@ public record Config(
 
     public record Heat(
             double limit,
-            double firingWindowSeconds,
+            double coolingDelayAfterShotSeconds,
             HeatProfile cold,
             HeatProfile base,
             HeatProfile hot,
             HeatProfile nether,
             HeatProfile end,
-            double coldMaxTemperature,
-            double hotMinTemperature,
-            boolean unknownDimensionUsesTemperature) {
+            double coldBiomeMaxTemperature,
+            double hotBiomeMinTemperature,
+            boolean otherDimensionsUseBiomeTemperature) {
     }
 
     public record HeatProfile(double heatPerShot, double coolPerSecond) {
@@ -445,8 +472,8 @@ public record Config(
             int fireballCount,
             double fireballSpeed,
             int fireballPower,
-            int fireAttempts,
-            double fireRadius,
+            int firePlacementAttempts,
+            double firePlacementRadius,
             boolean killsGhast,
             boolean breaksBlocks) {
     }

@@ -93,12 +93,12 @@ final class HappyArtilleryIntegrationTest {
         Config config = new Config(
                 defaults.controls(), defaults.fire(),
                 new Config.Heat(
-                        defaults.heat().limit(), defaults.heat().firingWindowSeconds(),
+                        defaults.heat().limit(), defaults.heat().coolingDelayAfterShotSeconds(),
                         defaults.heat().cold(), defaults.heat().base(), defaults.heat().hot(),
                         new Config.HeatProfile(3.0, 0.75),
                         new Config.HeatProfile(0.7, 0.0),
-                        defaults.heat().coldMaxTemperature(), defaults.heat().hotMinTemperature(),
-                        defaults.heat().unknownDimensionUsesTemperature()),
+                        defaults.heat().coldBiomeMaxTemperature(), defaults.heat().hotBiomeMinTemperature(),
+                        defaults.heat().otherDimensionsUseBiomeTemperature()),
                 new Config.Water(defaults.water().blocksFiring()),
                 defaults.overheat(), defaults.cry(), defaults.hud());
         GhastState state = new GhastState(
@@ -386,11 +386,11 @@ final class HappyArtilleryIntegrationTest {
         Config config = new Config(
                 defaults.controls(), defaults.fire(),
                 new Config.Heat(
-                        defaults.heat().limit(), defaults.heat().firingWindowSeconds(),
+                        defaults.heat().limit(), defaults.heat().coolingDelayAfterShotSeconds(),
                         defaults.heat().cold(), defaults.heat().base(), defaults.heat().hot(),
                         new Config.HeatProfile(3.0, 0.75), defaults.heat().end(),
-                        defaults.heat().coldMaxTemperature(), defaults.heat().hotMinTemperature(),
-                        defaults.heat().unknownDimensionUsesTemperature()),
+                        defaults.heat().coldBiomeMaxTemperature(), defaults.heat().hotBiomeMinTemperature(),
+                        defaults.heat().otherDimensionsUseBiomeTemperature()),
                 defaults.water(), defaults.overheat(), defaults.cry(), defaults.hud());
         RecordingDriver access = RecordingDriver.passive(config, BiomeClass.NETHER);
 

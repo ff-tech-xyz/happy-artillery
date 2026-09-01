@@ -23,13 +23,13 @@ public enum BiomeClass {
             return END;
         }
         Config.Heat temperaturePolicy = config.heat();
-        if (!temperaturePolicy.unknownDimensionUsesTemperature()) {
+        if (!temperaturePolicy.otherDimensionsUseBiomeTemperature()) {
             return BASE;
         }
-        if (baseTemperature <= temperaturePolicy.coldMaxTemperature()) {
+        if (baseTemperature <= temperaturePolicy.coldBiomeMaxTemperature()) {
             return COLD;
         }
-        if (baseTemperature >= temperaturePolicy.hotMinTemperature()) {
+        if (baseTemperature >= temperaturePolicy.hotBiomeMinTemperature()) {
             return HOT;
         }
         return BASE;

@@ -74,9 +74,9 @@ Defaults (seven top-level groups, 34 declared settings and 45 scalar leaves):
 |---|---|
 | controls | `fireItem=minecraft:fire_charge`, `cryItem=minecraft:ghast_tear`, `holdToFire=true`, `allowPlainItems=false` |
 | fire | `shotCooldownSeconds=0.25`, `explosionPower=1` (strict integer) |
-| heat | `limit=100.0`, `firingWindowSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldMaxTemperature=0.3`, `hotMinTemperature=1.0`, `unknownDimensionUsesTemperature=true` |
+| heat | `limit=100.0`, `coolingDelayAfterShotSeconds=1.0`, `cold=(0.70,1.0)`, `base=(1.25,0.6)`, `hot=(2.00,0.5)`, `nether=(3.00,0.0)`, `end=(0.70,1.0)`, `coldBiomeMaxTemperature=0.3`, `hotBiomeMinTemperature=1.0`, `otherDimensionsUseBiomeTemperature=true` |
 | water | `blocksFiring=true` |
-| overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `fireAttempts=24`, `fireRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
+| overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `firePlacementAttempts=24`, `firePlacementRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
 | cry | `enabled=true`, `volume=10.0`, `cooldownSeconds=10.0` |
 | hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85`, `cooling=(noCoolingText=NO COOLING, noCoolingColor=RED, slowMaxPerSecond=0.5, slowColor=GOLD, normalMaxPerSecond=1.0, normalColor=GREEN, fastColor=BLUE)` |
 

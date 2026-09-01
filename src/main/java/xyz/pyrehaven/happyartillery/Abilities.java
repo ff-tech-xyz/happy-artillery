@@ -196,8 +196,8 @@ public final class Abilities {
             }
         }
         if (overheat.breaksBlocks()) {
-            for (int index = 0; index < overheat.fireAttempts(); index++) {
-                Vec3 offset = fireOffset(index, overheat.fireAttempts(), overheat.fireRadius());
+            for (int index = 0; index < overheat.firePlacementAttempts(); index++) {
+                Vec3 offset = fireOffset(index, overheat.firePlacementAttempts(), overheat.firePlacementRadius());
                 if (access.placeFire(ghast, offset) == FireAttempt.REJECTED) {
                     rejectedAttempts++;
                 }
