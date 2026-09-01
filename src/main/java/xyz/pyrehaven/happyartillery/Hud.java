@@ -180,31 +180,24 @@ public final class Hud<R, H> {
     }
 
     void remove(ServerPlayer rider) {
-        remove(rider.getUUID(), viewerAccess);
+        remove(rider.getUUID());
     }
 
     void clear() {
-        clear(viewerAccess);
-    }
-
-    void remove(Object riderId, ViewerAccess<R, H> access) {
-        Objects.requireNonNull(riderId, "riderId");
-        Objects.requireNonNull(access, "access");
-        Session<R, H> session = sessions.remove(riderId);
-        if (session != null && session.display != null) {
-            access.removeViewer(session.display, session.viewer);
-        }
-    }
-
-    void clear(ViewerAccess<R, H> access) {
-        Objects.requireNonNull(access, "access");
         for (Session<R, H> session : sessions.values()) {
-            if (session.display == null) {
-                continue;
+            if (session.display != null) {
+                viewerAccess.removeViewer(session.display, session.viewer);
             }
-            access.removeViewer(session.display, session.viewer);
         }
         sessions.clear();
+    }
+
+    void remove(Object riderId) {
+        Objects.requireNonNull(riderId, "riderId");
+        Session<R, H> session = sessions.remove(riderId);
+        if (session != null && session.display != null) {
+            viewerAccess.removeViewer(session.display, session.viewer);
+        }
     }
 
 

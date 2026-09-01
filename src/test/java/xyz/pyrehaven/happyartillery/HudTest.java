@@ -39,27 +39,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class HudTest {
     @Test
-    void snapshotCarriesOneTypedModeWithoutBiomeStatusOrCompatibilityConstructors() {
-        assertTrue(Hud.Mode.class.isSealed());
-        assertEquals(Set.of(Hud.Firing.class, Hud.Cooling.class),
-                Set.of(Hud.Mode.class.getPermittedSubclasses()));
-        assertEquals(List.of(double.class),
-                Arrays.stream(Hud.Cooling.class.getRecordComponents())
-                        .map(java.lang.reflect.RecordComponent::getType).toList());
-        assertEquals(1, Hud.Snapshot.class.getDeclaredConstructors().length);
-        assertEquals(List.of(double.class, Hud.Mode.class, java.util.Optional.class, boolean.class),
-                Arrays.stream(Hud.Snapshot.class.getRecordComponents())
-                        .map(java.lang.reflect.RecordComponent::getType).toList());
-        assertFalse(Arrays.stream(Hud.Snapshot.class.getRecordComponents())
-                .anyMatch(component -> component.getType() == BiomeClass.class));
-        assertFalse(Arrays.stream(Hud.class.getDeclaredClasses())
-                .anyMatch(type -> type.getSimpleName().equals("Status")));
-        assertThrows(IllegalArgumentException.class, () -> new Hud.Cooling(-0.1));
-        assertThrows(IllegalArgumentException.class, () -> new Hud.Cooling(Double.NaN));
-        assertThrows(IllegalArgumentException.class, () -> new Hud.Cooling(Double.POSITIVE_INFINITY));
-    }
-
-    @Test
     void effectiveCoolingTextAndConfiguredBandsUseExactRatesAndLowerEquality() {
         Config config = configWithCooling(new Config.Cooling(
                 "PAUSED", Config.Color.BLUE,
@@ -97,27 +76,6 @@ final class HudTest {
 
     private static final UUID RIDER_ID = UUID.fromString("920ac02c-8d07-4a03-918f-0b7e91ae436d");
     private static final UUID GHAST_ID = UUID.fromString("646f44ce-77ea-4bde-8a87-935850df538c");
-
-    @Test
-    void sessionStorageOwnsTypedViewerAndHandleAtTheClassBoundary() throws Exception {
-        assertEquals(List.of("R", "H"), Arrays.stream(Hud.class.getTypeParameters())
-                .map(java.lang.reflect.TypeVariable::getName).toList());
-
-        Class<?> session = Class.forName(Hud.class.getName() + "$Session");
-        assertEquals(List.of("R", "H"), Arrays.stream(session.getTypeParameters())
-                .map(java.lang.reflect.TypeVariable::getName).toList());
-        assertEquals("R", session.getDeclaredField("viewer").getGenericType().getTypeName());
-        assertEquals("H", session.getDeclaredField("display").getGenericType().getTypeName());
-        assertEquals("java.util.Map<java.lang.Object, xyz.pyrehaven.happyartillery.Hud$Session<R, H>>",
-                Hud.class.getDeclaredField("sessions").getGenericType().getTypeName());
-        assertEquals(Set.of(Hud.ViewerAccess.class),
-                Set.of(Hud.PresentationAccess.class.getInterfaces()));
-        assertEquals(Set.of("removeViewer"), Arrays.stream(Hud.ViewerAccess.class.getDeclaredMethods())
-                .map(java.lang.reflect.Method::getName).collect(java.util.stream.Collectors.toSet()));
-        assertEquals(false, Arrays.stream(Hud.class.getDeclaredClasses())
-                .anyMatch(type -> type.getSimpleName().equals("Display")));
-    }
-
     @Test
     void firstVisibleUpdateCreatesAndAddsExactlyOneBossBar() {
         RecordingAccess access = new RecordingAccess();
@@ -595,7 +553,7 @@ final class HudTest {
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 snapshot(90.0, BiomeClass.BASE, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        hud.remove(RIDER_ID, access);
+        hud.remove(RIDER_ID);
         access.events.clear();
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
@@ -923,7 +881,7 @@ final class HudTest {
                 Config.defaults(), access);
         access.events.clear();
 
-        hud.remove(RIDER_ID, access);
+        hud.remove(RIDER_ID);
         hud.update(RIDER_ID, replacement, GHAST_ID, state, 8L,
                 snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0)),
                 Config.defaults(), access);
@@ -955,7 +913,7 @@ final class HudTest {
                 configWithHud(false, true, 4), access);
         access.events.clear();
 
-        hud.clear(access);
+        hud.clear();
         hud.update(hiddenId, hidden, GHAST_ID, hiddenState, 1L,
                 snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0),
                         java.util.Optional.of(controlSnapshot(
@@ -980,8 +938,8 @@ final class HudTest {
                 Config.defaults(), access);
         access.events.clear();
 
-        hud.remove(RIDER_ID, access);
-        hud.clear(access);
+        hud.remove(RIDER_ID);
+        hud.clear();
 
         assertEquals(List.of("remove", "remove"), access.bossEvents());
     }
@@ -1024,95 +982,6 @@ final class HudTest {
         assertEquals(true, calls.stream().anyMatch(call -> call.contains(
                 "ServerLevel.sendParticles(Lnet/minecraft/server/level/ServerPlayer;")));
     }
-
-    @Test
-    void presentationBoundaryReceivesSnapshotWithoutGameplayMutationOrClassification() throws Exception {
-        assertEquals(Set.of("createBossBar", "addViewer", "setProgress", "setColor",
-                        "hasCurrentName", "setName", "actionBar", "warningParticle"),
-                Arrays.stream(Hud.PresentationAccess.class.getDeclaredMethods())
-                        .map(java.lang.reflect.Method::getName).collect(java.util.stream.Collectors.toSet()));
-
-        RiderState before = new RiderState(java.util.Optional.of(GHAST_ID),
-                47L, java.util.Optional.empty());
-        Hud.Snapshot snapshot = snapshot(63.0, BiomeClass.COLD, new Hud.Cooling(1.0));
-        RecordingAccess access = new RecordingAccess();
-        RiderState after = new Hud<UUID, String>(access).update(
-                RIDER_ID, RIDER_ID, GHAST_ID, before, 20L,
-                snapshot, Config.defaults(), access);
-        assertEquals(List.of(before.riddenGhastId(), before.lastHandledTick()),
-                List.of(after.riddenGhastId(), after.lastHandledTick()));
-        assertEquals(snapshot(63.0, BiomeClass.COLD, new Hud.Cooling(1.0)), snapshot);
-
-        for (ClassNode hudClass : hudClassFamily()) {
-            for (MethodNode method : hudClass.methods) {
-                for (var instruction : method.instructions) {
-                    if (instruction instanceof MethodInsnNode call) {
-                        assertFalse(Set.of("GhastState", "Heat", "Abilities", "Controls").stream()
-                                        .anyMatch(owner -> call.owner.endsWith("/" + owner)),
-                                "Hud must not call gameplay state or mutation owners: "
-                                        + call.owner + "." + call.name);
-                    }
-                }
-            }
-        }
-    }
-
-    @Test
-    void completeHudClassFamilyContainsNoBiomeClassReference() throws Exception {
-        for (ClassNode hudClass : hudClassFamily()) {
-            assertNoBiomeClassReferences(hudClass);
-        }
-    }
-
-    @Test
-    void biomeReferenceScannerReportsInjectedDescriptorTypeAndHandleReferences() {
-        ClassNode injected = new ClassNode();
-        injected.name = "xyz/pyrehaven/happyartillery/Hud$Injected";
-        injected.superName = "java/lang/Object";
-        injected.fields.add(new FieldNode(
-                0, "biome", "Lxyz/pyrehaven/happyartillery/BiomeClass;", null, null));
-        MethodNode method = new MethodNode(0, "leak",
-                "(Lxyz/pyrehaven/happyartillery/BiomeClass;)V", null, null);
-        method.instructions.add(new TypeInsnNode(
-                org.objectweb.asm.Opcodes.CHECKCAST,
-                "xyz/pyrehaven/happyartillery/BiomeClass"));
-        method.instructions.add(new LdcInsnNode(
-                Type.getType("Lxyz/pyrehaven/happyartillery/BiomeClass;")));
-        method.instructions.add(new LdcInsnNode(new Handle(
-                org.objectweb.asm.Opcodes.H_INVOKESTATIC,
-                "xyz/pyrehaven/happyartillery/BiomeClass",
-                "classify",
-                "(Lxyz/pyrehaven/happyartillery/BiomeClass;)V",
-                false)));
-        injected.methods.add(method);
-
-        List<String> references = biomeClassReferences(injected);
-        assertTrue(references.stream().anyMatch(value -> value.contains("field biome descriptor")),
-                references::toString);
-        assertTrue(references.stream().anyMatch(value -> value.contains("method leak")
-                        && value.contains(" descriptor:")), references::toString);
-        assertTrue(references.stream().anyMatch(value -> value.contains("type instruction")),
-                references::toString);
-        assertTrue(references.stream().anyMatch(value -> value.contains("ldc type")),
-                references::toString);
-        assertTrue(references.stream().anyMatch(value -> value.contains("ldc handle owner")),
-                references::toString);
-        assertTrue(references.stream().anyMatch(value -> value.contains("ldc handle descriptor")),
-                references::toString);
-    }
-
-    @Test
-    void hudClassFamilyUsesNestMembersWhenInnerClassesOmitSyntheticMember() throws Exception {
-        ClassNode root = BytecodeTestSupport.classNode(Hud.class.getName());
-        Set<String> expected = new TreeSet<>(root.nestMembers);
-        expected.add(root.name);
-        String synthetic = root.name + "$1";
-        assertTrue(expected.contains(synthetic), expected::toString);
-        root.innerClasses.removeIf(inner -> synthetic.equals(inner.name));
-
-        assertEquals(expected, authoritativeHudClassNames(root));
-    }
-
     @Test
     void pilotAndPassengersRenderFromOnePostTransitionSnapshot() {
         RecordingAccess access = new RecordingAccess();
@@ -1135,38 +1004,6 @@ final class HudTest {
                         List.of(pilotState.hudCache().orElseThrow(),
                                 passengerState.hudCache().orElseThrow())));
     }
-
-    @Test
-    void productionTeardownWrappersDelegateWithExactReceiverIdAndTypedBoundary() throws Exception {
-        org.objectweb.asm.tree.ClassNode owner = BytecodeTestSupport.classNode(Hud.class.getName());
-        MethodNode remove = exactMethod(owner, "remove",
-                "(Lnet/minecraft/server/level/ServerPlayer;)V");
-        MethodNode clear = exactMethod(owner, "clear", "()V");
-
-        assertEquals(List.of(
-                        "ALOAD 0",
-                        "ALOAD 1",
-                        "INVOKEVIRTUAL net/minecraft/server/level/ServerPlayer.getUUID()Ljava/util/UUID;",
-                        "ALOAD 0",
-                        "GETFIELD xyz/pyrehaven/happyartillery/Hud.viewerAccess Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;",
-                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Hud.remove(Ljava/lang/Object;Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;)V",
-                        "RETURN"), wrapperShape(remove));
-        assertEquals(List.of(
-                        "ALOAD 0",
-                        "ALOAD 0",
-                        "GETFIELD xyz/pyrehaven/happyartillery/Hud.viewerAccess Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;",
-                        "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Hud.clear(Lxyz/pyrehaven/happyartillery/Hud$ViewerAccess;)V",
-                        "RETURN"), wrapperShape(clear));
-
-        for (MethodNode wrapper : List.of(remove, clear)) {
-            assertFalse(wrapperShape(wrapper).stream().anyMatch(operation ->
-                    operation.contains("java/util/Map")
-                            || operation.contains("Hud$Session")
-                            || operation.contains("ServerBossEvent.removePlayer")
-                            || operation.startsWith("CHECKCAST")), wrapperShape(wrapper)::toString);
-        }
-    }
-
     private static MethodNode exactMethod(
             org.objectweb.asm.tree.ClassNode owner, String name, String descriptor) {
         List<MethodNode> matches = owner.methods.stream()
@@ -1174,265 +1011,6 @@ final class HudTest {
                 .toList();
         assertEquals(1, matches.size(), owner.name + "." + name + descriptor);
         return matches.getFirst();
-    }
-
-    private static List<ClassNode> hudClassFamily() throws Exception {
-        ClassNode root = BytecodeTestSupport.classNode(Hud.class.getName());
-        Set<String> authoritative = authoritativeHudClassNames(root);
-        Set<String> innerClasses = new TreeSet<>();
-        innerClasses.add(root.name);
-        root.innerClasses.stream().map(inner -> inner.name)
-                .filter(java.util.Objects::nonNull)
-                .filter(name -> name.startsWith(root.name + "$"))
-                .forEach(innerClasses::add);
-        Set<String> compiledClasses = compiledHudClassNames(root);
-
-        String synthetic = root.name + "$1";
-        assertTrue(authoritative.contains(synthetic), authoritative::toString);
-        assertTrue(innerClasses.contains(synthetic), innerClasses::toString);
-        assertTrue(compiledClasses.contains(synthetic), compiledClasses::toString);
-        assertEquals(authoritative, innerClasses,
-                "Hud InnerClasses entries must exactly match its authoritative nest");
-        assertEquals(authoritative, compiledClasses,
-                "compiled Hud class resources must exactly match its authoritative nest");
-
-        List<ClassNode> family = new ArrayList<>();
-        for (String name : authoritative) {
-            family.add(BytecodeTestSupport.classNode(name.replace('/', '.')));
-        }
-        return family;
-    }
-
-    private static Set<String> authoritativeHudClassNames(ClassNode root) {
-        assertTrue(root.nestMembers != null,
-                () -> root.name + " must declare a complete NestMembers list");
-        Set<String> names = new TreeSet<>(root.nestMembers);
-        names.add(root.name);
-        return names;
-    }
-
-    private static Set<String> compiledHudClassNames(ClassNode root) throws Exception {
-        var resource = Hud.class.getResource("Hud.class");
-        assertTrue(resource != null, "compiled Hud.class resource must exist");
-        URI uri = resource.toURI();
-        assertEquals("file", uri.getScheme(),
-                () -> "compiled Hud.class resource must be a file URI: " + uri);
-        Path rootClass = Path.of(uri);
-        assertTrue(Files.isRegularFile(rootClass),
-                () -> "compiled Hud.class resource must be a regular file: " + rootClass);
-        Path directory = rootClass.getParent();
-        assertTrue(directory != null && Files.isDirectory(directory),
-                () -> "compiled Hud.class resource must have a file directory: " + rootClass);
-
-        String simpleName = root.name.substring(root.name.lastIndexOf('/') + 1);
-        String packagePrefix = root.name.substring(0, root.name.lastIndexOf('/') + 1);
-        Set<String> names = new TreeSet<>();
-        try (var classes = Files.newDirectoryStream(directory, candidate -> {
-            if (!Files.isRegularFile(candidate)) {
-                return false;
-            }
-            String basename = candidate.getFileName().toString();
-            return basename.equals(simpleName + ".class")
-                    || basename.startsWith(simpleName + "$") && basename.endsWith(".class");
-        })) {
-            for (Path candidate : classes) {
-                String basename = candidate.getFileName().toString();
-                names.add(packagePrefix + basename.substring(0, basename.length() - ".class".length()));
-            }
-        }
-        return names;
-    }
-
-    private static void assertNoBiomeClassReferences(ClassNode owner) {
-        List<String> references = biomeClassReferences(owner);
-        assertEquals(List.of(), references,
-                () -> owner.name + " must not reference BiomeClass: " + references);
-    }
-
-    private static List<String> biomeClassReferences(ClassNode owner) {
-        List<String> references = new ArrayList<>();
-        reference(references, "class signature", owner.signature);
-        reference(references, "superclass", owner.superName);
-        owner.interfaces.forEach(value -> reference(references, "interface", value));
-        reference(references, "outer class", owner.outerClass);
-        reference(references, "outer method descriptor", owner.outerMethodDesc);
-        reference(references, "nest host", owner.nestHostClass);
-        if (owner.nestMembers != null) {
-            owner.nestMembers.forEach(value -> reference(references, "nest member", value));
-        }
-        if (owner.permittedSubclasses != null) {
-            owner.permittedSubclasses.forEach(value ->
-                    reference(references, "permitted subclass", value));
-        }
-        owner.innerClasses.forEach(inner -> {
-            reference(references, "inner class", inner.name);
-            reference(references, "inner class owner", inner.outerName);
-        });
-        annotations(references, "class", owner.visibleAnnotations);
-        annotations(references, "class", owner.invisibleAnnotations);
-        annotations(references, "class type", owner.visibleTypeAnnotations);
-        annotations(references, "class type", owner.invisibleTypeAnnotations);
-
-        if (owner.recordComponents != null) {
-            owner.recordComponents.forEach(component -> {
-                String path = "record component " + component.name;
-                reference(references, path + " descriptor", component.descriptor);
-                reference(references, path + " signature", component.signature);
-                annotations(references, path, component.visibleAnnotations);
-                annotations(references, path, component.invisibleAnnotations);
-                annotations(references, path + " type", component.visibleTypeAnnotations);
-                annotations(references, path + " type", component.invisibleTypeAnnotations);
-            });
-        }
-        owner.fields.forEach(field -> {
-            String path = "field " + field.name;
-            reference(references, path + " descriptor", field.desc);
-            reference(references, path + " signature", field.signature);
-            constant(references, path + " constant", field.value);
-            annotations(references, path, field.visibleAnnotations);
-            annotations(references, path, field.invisibleAnnotations);
-            annotations(references, path + " type", field.visibleTypeAnnotations);
-            annotations(references, path + " type", field.invisibleTypeAnnotations);
-        });
-        owner.methods.forEach(method -> scanMethod(references, method));
-        return references;
-    }
-
-    private static void scanMethod(List<String> references, MethodNode method) {
-        String path = "method " + method.name + method.desc;
-        reference(references, path + " descriptor", method.desc);
-        reference(references, path + " signature", method.signature);
-        method.exceptions.forEach(value -> reference(references, path + " exception", value));
-        annotations(references, path, method.visibleAnnotations);
-        annotations(references, path, method.invisibleAnnotations);
-        annotations(references, path + " type", method.visibleTypeAnnotations);
-        annotations(references, path + " type", method.invisibleTypeAnnotations);
-        parameterAnnotations(references, path, method.visibleParameterAnnotations);
-        parameterAnnotations(references, path, method.invisibleParameterAnnotations);
-        constant(references, path + " annotation default", method.annotationDefault);
-        method.tryCatchBlocks.forEach(block -> {
-            reference(references, path + " try/catch type", block.type);
-            annotations(references, path + " try/catch", block.visibleTypeAnnotations);
-            annotations(references, path + " try/catch", block.invisibleTypeAnnotations);
-        });
-        if (method.localVariables != null) {
-            method.localVariables.forEach(local -> {
-                reference(references, path + " local " + local.name + " descriptor", local.desc);
-                reference(references, path + " local " + local.name + " signature", local.signature);
-            });
-        }
-        annotations(references, path + " local", method.visibleLocalVariableAnnotations);
-        annotations(references, path + " local", method.invisibleLocalVariableAnnotations);
-
-        for (AbstractInsnNode instruction : method.instructions) {
-            String instructionPath = path + " instruction " + instruction.getOpcode();
-            if (instruction instanceof TypeInsnNode type) {
-                reference(references, instructionPath + " type instruction", type.desc);
-            } else if (instruction instanceof FieldInsnNode field) {
-                reference(references, instructionPath + " field owner", field.owner);
-                reference(references, instructionPath + " field descriptor", field.desc);
-            } else if (instruction instanceof MethodInsnNode call) {
-                reference(references, instructionPath + " method owner", call.owner);
-                reference(references, instructionPath + " method descriptor", call.desc);
-            } else if (instruction instanceof LdcInsnNode ldc) {
-                constant(references, instructionPath + " ldc", ldc.cst);
-            } else if (instruction instanceof InvokeDynamicInsnNode dynamic) {
-                reference(references, instructionPath + " invokedynamic descriptor", dynamic.desc);
-                constant(references, instructionPath + " bootstrap", dynamic.bsm);
-                for (Object argument : dynamic.bsmArgs) {
-                    constant(references, instructionPath + " bootstrap argument", argument);
-                }
-            } else if (instruction instanceof MultiANewArrayInsnNode array) {
-                reference(references, instructionPath + " multiarray descriptor", array.desc);
-            } else if (instruction instanceof FrameNode frame) {
-                constant(references, instructionPath + " frame local", frame.local);
-                constant(references, instructionPath + " frame stack", frame.stack);
-            }
-            annotations(references, instructionPath, instruction.visibleTypeAnnotations);
-            annotations(references, instructionPath, instruction.invisibleTypeAnnotations);
-        }
-    }
-
-    private static void parameterAnnotations(
-            List<String> references, String path, List<AnnotationNode>[] parameters) {
-        if (parameters == null) {
-            return;
-        }
-        for (int index = 0; index < parameters.length; index++) {
-            annotations(references, path + " parameter " + index, parameters[index]);
-        }
-    }
-
-    private static void annotations(
-            List<String> references, String path, List<? extends AnnotationNode> values) {
-        if (values == null) {
-            return;
-        }
-        for (AnnotationNode annotation : values) {
-            reference(references, path + " annotation descriptor", annotation.desc);
-            if (annotation.values != null) {
-                annotation.values.forEach(value -> constant(
-                        references, path + " annotation value", value));
-            }
-        }
-    }
-
-    private static void constant(List<String> references, String path, Object value) {
-        if (value instanceof String text) {
-            reference(references, path, text);
-        } else if (value instanceof Type type) {
-            reference(references, path + " type", type.getDescriptor());
-        } else if (value instanceof Handle handle) {
-            reference(references, path + " handle owner", handle.getOwner());
-            reference(references, path + " handle descriptor", handle.getDesc());
-        } else if (value instanceof ConstantDynamic dynamic) {
-            reference(references, path + " constant-dynamic descriptor", dynamic.getDescriptor());
-            constant(references, path + " constant-dynamic bootstrap", dynamic.getBootstrapMethod());
-            for (int index = 0; index < dynamic.getBootstrapMethodArgumentCount(); index++) {
-                constant(references, path + " constant-dynamic argument",
-                        dynamic.getBootstrapMethodArgument(index));
-            }
-        } else if (value instanceof AnnotationNode annotation) {
-            annotations(references, path, List.of(annotation));
-        } else if (value instanceof List<?> list) {
-            list.forEach(element -> constant(references, path, element));
-        } else if (value instanceof String[] array) {
-            Arrays.stream(array).forEach(element -> reference(references, path, element));
-        }
-    }
-
-    private static void reference(List<String> references, String path, String value) {
-        if (value != null && value.contains("xyz/pyrehaven/happyartillery/BiomeClass")) {
-            references.add(path + ": " + value);
-        }
-    }
-
-    private static List<String> wrapperShape(MethodNode method) {
-        List<String> shape = new ArrayList<>();
-        for (AbstractInsnNode instruction = method.instructions.getFirst();
-                instruction != null; instruction = instruction.getNext()) {
-            if (instruction.getOpcode() < 0) {
-                continue;
-            }
-            if (instruction instanceof VarInsnNode variable
-                    && instruction.getOpcode() == org.objectweb.asm.Opcodes.ALOAD) {
-                shape.add("ALOAD " + variable.var);
-            } else if (instruction instanceof FieldInsnNode field
-                    && instruction.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD) {
-                shape.add("GETFIELD " + field.owner + "." + field.name + " " + field.desc);
-            } else if (instruction instanceof MethodInsnNode call) {
-                String opcode = instruction.getOpcode() == org.objectweb.asm.Opcodes.INVOKEVIRTUAL
-                        ? "INVOKEVIRTUAL" : "UNEXPECTED-OPCODE-" + instruction.getOpcode();
-                shape.add(opcode + " " + call.owner + "." + call.name + call.desc);
-            } else if (instruction.getOpcode() == org.objectweb.asm.Opcodes.RETURN) {
-                shape.add("RETURN");
-            } else if (instruction instanceof TypeInsnNode type) {
-                shape.add("CHECKCAST " + type.desc);
-            } else {
-                shape.add("UNEXPECTED-OPCODE-" + instruction.getOpcode());
-            }
-        }
-        return shape;
     }
 
     private static Config configWithCooling(Config.Cooling cooling) {

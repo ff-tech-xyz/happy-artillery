@@ -39,24 +39,11 @@ public final class Abilities {
 
     static void onGhastLoad(HappyGhast ghast, long now) {
         ServerPlayerDetonationAccess access = ServerPlayerDetonationAccess.INSTANCE;
-        onGhastLoad(ghast, access.attachedState(ghast), now, FUSES, access);
-    }
-
-    static <P, G> void onGhastLoad(
-            G ghast,
-            Optional<GhastState> state,
-            long now,
-            FuseQueue<P, G> fuses,
-            DetonationAccess<P, G> access) {
-        fuses.onGhastLoad(ghast, Objects.requireNonNull(state, "state"), now, access);
-    }
-
-    static int onRiderAvailable(UUID riderId) {
-        return FUSES.onRiderAvailable(Objects.requireNonNull(riderId, "riderId"));
+        FUSES.onGhastLoad(ghast, access.attachedState(ghast), access);
     }
 
     static void onRiderAvailable(ServerPlayer rider) {
-        onRiderAvailable(Objects.requireNonNull(rider, "rider").getUUID());
+        FUSES.onRiderAvailable(Objects.requireNonNull(rider, "rider").getUUID());
     }
 
     static int runDueFuses(long now, MinecraftServer server) {
@@ -347,13 +334,6 @@ public final class Abilities {
         return new Cried(committed);
     }
 
-    static CryOutcome cry(
-            ServerPlayer pilot,
-            HappyGhast ghast,
-            GhastState state,
-            long now) {
-        return cry(pilot, ghast, state, now, Config.current(), ServerPlayerCryAccess.INSTANCE);
-    }
 
     private static long cooldownDeadline(long now, double seconds) {
         double tickCount = seconds * 20.0;
@@ -428,13 +408,8 @@ public final class Abilities {
         }
 
         void onGhastLoad(
-                G ghast, Optional<GhastState> state, long now, DetonationAccess<P, G> access) {
+                G ghast, Optional<GhastState> state, DetonationAccess<P, G> access) {
             schedule(ghast, state, access);
-        }
-
-        void onGhastLoad(
-                G ghast, GhastState state, long now, DetonationAccess<P, G> access) {
-            onGhastLoad(ghast, Optional.of(state), now, access);
         }
 
         int runDue(

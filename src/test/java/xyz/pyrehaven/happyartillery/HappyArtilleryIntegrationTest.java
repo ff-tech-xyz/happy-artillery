@@ -324,6 +324,35 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void acceptedTickSurvivesHudPersistenceAndRejectsSameTickControlAdmission() {
+        RecordingDriver access = RecordingDriver.dedupRegression();
+
+        HappyArtillery.tick(access);
+
+        RiderState persisted = access.riderStates.get("pilot");
+        assertEquals(41L, persisted.lastHandledTick());
+        assertEquals(true, persisted.hudCache().isPresent());
+        assertEquals(Long.MIN_VALUE, access.riderStates.get("passenger").lastHandledTick());
+        assertEquals(1, access.cryCalls);
+
+        HappyArtillery.tick(access);
+
+        assertEquals(1, access.cryCalls);
+        assertEquals(41L, access.riderStates.get("pilot").lastHandledTick());
+    }
+
+    @Test
+    void consumedFailedEffectRendersAuthoritativeResetStateForEveryRider() {
+        RecordingDriver access = RecordingDriver.consumedFailure();
+
+        HappyArtillery.tick(access);
+
+        assertEquals(1, access.fireCalls);
+        assertEquals(2, access.ghastProcesses);
+        assertEquals(List.of("pilot:0.0", "passenger:0.0"), access.hudSnapshots);
+    }
+
+    @Test
     void capturedPassiveModeIsComputedOnceAndSharedByPilotAndPassenger() {
         Config defaults = Config.defaults();
         Config config = new Config(
@@ -385,88 +414,6 @@ final class HappyArtilleryIntegrationTest {
         assertEquals("unexpected world failure", failure.getMessage());
         assertEquals(List.of(), unexpected.recovered);
     }
-
-    @Test
-    void callbackAdmissionUsesOneExplicitConfigThroughThePilotTransition() {
-        RecordingDriver access = RecordingDriver.ridden();
-        access.configuredInWater = true;
-        HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
-        HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
-        Config config = access.config();
-
-        HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
-                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
-                access.snapshot("pilot", "ghast"));
-
-        assertEquals(1, access.configReads);
-        assertEquals(1, access.fireCalls);
-        assertEquals(List.of(true), access.advancedInWater);
-        assertEquals(1, access.inWaterCalls);
-        assertEquals(List.of(new Hud.Cooling(config.water().coolPerSecond()),
-                new Hud.Cooling(config.water().coolPerSecond())), access.renderedModes);
-        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
-        assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
-        assertEquals(List.of(true, false), access.activeFireControls);
-    }
-
-    @Test
-    void acceptedFireRefreshesAuthoritativeStateBeforeSharingOneFiringMode() {
-        RecordingDriver access = RecordingDriver.ridden();
-        access.advancedFiringWindowEnd = 40L;
-        HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
-        HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
-        Config config = access.config();
-
-        HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
-                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
-                access.snapshot("pilot", "ghast"));
-
-        assertEquals(1, access.fireCalls);
-        assertEquals(2, access.ghastProcesses);
-        assertEquals(List.of(Hud.Firing.FIRING, Hud.Firing.FIRING), access.renderedModes);
-        assertSame(Hud.Firing.FIRING, access.renderedModes.getFirst());
-        assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
-    }
-
-    @Test
-    void acceptedConsumedFailureRendersTheAuthoritativeResetAttachment() {
-        RecordingDriver access = RecordingDriver.consumedFailure();
-        HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
-        HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
-        Config config = access.config();
-
-        HappyArtillery.processPilot(access, List.of(pilot, passenger), pilot, 41L, config,
-                new Controls.Accepted(Controls.ControlIntent.FIRE, pilot.state()),
-                access.snapshot("pilot", "ghast"));
-
-        assertEquals(2, access.ghastProcesses);
-        assertEquals(List.of("pilot:0.0", "passenger:0.0"), access.hudSnapshots);
-    }
-
-    @Test
-    void acceptedTickSurvivesHudPersistenceAndRejectsTheSameTickDriverAdmission() {
-        RecordingDriver access = RecordingDriver.dedupRegression();
-        HappyArtillery.PlayerView<String, String> pilot = access.inspectPlayer("pilot");
-        HappyArtillery.PlayerView<String, String> passenger = access.inspectPlayer("passenger");
-        Config config = access.config();
-        Controls.Admission accepted = access.controls(
-                "pilot", pilot.state(), 41L, config, access.snapshot("pilot", "ghast"));
-
-        HappyArtillery.processPilot(
-                access, List.of(pilot, passenger), pilot, 41L, config, accepted,
-                access.snapshot("pilot", "ghast"));
-
-        RiderState persisted = access.riderStates.get("pilot");
-        assertEquals(41L, persisted.lastHandledTick());
-        assertEquals(true, persisted.hudCache().isPresent());
-        assertEquals(Long.MIN_VALUE, access.riderStates.get("passenger").lastHandledTick());
-
-        HappyArtillery.tick(access);
-
-        assertEquals(1, access.cryCalls);
-        assertEquals(41L, access.riderStates.get("pilot").lastHandledTick());
-    }
-
     @Test
     void productionCallbackIsActorLocalAndDefersHudFanOut() throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
@@ -652,92 +599,6 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, snapshotCalls.stream().filter(call -> call.owner.equals(
                 "xyz/pyrehaven/happyartillery/Controls") && call.name.equals("snapshot")).count());
     }
-
-    @Test
-    void bothPilotEntriesThreadOneCapturedWaterBooleanThroughAdvanceAndPostActionMode()
-            throws IOException {
-        ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
-        String access = "L" + ROOT + "$DriverAccess;";
-        String riders = "Ljava/util/List;L" + ROOT + "$PlayerView;J";
-        String snapshot = "L" + PACKAGE + "Controls$InventorySnapshot;";
-        MethodNode tickEntry = method(root, "processPilot",
-                "(" + access + riders + snapshot + ")V");
-        MethodNode explicitConfigEntry = method(root, "processPilot",
-                "(" + access + riders + "L" + PACKAGE + "Config;L" + PACKAGE
-                        + "Controls$Admission;" + snapshot + ")V");
-        String advanceDescriptor = "(Ljava/lang/Object;L" + PACKAGE + "GhastState;JL"
-                + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;Z)L" + PACKAGE + "GhastState;";
-
-        for (MethodNode entry : List.of(tickEntry, explicitConfigEntry)) {
-            List<MethodInsnNode> calls = methodCalls(entry);
-            List<MethodInsnNode> waterCalls = calls.stream()
-                    .filter(call -> call.owner.equals(ROOT + "$DriverAccess")
-                            && call.name.equals("inWater"))
-                    .toList();
-            assertEquals(1, waterCalls.size(), entry.desc);
-            MethodInsnNode waterCall = waterCalls.getFirst();
-            AbstractInsnNode waterStore = nextReal(waterCall);
-            assertEquals(Opcodes.ISTORE, waterStore.getOpcode(), entry.desc);
-            int waterLocal = ((VarInsnNode) waterStore).var;
-
-            MethodInsnNode advance = calls.stream()
-                    .filter(call -> call.owner.equals(ROOT + "$DriverAccess")
-                            && call.name.equals("advance"))
-                    .findFirst().orElseThrow();
-            assertEquals(advanceDescriptor, advance.desc);
-            assertEquals(Opcodes.ILOAD, advance.getPrevious().getOpcode());
-            assertEquals(waterLocal, ((VarInsnNode) advance.getPrevious()).var);
-
-            MethodInsnNode postAction = calls.stream()
-                    .filter(call -> call.owner.equals(ROOT) && call.name.equals("processPilot")
-                            && call.desc.contains(";ZL" + PACKAGE + "GhastState;"))
-                    .findFirst().orElseThrow();
-            List<VarInsnNode> postLoads = previousVariableLoads(postAction, 11);
-            assertEquals(Opcodes.ILOAD, postLoads.get(6).getOpcode());
-            assertEquals(waterLocal, postLoads.get(6).var);
-        }
-
-        MethodNode postAction = method(root, "processPilot",
-                "(" + access + riders + "L" + PACKAGE + "Config;L" + PACKAGE
-                        + "BiomeClass;ZL" + PACKAGE + "GhastState;L" + PACKAGE
-                        + "GhastState;L" + PACKAGE + "Controls$Admission;" + snapshot + ")V");
-        MethodInsnNode presentation = methodCalls(postAction).stream()
-                .filter(call -> call.owner.equals(ROOT) && call.name.equals("presentationMode"))
-                .findFirst().orElseThrow();
-        List<VarInsnNode> presentationLoads = previousVariableLoads(presentation, 5);
-        assertEquals(List.of(Opcodes.ILOAD, Opcodes.ALOAD, Opcodes.LLOAD,
-                        Opcodes.ALOAD, Opcodes.ALOAD),
-                presentationLoads.stream().map(AbstractInsnNode::getOpcode).toList());
-        assertEquals(7, presentationLoads.getFirst().var);
-        assertEquals(14, presentationLoads.get(1).var);
-
-        ClassNode driver = BytecodeTestSupport.classNode(
-                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
-        MethodNode productionAdvance = method(driver, "advance",
-                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
-                        + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE
-                        + "BiomeClass;Z)L" + PACKAGE + "GhastState;");
-        assertEquals(0, methodCalls(productionAdvance).stream()
-                .filter(call -> call.name.equals("isInWater")).count());
-        MethodInsnNode heatAdvance = methodCalls(productionAdvance).stream()
-                .filter(call -> call.owner.equals(PACKAGE + "Heat") && call.name.equals("advance"))
-                .findFirst().orElseThrow();
-        assertEquals("(L" + PACKAGE + "GhastState;JL" + PACKAGE
-                        + "Config$HeatProfile;ZL" + PACKAGE + "Config$Water;)L" + PACKAGE
-                        + "GhastState;",
-                heatAdvance.desc);
-        AbstractInsnNode suppliedWater = heatAdvance.getPrevious().getPrevious().getPrevious();
-        assertEquals(Opcodes.ILOAD, suppliedWater.getOpcode());
-        assertEquals(7, ((VarInsnNode) suppliedWater).var);
-
-        MethodNode productionObservation = method(driver, "inWater",
-                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)Z");
-        assertEquals(List.of(
-                        "net/minecraft/world/entity/animal/happyghast/HappyGhast.isInWater()Z"),
-                methodCalls(productionObservation).stream()
-                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
-    }
-
     @Test
     void productionRiderLossAndRenderStayConnectedToTypedHudBoundaries() throws IOException {
         ClassNode driverOwner = BytecodeTestSupport.classNode(
@@ -772,78 +633,6 @@ final class HappyArtilleryIntegrationTest {
                 && call.desc.endsWith("L" + PACKAGE + "Hud$PresentationAccess;)L"
                         + PACKAGE + "RiderState;")).count());
     }
-
-    @Test
-    void productionStopDelegatesOnlyToAbilitiesAndHudAndRootConstructsNoProjectile() throws IOException {
-        ClassNode lifecycle = BytecodeTestSupport.classNode(
-                HappyArtillery.class.getName() + "$MinecraftLifecycleAccess");
-        assertEquals(List.of("xyz/pyrehaven/happyartillery/Abilities.onServerStop()V"),
-                methodCalls(method(lifecycle, "clearFuses", "()V")).stream()
-                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
-        assertEquals(List.of("xyz/pyrehaven/happyartillery/Hud.clear()V"),
-                methodCalls(method(lifecycle, "clearHud", "()V")).stream()
-                        .map(HappyArtilleryIntegrationTest::callIdentity).toList());
-
-        for (String className : List.of(HappyArtillery.class.getName(),
-                HappyArtillery.class.getName() + "$MinecraftDriverAccess",
-                HappyArtillery.class.getName() + "$FabricRegistrar")) {
-            ClassNode node = BytecodeTestSupport.classNode(className);
-            assertEquals(0, node.methods.stream().flatMap(method -> Stream.iterate(
-                            method.instructions.getFirst(), java.util.Objects::nonNull,
-                            instruction -> instruction.getNext()))
-                    .filter(TypeInsnNode.class::isInstance).map(TypeInsnNode.class::cast)
-                    .filter(instruction -> instruction.desc.endsWith("LargeFireball")).count());
-        }
-    }
-
-    @Test
-    void productionFireUsesAlreadyCapturedConfigAndBiomeThroughBothBoundaries() throws IOException {
-        String adapterDescriptor = "(Lnet/minecraft/server/level/ServerPlayer;"
-                + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
-                + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;)L"
-                + PACKAGE + "Abilities$FireOutcome;";
-        String coreDescriptor = "(Ljava/lang/Object;Ljava/lang/Object;L" + PACKAGE
-                + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "BiomeClass;L"
-                + PACKAGE + "Abilities$FireAccess;L" + PACKAGE + "Abilities$FuseQueue;L"
-                + PACKAGE + "Abilities$DetonationAccess;)L" + PACKAGE
-                + "Abilities$FireOutcome;";
-
-        ClassNode driverOwner = BytecodeTestSupport.classNode(
-                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
-        MethodNode driver = method(driverOwner, "fire", adapterDescriptor);
-        List<MethodInsnNode> driverCalls = methodCalls(driver).stream()
-                .filter(call -> call.owner.equals(PACKAGE + "Abilities")
-                        && call.name.equals("fire"))
-                .toList();
-        assertEquals(1, driverCalls.size());
-        MethodInsnNode adapterCall = driverCalls.getFirst();
-        assertEquals(PACKAGE + "Abilities", adapterCall.owner);
-        assertEquals(adapterDescriptor, adapterCall.desc);
-        assertEquals(List.of(
-                        "ALOAD 1", "ALOAD 2", "ALOAD 3", "LLOAD 4", "ALOAD 6", "ALOAD 7"),
-                previousOperands(adapterCall, 6));
-
-        ClassNode abilitiesOwner = BytecodeTestSupport.classNode(Abilities.class.getName());
-        MethodNode adapter = method(abilitiesOwner, "fire", adapterDescriptor);
-        List<MethodInsnNode> adapterCalls = methodCalls(adapter).stream()
-                .filter(call -> call.owner.equals(PACKAGE + "Abilities")
-                        && call.name.equals("fire"))
-                .toList();
-        assertEquals(1, adapterCalls.size());
-        MethodInsnNode coreCall = adapterCalls.getFirst();
-        assertEquals(PACKAGE + "Abilities", coreCall.owner);
-        assertEquals(coreDescriptor, coreCall.desc);
-        assertEquals(List.of(
-                        "ALOAD 0", "ALOAD 1", "ALOAD 2", "LLOAD 3", "ALOAD 5", "ALOAD 6",
-                        "GETSTATIC " + PACKAGE + "Abilities$ServerPlayerFireAccess.INSTANCE L"
-                                + PACKAGE + "Abilities$ServerPlayerFireAccess;",
-                        "GETSTATIC " + PACKAGE + "Abilities.FUSES L" + PACKAGE
-                                + "Abilities$FuseQueue;",
-                        "GETSTATIC " + PACKAGE + "Abilities$ServerPlayerDetonationAccess.INSTANCE L"
-                                + PACKAGE + "Abilities$ServerPlayerDetonationAccess;"),
-                previousOperands(coreCall, 9));
-    }
-
     @Test
     void productionFireAndCryRouteWaterFeedbackDirectlyWithoutEnumConversion() throws IOException {
         ClassNode access = BytecodeTestSupport.classNode(

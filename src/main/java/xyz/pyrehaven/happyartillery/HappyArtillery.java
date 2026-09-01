@@ -128,19 +128,6 @@ public final class HappyArtillery implements ModInitializer {
                 state, advanced, admission, snapshot);
     }
 
-    static <P, G> void processPilot(
-            DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
-            PlayerView<P, G> pilot, long now, Config config, Controls.Admission admission,
-            Controls.InventorySnapshot snapshot) {
-        G ghast = pilot.riddenGhast().orElseThrow();
-        Objects.requireNonNull(config, "config");
-        BiomeClass biomeClass = access.classify(ghast, config);
-        boolean inWater = access.inWater(ghast);
-        GhastState state = access.ghastState(ghast);
-        GhastState advanced = access.advance(ghast, state, now, config, biomeClass, inWater);
-        processPilot(access, riders, pilot, now, config, biomeClass, inWater,
-                state, advanced, admission, snapshot);
-    }
 
     private static <P, G> void processPilot(
             DriverAccess<P, G> access, List<PlayerView<P, G>> riders,
