@@ -802,7 +802,6 @@ final class ConfigTest {
                 Arguments.of("wrong scalar type", "{\"hud\":{\"bossBar\":\"false\"}}"),
                 Arguments.of("non-finite number", "{\"heat\":{\"limit\":NaN}}"),
                 Arguments.of("impossible range", "{\"hud\":{\"warningFromPercent\":101}}"),
-                Arguments.of("zero positive value", "{\"fire\":{\"shotCooldownSeconds\":0}}"),
                 Arguments.of("negative duration", "{\"fire\":{\"shotCooldownSeconds\":-1}}"),
                 Arguments.of("negative count", "{\"overheat\":{\"fireballCount\":-1}}"),
                 Arguments.of("HUD refresh below the four-tick packet floor",

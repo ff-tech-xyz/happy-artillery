@@ -174,6 +174,7 @@ produces 45 scalar leaves. `hud.cooling` thresholds are finite, non-negative, an
 
 The preferred control uses a long-duration, no-animation/no-sound consumable component. While the
 control remains in the server-observed using-item state, firing repeats at the configured cooldown.
+A `shotCooldownSeconds` value of `0` means no Fire cooldown; negative values are invalid.
 Automated component and server-observed use-state seams establish the preferred implementation before
 activation. The behavior is accepted only when the runnable exact candidate proves a steady four
 shots/second on Java and Bedrock through Geyser in the same session.

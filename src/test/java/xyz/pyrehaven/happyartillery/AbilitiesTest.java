@@ -15,8 +15,11 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import net.minecraft.world.phys.Vec3;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -241,6 +244,25 @@ final class AbilitiesTest {
         assertEquals(1, access.adds);
         assertEquals(1, access.replacements);
         assertEquals(1, access.explosionPower);
+    }
+
+    @Test
+    void zeroFireCooldownAllowsRepeatedOtherwiseAdmissibleShots(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file, "{\"fire\":{\"shotCooldownSeconds\":0}}");
+        Config config = Config.load(file);
+        RecordingAccess access = new RecordingAccess();
+
+        Abilities.FireOutcome first = fire(GhastState.fresh(), 100L, config, access);
+        assertTrue(first instanceof Abilities.Fired);
+        Abilities.FireOutcome second = fire(((Abilities.Fired) first).state(), 100L, config, access);
+
+        assertTrue(second instanceof Abilities.Fired);
+        assertEquals(100L, ((Abilities.Fired) first).state().fireReadyTick());
+        assertEquals(100L, ((Abilities.Fired) second).state().fireReadyTick());
+        assertEquals(2, access.adds);
+        assertEquals(2, access.replacements);
     }
 
     @Test

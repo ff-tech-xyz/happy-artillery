@@ -304,7 +304,7 @@ public record Config(
         requireIdentifier("controls.fireItem", controls.fireItem());
         requireIdentifier("controls.cryItem", controls.cryItem());
 
-        requirePositive("fire.shotCooldownSeconds", fire.shotCooldownSeconds());
+        requireNonNegative("fire.shotCooldownSeconds", fire.shotCooldownSeconds());
         requireRange("fire.explosionPower", fire.explosionPower(), 0, Integer.MAX_VALUE);
 
         requirePositive("heat.limit", heat.limit());
