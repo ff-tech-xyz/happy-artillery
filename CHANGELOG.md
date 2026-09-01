@@ -13,7 +13,7 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 - Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location, water exposure, and firing state.
 - Every rider now sees the ghast's heat HUD. It reports firing, configured no-cooling text, or the effective cooling rate; only the pilot receives controls.
 - Normal shots use vanilla large fireballs launched clear of the ridden ghast and its passengers.
-- `overheat.breaksBlocks=false` keeps the central explosion from damaging terrain and skips direct fire placement. Emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
+- `overheat.breaksBlocks=false` keeps the central explosion from damaging terrain and skips direct fire placement. When enabled, the central explosion and direct fire placement still obey `mobGriefing`. Emitted vanilla fireballs keep their normal impact behavior in either mode.
 
 ### Server and configuration
 

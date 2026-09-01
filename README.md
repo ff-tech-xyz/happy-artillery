@@ -21,7 +21,7 @@ Each shot adds heat. Heat gain and passive cooling depend on the dimension and b
 
 The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Passengers see the same heat and cooling status without receiving controls.
 
-Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod may place fire. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
+Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod attempts direct fire placement only while `mobGriefing` is enabled. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
 
 ## Requirements
 

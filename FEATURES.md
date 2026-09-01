@@ -273,7 +273,8 @@ Overheat:
 - `overheat.breaksBlocks` is the sole block-mutation toggle. When false, the explosion uses a
   non-terrain interaction and fire placement is skipped: it changes no terrain and starts no fire. When
   true, the explosion uses `ExplosionInteraction.MOB`, so vanilla `mobGriefing` decides terrain damage,
-  and configured fire placement is attempted. Happy Artillery adds no claims adapter, veto, or bypass.
+  and configured fire placement is attempted only while `mobGriefing` is enabled. Happy Artillery adds
+  no claims adapter, veto, or bypass.
 - Event consumption is one-shot in both branches: a successful pass and a consumed pass with rejected
   attempts both leave non-pending state, so stale or duplicate queued tasks cannot repeat effects. With
   `fuseTicks=0`, those outcomes map to `Detonated` and `Rejected(EFFECT_FAILED)` respectively. A pass

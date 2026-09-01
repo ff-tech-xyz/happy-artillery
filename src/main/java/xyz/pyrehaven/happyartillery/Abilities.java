@@ -14,6 +14,7 @@ import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -837,7 +838,11 @@ public final class Abilities {
 
         @Override
         public FireAttempt placeFire(HappyGhast ghast, Vec3 offset) {
-            Level level = ghast.level();
+            ServerLevel serverLevel = (ServerLevel) ghast.level();
+            if (!serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
+                return FireAttempt.SKIPPED;
+            }
+            Level level = serverLevel;
             BlockPos position = BlockPos.containing(ghast.position().add(offset));
             if (!level.isEmptyBlock(position)
                     || !BaseFireBlock.canBePlacedAt(level, position, Direction.UP)) {

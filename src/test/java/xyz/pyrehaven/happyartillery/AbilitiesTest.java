@@ -1000,6 +1000,62 @@ final class AbilitiesTest {
     }
 
     @Test
+    void productionFirePlacementChecksMobGriefingBeforeBlockWork() throws Exception {
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
+        MethodNode placeFire = exactMethod(adapter, "placeFire",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
+                        + "Lnet/minecraft/world/phys/Vec3;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireAttempt;");
+        List<AbstractInsnNode> semantic = instructions(placeFire);
+        List<FieldInsnNode> mobGriefingRules = semantic.stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals("net/minecraft/world/level/gamerules/GameRules")
+                        && field.name.equals("MOB_GRIEFING"))
+                .toList();
+        List<MethodInsnNode> ruleReads = callsTo(
+                placeFire, "net/minecraft/world/level/gamerules/GameRules", "get");
+        List<MethodInsnNode> booleanReads = callsTo(
+                placeFire, "java/lang/Boolean", "booleanValue");
+        List<MethodInsnNode> positionChecks = callsTo(
+                placeFire, "net/minecraft/core/BlockPos", "containing");
+        List<MethodInsnNode> placements = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.name.equals("setBlockAndUpdate"))
+                .toList();
+        List<FieldInsnNode> skippedResults = semantic.stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals(
+                        "xyz/pyrehaven/happyartillery/Abilities$FireAttempt")
+                        && field.name.equals("SKIPPED"))
+                .toList();
+
+        assertEquals(1, mobGriefingRules.size());
+        assertEquals(1, ruleReads.size());
+        assertEquals(1, booleanReads.size());
+        assertEquals(1, positionChecks.size());
+        assertEquals(1, placements.size());
+        assertEquals(2, skippedResults.size());
+        assertTrue(semantic.indexOf(mobGriefingRules.getFirst())
+                < semantic.indexOf(ruleReads.getFirst()));
+        assertTrue(semantic.indexOf(ruleReads.getFirst())
+                < semantic.indexOf(booleanReads.getFirst()));
+        assertTrue(semantic.indexOf(booleanReads.getFirst())
+                < semantic.indexOf(positionChecks.getFirst()));
+        assertTrue(semantic.indexOf(booleanReads.getFirst())
+                < semantic.indexOf(placements.getFirst()));
+        int booleanReadIndex = semantic.indexOf(booleanReads.getFirst());
+        assertTrue(semantic.get(booleanReadIndex + 1) instanceof JumpInsnNode);
+        assertTrue(skippedResults.stream()
+                .mapToInt(semantic::indexOf)
+                .anyMatch(index -> index > booleanReadIndex
+                        && index < semantic.indexOf(positionChecks.getFirst())));
+    }
+
+    @Test
     void detonationAccessExposesPersistedGhastUuidFromMinecraftEntity() throws Exception {
         Class<?> access = Class.forName(
                 "xyz.pyrehaven.happyartillery.Abilities$DetonationAccess");
