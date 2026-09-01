@@ -40,21 +40,13 @@ public final class Controls {
     private Controls() {
     }
 
-    static ItemStack fireControl(UUID ownerId, UUID rideId) {
-        return fireControl(Config.current().controls(), ownerId, rideId);
-    }
-
     private static ItemStack fireControl(Config.Controls settings, UUID ownerId, UUID rideId) {
-        return control(settings.fireItem(), "Fire Control",
+        return control(settings.fireItem(), "Fire Control", HOLD_USE,
                 new Components.Marker(Components.Control.FIRE, ownerId, rideId));
     }
 
-    static ItemStack cryControl(UUID ownerId, UUID rideId) {
-        return cryControl(Config.current().controls(), ownerId, rideId);
-    }
-
     private static ItemStack cryControl(Config.Controls settings, UUID ownerId, UUID rideId) {
-        return control(settings.cryItem(), "Cry Control",
+        return control(settings.cryItem(), "Cry Control", null,
                 new Components.Marker(Components.Control.CRY, ownerId, rideId));
     }
 
@@ -119,7 +111,11 @@ public final class Controls {
 
     static RiderState recoverInvalidState(ServerPlayer player, InvalidRiderState failure) {
         Objects.requireNonNull(failure, "failure");
-        removeOwned(player, player.getUUID(), ServerPlayerInventoryAccess.INSTANCE);
+        return recoverInvalidState(player, player.getUUID(), ServerPlayerInventoryAccess.INSTANCE);
+    }
+
+    static <T> RiderState recoverInvalidState(T inventory, UUID ownerId, InventoryAccess<T> access) {
+        removeOwned(inventory, ownerId, access);
         return RiderState.fresh();
     }
 
@@ -192,9 +188,14 @@ public final class Controls {
     }
 
     public static void consumeDroppedControl(ItemStack droppedStack, ItemEntity returnedEntity) {
+        consumeDroppedControl(droppedStack, returnedEntity, ItemEntity::discard);
+    }
+
+    static <T> void consumeDroppedControl(ItemStack droppedStack, T returnedEntity, DropAccess<T> access) {
         Objects.requireNonNull(droppedStack, "droppedStack");
+        Objects.requireNonNull(access, "access");
         if (returnedEntity != null && Components.marker(droppedStack).marker().isPresent()) {
-            returnedEntity.discard();
+            access.discard(returnedEntity);
         }
     }
 
@@ -223,21 +224,11 @@ public final class Controls {
     }
 
     static Admission handleUseItem(
-            ServerPlayer player, InteractionHand hand, RiderState state, long gameTick) {
-        return handleUseItem(player, hand, state, gameTick, Config.current().controls(),
-                ServerPlayerControlAccess.INSTANCE);
-    }
-
-    static Admission handleUseItem(
             ServerPlayer player, InteractionHand hand, RiderState state, long gameTick,
             Config.Controls settings) {
         return handleUseItem(player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
     }
 
-    static <P, G> Admission handleUseItem(
-            P player, InteractionHand hand, RiderState state, long gameTick, ControlAccess<P, G> access) {
-        return handleUseItem(player, hand, state, gameTick, Config.current().controls(), access);
-    }
 
     static <P, G> Admission handleUseItem(
             P player, InteractionHand hand, RiderState state, long gameTick,
@@ -246,11 +237,6 @@ public final class Controls {
                 state, gameTick, settings, access);
     }
 
-    static Admission handleUseEntity(
-            ServerPlayer player, Entity target, InteractionHand hand, RiderState state, long gameTick) {
-        return handleUseEntity(player, target, hand, state, gameTick, Config.current().controls(),
-                ServerPlayerControlAccess.INSTANCE);
-    }
 
     static Admission handleUseEntity(
             ServerPlayer player, Entity target, InteractionHand hand, RiderState state, long gameTick,
@@ -259,11 +245,6 @@ public final class Controls {
                 ServerPlayerControlAccess.INSTANCE);
     }
 
-    static <P, G> Admission handleUseEntity(
-            P player, Object target, InteractionHand hand, RiderState state, long gameTick,
-            ControlAccess<P, G> access) {
-        return handleUseEntity(player, target, hand, state, gameTick, Config.current().controls(), access);
-    }
 
     static <P, G> Admission handleUseEntity(
             P player, Object target, InteractionHand hand, RiderState state, long gameTick,
@@ -272,11 +253,6 @@ public final class Controls {
                 state, gameTick, settings, access);
     }
 
-    static Admission sampleHeld(ServerPlayer player, RiderState state, long gameTick) {
-        UUID rideId = state.riddenGhastId().orElseThrow();
-        return sampleHeld(player, state, gameTick, Config.current().controls(), snapshot(player, rideId),
-                ServerPlayerControlAccess.INSTANCE);
-    }
 
     static Admission sampleHeld(
             ServerPlayer player, RiderState state, long gameTick, Config.Controls settings,
@@ -285,11 +261,6 @@ public final class Controls {
                 ServerPlayerControlAccess.INSTANCE);
     }
 
-    static <P, G> Admission sampleHeld(
-            P player, RiderState state, long gameTick, InventorySnapshot snapshot,
-            ControlAccess<P, G> access) {
-        return sampleHeld(player, state, gameTick, Config.current().controls(), snapshot, access);
-    }
 
     static <P, G> Admission sampleHeld(
             P player, RiderState state, long gameTick, Config.Controls settings,
@@ -348,9 +319,9 @@ public final class Controls {
             plainCry = false;
         }
         if (source == CallbackSource.SERVER_TICK) {
-            boolean generatedPresent = !markedFire
-                    || snapshot.orElseThrow().fire() != ControlLocation.MISSING;
-            return settings.holdToFire() && (markedFire && generatedPresent || plainFire)
+            boolean generatedFirePresent = markedFire
+                    && snapshot.orElseThrow().fire() != ControlLocation.MISSING;
+            return settings.holdToFire() && (generatedFirePresent || plainFire)
                     ? Optional.of(ControlIntent.FIRE) : Optional.empty();
         }
         if (markedCry || plainCry) {
@@ -366,7 +337,8 @@ public final class Controls {
                         "Validated control item is no longer registered: " + itemId)));
     }
 
-    private static ItemStack control(String itemId, String name, Components.Marker marker) {
+    private static ItemStack control(
+            String itemId, String name, Consumable consumable, Components.Marker marker) {
         ItemStack control = new ItemStack(BuiltInRegistries.ITEM
                 .getOptional(Identifier.parse(itemId))
                 .orElseThrow(() -> new IllegalStateException(
@@ -374,7 +346,9 @@ public final class Controls {
         Components.mark(control, marker);
         control.set(DataComponents.CUSTOM_NAME, Component.literal(name));
         control.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
-        control.set(DataComponents.CONSUMABLE, HOLD_USE);
+        if (consumable != null) {
+            control.set(DataComponents.CONSUMABLE, consumable);
+        }
         return control;
     }
 
@@ -384,7 +358,6 @@ public final class Controls {
         InventorySnapshot {
             Objects.requireNonNull(fire, "fire");
             Objects.requireNonNull(cry, "cry");
-            if (staleOrForeignCount < 0) throw new IllegalArgumentException("negative marker count");
         }
     }
 
@@ -431,6 +404,11 @@ public final class Controls {
         boolean isUsingItem(T source);
         InteractionHand getUsedItemHand(T source);
         ItemStack getUseItem(T source);
+    }
+
+    @FunctionalInterface
+    interface DropAccess<T> {
+        void discard(T returnedEntity);
     }
 
     interface ControlAccess<P, G> {

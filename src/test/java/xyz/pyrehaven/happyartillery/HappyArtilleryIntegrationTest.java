@@ -7,6 +7,7 @@ import net.minecraft.data.registries.VanillaRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -1158,7 +1159,10 @@ final class HappyArtilleryIntegrationTest {
         @Override public UUID ghastId(String ghast) { return GHAST_ID; }
         @Override public UUID playerId(String player) { return new UUID(0L, 0L); }
         @Override public ItemStack itemInHand(String player, InteractionHand hand) {
-            return Controls.cryControl(new UUID(0L, 0L), GHAST_ID);
+            ItemStack control = new ItemStack(Items.GHAST_TEAR);
+            Components.mark(control, new Components.Marker(
+                    Components.Control.CRY, new UUID(0L, 0L), GHAST_ID));
+            return control;
         }
         @Override public Controls.ObservedUse observedUse(String player) {
             return new Controls.ObservedUse(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
