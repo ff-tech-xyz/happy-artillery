@@ -208,6 +208,25 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void typeMismatchReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
+        Path configPath = tempDir.resolve("happy-artillery.json");
+        Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");
+        Config previous = Config.load(configPath);
+        byte[] invalid = "{\"hud\":{\"bossBar\":\"false\"}}".getBytes();
+        Files.write(configPath, invalid);
+        RecordingReloadFeedback feedback = new RecordingReloadFeedback();
+
+        int result = HappyArtillery.executeReload(configPath, feedback);
+
+        assertEquals(0, result);
+        assertSame(previous, Config.current());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(invalid, Files.readAllBytes(configPath));
+        assertEquals(List.of(
+                "failure:Happy Artillery config reload failed: Invalid value type for bossBar"),
+                feedback.messages);
+    }
+
+    @Test
     void invalidReloadReportsOnceReturnsFailureAndPreservesStateAndBytes() throws Exception {
         Path configPath = tempDir.resolve("happy-artillery.json");
         Files.writeString(configPath, "{\"controls\":{\"holdToFire\":false}}");

@@ -85,6 +85,7 @@ The declared-setting count is the sum of direct members in the seven groups
 (`4 + 2 + 10 + 3 + 9 + 3 + 5 = 36`); recursively expanding five heat profiles and `hud.cooling`
 produces 47 scalar leaves. `hud.cooling` thresholds are finite, non-negative, and strictly increasing
 (`slowMaxPerSecond < normalMaxPerSecond`); colors are valid vanilla boss-bar color names.
+`hud.refreshTicks` must be at least 4.
 
 ## Persistent state and time
 
@@ -283,6 +284,8 @@ Cry:
 
 - Enabled pilot input outside water and cooldown plays one `GHAST_SCREAM` at the ghast, hostile source,
   volume 10.0, pitch 0.8. It has no damage, debuff, reveal, or heat effect.
+- Cry is unconditionally blocked underwater. `water.blocksFiring` controls fire admission only and does
+  not make cry available in water.
 - Sound playback supplies no rejection result. The cooldown is committed after the infallible sound call
   completes and is stored on the ghast. Ordinary admission denial does not start it.
 
