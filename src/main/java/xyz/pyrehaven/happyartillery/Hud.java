@@ -265,7 +265,7 @@ public final class Hud<R, H> {
             return Config.Color.RED;
         }
         if (mode == Firing.FIRING) {
-            return Config.Color.GREEN;
+            return hud.firingColor();
         }
         double rate = ((Cooling) mode).perSecond();
         Config.Cooling cooling = hud.cooling();

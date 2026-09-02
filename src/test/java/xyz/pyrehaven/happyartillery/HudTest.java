@@ -57,7 +57,7 @@ final class HudTest {
                 List.of(0.0, 0.3333333333333333, 0.5, 0.75, 1.0, 5.0).stream()
                         .map(rate -> deliveredAction(new Hud.Cooling(rate), config, 25.0))
                         .toList());
-        assertEquals("action:GREEN:HEAT 25% · FIRING",
+        assertEquals("action:GOLD:HEAT 25% · FIRING",
                 deliveredAction(Hud.Firing.FIRING, config, 25.0));
         assertEquals("action:RED:HEAT 95% · COOLING 5/s",
                 deliveredAction(new Hud.Cooling(5.0), config, 95.0));
@@ -73,6 +73,33 @@ final class HudTest {
 
         assertEquals("action:BLUE:HEAT 25% · ",
                 deliveredAction(new Hud.Cooling(0.0), config, 25.0));
+    }
+
+    @Test
+    void firingUsesConfiguredColorForBossAndActionBarsEvenWhenBossBarIsDisabled() {
+        Config visibleBoss = configWithFiringColor(true, Config.Color.BLUE);
+        RecordingAccess visibleAccess = new RecordingAccess();
+        Hud<UUID, String> visibleHud = new Hud<>(visibleAccess);
+        RiderState visibleState = visibleHud.update(
+                RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, Hud.Firing.FIRING), visibleBoss, visibleAccess);
+        visibleHud.update(RIDER_ID, RIDER_ID, GHAST_ID, visibleState, 4L,
+                snapshot(25.0, BiomeClass.BASE, Hud.Firing.FIRING), visibleBoss, visibleAccess);
+
+        assertEquals(List.of("create:0.25:BLUE", "add"), visibleAccess.bossEvents());
+        assertEquals(List.of("action:BLUE:HEAT 25% · FIRING"), visibleAccess.actionEvents());
+
+        Config hiddenBoss = configWithFiringColor(false, Config.Color.BLUE);
+        RecordingAccess hiddenAccess = new RecordingAccess();
+        Hud<UUID, String> hiddenHud = new Hud<>(hiddenAccess);
+        RiderState hiddenState = hiddenHud.update(
+                RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                snapshot(25.0, BiomeClass.BASE, Hud.Firing.FIRING), hiddenBoss, hiddenAccess);
+        hiddenHud.update(RIDER_ID, RIDER_ID, GHAST_ID, hiddenState, 4L,
+                snapshot(25.0, BiomeClass.BASE, Hud.Firing.FIRING), hiddenBoss, hiddenAccess);
+
+        assertEquals(List.of(), hiddenAccess.bossEvents());
+        assertEquals(List.of("action:BLUE:HEAT 25% · FIRING"), hiddenAccess.actionEvents());
     }
 
     private static final UUID RIDER_ID = UUID.fromString("920ac02c-8d07-4a03-918f-0b7e91ae436d");
@@ -106,7 +133,7 @@ final class HudTest {
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
 
-        assertEquals(List.of("progress:0.5"), access.bossEvents());
+        assertEquals(List.of("progress:0.5", "color:GOLD"), access.bossEvents());
     }
 
     @Test
@@ -197,7 +224,7 @@ final class HudTest {
                 Config.defaults(), access);
 
         assertEquals(new ActionObservation(
-                        List.of("action:GREEN:HEAT 26% · FIRING"),
+                        List.of("action:GOLD:HEAT 26% · FIRING"),
                         new RiderState.HudCache(0.26, "GREEN", "HEAT 26% · FIRING", 4L)),
                 new ActionObservation(access.actionEvents(), state.hudCache().orElseThrow()));
     }
@@ -221,8 +248,8 @@ final class HudTest {
                 firing, Config.defaults(), access);
 
         assertEquals(List.of(
-                "action:GREEN:HEAT 25% · FIRING",
-                "action:GREEN:HEAT 25% · FIRING"),
+                "action:GOLD:HEAT 25% · FIRING",
+                "action:GOLD:HEAT 25% · FIRING"),
                 access.actionEvents());
     }
 
@@ -726,7 +753,7 @@ final class HudTest {
                 snapshot(30.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 configWithHud(false, true, 4), access);
 
-        assertEquals(List.of("action:GREEN:HEAT 30% · FIRING"), access.actionEvents());
+        assertEquals(List.of("action:GOLD:HEAT 30% · FIRING"), access.actionEvents());
     }
 
     @Test
@@ -742,7 +769,7 @@ final class HudTest {
                 snapshot(30.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 configWithHud(false, true, 4), access);
 
-        assertEquals(List.of("action:GREEN:HEAT 30% · FIRING"), access.actionEvents());
+        assertEquals(List.of("action:GOLD:HEAT 30% · FIRING"), access.actionEvents());
     }
 
     @Test
@@ -775,7 +802,7 @@ final class HudTest {
                 snapshot(30.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 configWithHud(false, true, 4), access);
 
-        assertEquals(List.of("action:GREEN:HEAT 30% · FIRING"), access.actionEvents());
+        assertEquals(List.of("action:GOLD:HEAT 30% · FIRING"), access.actionEvents());
     }
 
     @Test
@@ -810,7 +837,7 @@ final class HudTest {
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 13L,
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "GREEN", "HEAT 50% · FIRING", 4L),
+        assertEquals(new RiderState.HudCache(0.5, "GOLD", "HEAT 50% · FIRING", 4L),
                 state.hudCache().orElseThrow());
     }
 
@@ -834,8 +861,8 @@ final class HudTest {
                     Config.defaults(), access);
         }
 
-        assertEquals(List.of("action:GREEN:HEAT 40% · FIRING", "particle",
-                "progress:0.4", "color:GREEN"), access.events);
+        assertEquals(List.of("action:GOLD:HEAT 40% · FIRING", "particle",
+                "progress:0.4", "color:GOLD"), access.events);
     }
 
     @Test
@@ -853,8 +880,8 @@ final class HudTest {
                     Config.defaults(), access);
         }
 
-        assertTrue(access.events.contains("color:GREEN"), access.events::toString);
-        assertTrue(access.events.stream().anyMatch(event -> event.startsWith("action:GREEN:")),
+        assertTrue(access.events.contains("color:GOLD"), access.events::toString);
+        assertTrue(access.events.stream().anyMatch(event -> event.startsWith("action:GOLD:")),
                 access.events::toString);
     }
 
@@ -940,7 +967,7 @@ final class HudTest {
                 snapshot(20.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
 
-        assertEquals(List.of("create:0.1:GREEN", "add", "remove", "create:0.2:GREEN", "add"),
+        assertEquals(List.of("create:0.1:GREEN", "add", "remove", "create:0.2:GOLD", "add"),
                 access.bossEvents());
     }
 
@@ -1113,12 +1140,22 @@ final class HudTest {
         return matches.getFirst();
     }
 
+    private static Config configWithFiringColor(boolean bossBar, Config.Color firingColor) {
+        Config defaults = Config.defaults();
+        return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
+                defaults.water(), defaults.overheat(), defaults.cry(),
+                new Config.Hud(bossBar, defaults.hud().actionBar(),
+                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(),
+                        firingColor, defaults.hud().cooling()));
+    }
+
     private static Config configWithCooling(Config.Cooling cooling) {
         Config defaults = Config.defaults();
         return new Config(defaults.controls(), defaults.fire(), defaults.heat(),
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(defaults.hud().bossBar(), defaults.hud().actionBar(),
-                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(), cooling));
+                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(),
+                        defaults.hud().firingColor(), cooling));
     }
 
     private static String deliveredAction(Hud.Mode mode, Config config, double heat) {
@@ -1137,7 +1174,7 @@ final class HudTest {
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(
                         bossBar, actionBar, refreshTicks, defaults.hud().warningFromPercent(),
-                        defaults.hud().cooling()));
+                        defaults.hud().firingColor(), defaults.hud().cooling()));
     }
 
     private static Hud.Snapshot snapshot(double heat, BiomeClass biomeClass, Hud.Mode mode) {
@@ -1169,7 +1206,7 @@ final class HudTest {
                 defaults.water(), defaults.overheat(), defaults.cry(),
                 new Config.Hud(defaults.hud().bossBar(), defaults.hud().actionBar(),
                         defaults.hud().refreshTicks(), warningFromPercent,
-                        defaults.hud().cooling()));
+                        defaults.hud().firingColor(), defaults.hud().cooling()));
     }
 
     private static Controls.InventorySnapshot controlSnapshot(

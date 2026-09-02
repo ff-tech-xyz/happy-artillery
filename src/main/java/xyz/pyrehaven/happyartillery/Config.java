@@ -341,6 +341,7 @@ public record Config(
         requireNonNegative("cry.cooldownSeconds", cry.cooldownSeconds());
         requireRange("hud.refreshTicks", hud.refreshTicks(), 4, Integer.MAX_VALUE);
         requireRange("hud.warningFromPercent", hud.warningFromPercent(), 0, 100);
+        requirePresent("hud.firingColor", hud.firingColor());
         validateCooling(hud.cooling());
     }
 
@@ -436,7 +437,7 @@ public record Config(
                 new Water(true),
                 new Overheat(0, 6.0, 24, 0.4, 2, 24, 8.0, true, true),
                 new Cry(true, 10.0, 10.0),
-                new Hud(true, true, 4, 85,
+                new Hud(true, true, 4, 85, Color.GOLD,
                         new Cooling(
                                 "NO COOLING", Color.RED,
                                 0.5, Color.GOLD,
@@ -496,6 +497,7 @@ public record Config(
             boolean actionBar,
             int refreshTicks,
             int warningFromPercent,
+            Color firingColor,
             Cooling cooling) {
     }
 

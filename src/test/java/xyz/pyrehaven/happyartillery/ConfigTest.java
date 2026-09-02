@@ -67,8 +67,8 @@ final class ConfigTest {
 
         assertEquals(new Gson().toJsonTree(Config.defaults()), reference);
         assertEquals(7, reference.size());
-        assertEquals(35, declaredKeyCount(reference));
-        assertEquals(46, nestedLeafCount(reference));
+        assertEquals(36, declaredKeyCount(reference));
+        assertEquals(47, nestedLeafCount(reference));
     }
 
     @Test
@@ -146,7 +146,9 @@ final class ConfigTest {
 
     @Test
     void hudCoolingSchemaIsTypedAndHasNoCompatibilityPath() {
-        assertEquals(List.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
+        assertEquals(List.of(
+                        "bossBar", "actionBar", "refreshTicks", "warningFromPercent",
+                        "firingColor", "cooling"),
                 Stream.of(Config.Hud.class.getRecordComponents())
                         .map(RecordComponent::getName).toList());
         assertEquals(List.of(
@@ -168,7 +170,8 @@ final class ConfigTest {
                 defaults.overheat(), defaults.cry(),
                 new Config.Hud(
                         defaults.hud().bossBar(), defaults.hud().actionBar(),
-                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(), null));
+                        defaults.hud().refreshTicks(), defaults.hud().warningFromPercent(),
+                        defaults.hud().firingColor(), null));
 
         IllegalArgumentException failure = assertThrows(
                 IllegalArgumentException.class, () -> Config.validate(invalid));
@@ -217,6 +220,28 @@ final class ConfigTest {
     }
 
     @Test
+    void firingColorDefaultsDistinctFromNormalCoolingAndUsesTheSharedStrictPalette(
+            @TempDir Path directory) throws Exception {
+        assertEquals(Config.Color.GOLD, Config.defaults().hud().firingColor());
+        assertFalse(Config.defaults().hud().firingColor()
+                == Config.defaults().hud().cooling().normalColor());
+
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] sparse = "{\"hud\":{\"firingColor\":\"BLUE\"}}"
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, sparse);
+
+        Config loaded = Config.load(file);
+
+        assertEquals(Config.Color.BLUE, loaded.hud().firingColor());
+        assertArrayEquals(sparse, Files.readAllBytes(file));
+
+        assertRejectedWithoutMutation(directory,
+                "{\"hud\":{\"firingColor\":\"YELLOW\"}}",
+                "firingColor accepted a color outside the Happy Artillery palette");
+    }
+
+    @Test
     void defaultsContainTheCompleteSchema() throws ReflectiveOperationException {
         Object defaults = Config.class.getMethod("defaults").invoke(null);
 
@@ -246,6 +271,7 @@ final class ConfigTest {
                 "cry", Map.of("enabled", true, "volume", 10.0, "cooldownSeconds", 10.0),
                 "hud", Map.of("bossBar", true, "actionBar", true,
                         "refreshTicks", 4, "warningFromPercent", 85,
+                        "firingColor", Config.Color.GOLD,
                         "cooling", Map.of(
                                 "noCoolingText", "NO COOLING", "noCoolingColor", Config.Color.RED,
                                 "slowMaxPerSecond", 0.5, "slowColor", Config.Color.GOLD,
@@ -575,10 +601,12 @@ final class ConfigTest {
 
         assertEquals(first, second);
         assertEquals(7, serialized.size());
-        assertEquals(35, declaredKeyCount(serialized));
-        assertEquals(46, nestedLeafCount(serialized));
+        assertEquals(36, declaredKeyCount(serialized));
+        assertEquals(47, nestedLeafCount(serialized));
         assertEquals(Set.of("blocksFiring"), serialized.getAsJsonObject("water").keySet());
-        assertEquals(Set.of("bossBar", "actionBar", "refreshTicks", "warningFromPercent", "cooling"),
+        assertEquals(Set.of(
+                        "bossBar", "actionBar", "refreshTicks", "warningFromPercent",
+                        "firingColor", "cooling"),
                 serialized.getAsJsonObject("hud").keySet());
         assertEquals(Set.of(
                         "noCoolingText", "noCoolingColor", "slowMaxPerSecond", "slowColor",
@@ -740,8 +768,8 @@ final class ConfigTest {
             assertEquals(file, target);
             JsonObject serialized = JsonParser.parseString(Files.readString(temporary))
                     .getAsJsonObject();
-            assertEquals(35, declaredKeyCount(serialized));
-            assertEquals(46, nestedLeafCount(serialized));
+            assertEquals(36, declaredKeyCount(serialized));
+            assertEquals(47, nestedLeafCount(serialized));
             assertEquals(new Gson().toJsonTree(Config.defaults().hud().cooling()),
                     serialized.getAsJsonObject("hud").get("cooling"));
             assertEquals(Config.defaults().controls().holdToFire(),

@@ -124,6 +124,8 @@
     "refreshTicks": 4,
     // Exact integer percent from 0 through 100, inclusive. Zero warns at any heat level.
     "warningFromPercent": 85,
+    // Boss/action-bar color while firing. Must be RED, GOLD, GREEN, or BLUE.
+    "firingColor": "GOLD",
     // Cooling presentation is selected from the effective cooling rate.
     "cooling": {
       // Text shown when the effective cooling rate is zero. Blank text is accepted.
