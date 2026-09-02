@@ -336,7 +336,6 @@ final class HappyArtilleryIntegrationTest {
     @Test
     void riddenGhastUsesOnePilotConfigAndBiomeThenSharesPostTransitionHudSnapshot() {
         RecordingDriver access = RecordingDriver.ridden();
-        access.configuredInWater = true;
 
         HappyArtillery.tick(access);
 
@@ -345,7 +344,6 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(1, access.classifications);
         assertEquals(2, access.ghastProcesses);
         assertEquals(1, access.fireCalls);
-        assertEquals(0, access.inWaterCalls);
         assertEquals(List.of(Hud.Firing.FIRING, Hud.Firing.FIRING), access.renderedModes);
         assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
         assertEquals(List.of("pilot:7.0", "passenger:7.0"), access.hudSnapshots);
@@ -399,7 +397,6 @@ final class HappyArtilleryIntegrationTest {
 
         assertEquals(1, access.configReads);
         assertEquals(1, access.classifications);
-        assertEquals(0, access.inWaterCalls);
         assertEquals(List.of(new Hud.Cooling(0.75), new Hud.Cooling(0.75)), access.renderedModes);
         assertSame(access.renderedModes.getFirst(), access.renderedModes.getLast());
     }
@@ -613,6 +610,55 @@ final class HappyArtilleryIntegrationTest {
     }
 
     @Test
+    void productionDueFuseFailureIsContainedAndLoggedWithTickContext() throws IOException {
+        RuntimeException failure = new RuntimeException("detonation failed");
+        List<Long> loggedTicks = new ArrayList<>();
+        List<RuntimeException> loggedFailures = new ArrayList<>();
+
+        assertDoesNotThrow(() -> HappyArtillery.runDueFusesSafely(
+                73L,
+                () -> {
+                    throw failure;
+                },
+                (now, thrown) -> {
+                    loggedTicks.add(now);
+                    loggedFailures.add(thrown);
+                }));
+
+        assertEquals(List.of(73L), loggedTicks);
+        assertEquals(1, loggedFailures.size());
+        assertSame(failure, loggedFailures.getFirst());
+
+        ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
+        ClassNode driver = BytecodeTestSupport.classNode(
+                HappyArtillery.class.getName() + "$MinecraftDriverAccess");
+        MethodNode boundary = method(driver, "runDueFuses", "(J)V");
+        assertEquals(1, methodCalls(boundary).stream()
+                .filter(call -> call.owner.equals(ROOT)
+                        && call.name.equals("runDueFusesSafely"))
+                .count());
+        assertEquals(1, driver.methods.stream()
+                .filter(candidate -> candidate.name.startsWith("lambda$runDueFuses$"))
+                .flatMap(candidate -> methodCalls(candidate).stream())
+                .filter(call -> call.owner.equals(PACKAGE + "Abilities")
+                        && call.name.equals("runDueFuses"))
+                .count());
+
+        MethodNode logger = method(root, "logDueFuseFailure", "(JLjava/lang/RuntimeException;)V");
+        assertEquals(1, methodCalls(logger).stream()
+                .filter(call -> call.owner.equals("org/slf4j/Logger")
+                        && call.name.equals("error")
+                        && call.desc.equals("(Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;)V"))
+                .count());
+        assertEquals(1, Stream.iterate(logger.instructions.getFirst(), java.util.Objects::nonNull,
+                        AbstractInsnNode::getNext)
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals(ROOT) && field.name.equals("LOGGER"))
+                .count());
+    }
+
+    @Test
     void productionDriverAndTickUseOnlyBoundedPlayerApisAndExplicitHeldConfig() throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
         List<MethodInsnNode> tickCalls = methodCalls(method(
@@ -711,12 +757,12 @@ final class HappyArtilleryIntegrationTest {
     void loadAvailabilityAndStopCallbacksDelegateToTheirExistingOwners() {
         RecordingLifecycle lifecycle = new RecordingLifecycle();
 
-        HappyArtillery.ghastLoaded("ghast", 73L, lifecycle);
+        HappyArtillery.ghastLoaded("ghast", lifecycle);
         HappyArtillery.riderAvailable("rider", lifecycle);
         HappyArtillery.serverStopped(lifecycle);
 
         assertEquals(List.of(
-                "wake-ghast:ghast@73", "wake-rider:rider", "clear-fuses", "clear-hud"),
+                "wake-ghast:ghast", "wake-rider:rider", "clear-fuses", "clear-hud"),
                 lifecycle.calls);
     }
 
@@ -724,8 +770,8 @@ final class HappyArtilleryIntegrationTest {
             implements HappyArtillery.LifecycleAccess<String, String> {
         private final List<String> calls = new ArrayList<>();
 
-        @Override public void wakeGhast(String ghast, long now) {
-            calls.add("wake-ghast:" + ghast + "@" + now);
+        @Override public void wakeGhast(String ghast) {
+            calls.add("wake-ghast:" + ghast);
         }
         @Override public void wakeRider(String rider) { calls.add("wake-rider:" + rider); }
         @Override public void clearFuses() { calls.add("clear-fuses"); }
@@ -741,7 +787,7 @@ final class HappyArtilleryIntegrationTest {
 
         private int configReads;
         private int classifications;
-        private int inWaterCalls;
+
         private int snapshotCalls;
         private int ghastProcesses;
         private int fireCalls;
@@ -750,7 +796,7 @@ final class HappyArtilleryIntegrationTest {
         private Config configured = Config.defaults();
         private BiomeClass configuredBiome = BiomeClass.HOT;
         private boolean acceptedFire = true;
-        private boolean configuredInWater;
+
         private long advancedFiringWindowEnd = 41L;
         private final boolean consumedFailure;
         private final boolean dedupRegression;
@@ -858,10 +904,7 @@ final class HappyArtilleryIntegrationTest {
         }
         @Override public void runDueFuses(long now) { order.add("fuses"); }
         @Override public Object ghastId(String ghast) { return ghast; }
-        @Override public boolean inWater(String ghast) {
-            inWaterCalls++;
-            return configuredInWater;
-        }
+
         @Override public Config config() {
             configReads++;
             expectedConfig = configured;

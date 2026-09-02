@@ -509,6 +509,30 @@ final class AbilitiesTest {
     }
 
     @Test
+    void zeroFirePlacementRadiusAttemptsCenterOnceWhilePositiveRadiusHonorsAttemptCount() {
+        RecordingDetonationAccess zeroRadius = new RecordingDetonationAccess();
+        zeroRadius.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        Config zeroRadiusConfig = configWithOverheat(0, 6.0, 0, 0.4, 2, 5, 0.0,
+                false, true);
+
+        assertEquals(new Abilities.DetonationConsumed(), Abilities.executeDetonation(
+                new Object(), 140L, zeroRadiusConfig, zeroRadius));
+        assertEquals(List.of(Vec3.ZERO), zeroRadius.fireOffsets);
+
+        RecordingDetonationAccess positiveRadius = new RecordingDetonationAccess();
+        positiveRadius.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        Config positiveRadiusConfig = configWithOverheat(0, 6.0, 0, 0.4, 2, 5, 8.0,
+                false, true);
+
+        assertEquals(new Abilities.DetonationConsumed(), Abilities.executeDetonation(
+                new Object(), 140L, positiveRadiusConfig, positiveRadius));
+        assertEquals(5, positiveRadius.fireOffsets.size());
+        assertEquals(5, Set.copyOf(positiveRadius.fireOffsets).size());
+    }
+
+    @Test
     void terrainDisabledSkipsConfiguredFireWithoutCountingItAsRejected() {
         RecordingDetonationAccess access = new RecordingDetonationAccess();
         access.state = new GhastState(101.0, 100L, 120L, 105L, 300L,
@@ -1074,7 +1098,7 @@ final class AbilitiesTest {
         assertEquals(1, booleanReads.size());
         assertEquals(1, positionChecks.size());
         assertEquals(1, placements.size());
-        assertEquals(2, skippedResults.size());
+        assertEquals(3, skippedResults.size());
         assertTrue(semantic.indexOf(mobGriefingRules.getFirst())
                 < semantic.indexOf(ruleReads.getFirst()));
         assertTrue(semantic.indexOf(ruleReads.getFirst())
@@ -1089,6 +1113,64 @@ final class AbilitiesTest {
                 .mapToInt(semantic::indexOf)
                 .anyMatch(index -> index > booleanReadIndex
                         && index < semantic.indexOf(positionChecks.getFirst())));
+    }
+
+    @Test
+    void productionFirePlacementResolvesHorizontalSampleToLoadedWorldSurface() throws Exception {
+        java.lang.reflect.Method fireOffset = Abilities.class.getDeclaredMethod(
+                "fireOffset", int.class, int.class, double.class);
+        fireOffset.setAccessible(true);
+        Vec3 sample = (Vec3) fireOffset.invoke(null, 2, 5, 8.0);
+        assertEquals(0.0, sample.y);
+
+        ClassNode adapter = BytecodeTestSupport.classNode(
+                "xyz.pyrehaven.happyartillery.Abilities$ServerPlayerDetonationAccess");
+        MethodNode placeFire = exactMethod(adapter, "placeFire",
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;"
+                        + "Lnet/minecraft/world/phys/Vec3;)"
+                        + "Lxyz/pyrehaven/happyartillery/Abilities$FireAttempt;");
+        List<AbstractInsnNode> semantic = instructions(placeFire);
+        List<MethodInsnNode> candidatePositions = callsTo(
+                placeFire, "net/minecraft/core/BlockPos", "containing");
+        List<MethodInsnNode> loadedChecks = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.name.equals("hasChunkAt"))
+                .toList();
+        List<MethodInsnNode> surfaceResolutions = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.name.equals("getHeightmapPos"))
+                .toList();
+        List<FieldInsnNode> surfaceTypes = semantic.stream()
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals(
+                        "net/minecraft/world/level/levelgen/Heightmap$Types")
+                        && field.name.equals("MOTION_BLOCKING_NO_LEAVES"))
+                .toList();
+        List<MethodInsnNode> emptyChecks = semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.name.equals("isEmptyBlock"))
+                .toList();
+
+        assertEquals(1, candidatePositions.size());
+        assertEquals(1, loadedChecks.size());
+        assertEquals(1, surfaceResolutions.size());
+        assertEquals(1, surfaceTypes.size());
+        assertEquals(1, emptyChecks.size());
+        assertTrue(semantic.indexOf(candidatePositions.getFirst())
+                < semantic.indexOf(loadedChecks.getFirst()));
+        assertTrue(semantic.indexOf(loadedChecks.getFirst())
+                < semantic.indexOf(surfaceResolutions.getFirst()));
+        assertTrue(semantic.indexOf(surfaceResolutions.getFirst())
+                < semantic.indexOf(emptyChecks.getFirst()));
+        assertEquals(0, semantic.stream()
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .filter(call -> call.name.equals("getChunk") || call.name.equals("getChunkSource"))
+                .count());
     }
 
     @Test
@@ -1354,22 +1436,22 @@ final class AbilitiesTest {
         ClassNode abilities = BytecodeTestSupport.classNode(
                 "xyz.pyrehaven.happyartillery.Abilities");
         MethodNode load = exactMethod(abilities, "onGhastLoad",
-                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;J)V");
+                "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)V");
         assertEquals(List.of(
                         "GETSTATIC xyz/pyrehaven/happyartillery/"
                                 + "Abilities$ServerPlayerDetonationAccess.INSTANCE "
                                 + "Lxyz/pyrehaven/happyartillery/Abilities$ServerPlayerDetonationAccess;",
-                        "ASTORE 3",
+                        "ASTORE 1",
                         "GETSTATIC xyz/pyrehaven/happyartillery/Abilities.FUSES "
                                 + "Lxyz/pyrehaven/happyartillery/Abilities$FuseQueue;",
                         "ALOAD 0",
-                        "ALOAD 3",
+                        "ALOAD 1",
                         "ALOAD 0",
                         "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/"
                                 + "Abilities$ServerPlayerDetonationAccess.attachedState "
                                 + "(Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;)"
                                 + "Ljava/util/Optional;",
-                        "ALOAD 3",
+                        "ALOAD 1",
                         "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Abilities$FuseQueue.onGhastLoad "
                                 + "(Ljava/lang/Object;Ljava/util/Optional;"
                                 + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;)V",

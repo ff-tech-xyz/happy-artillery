@@ -15,6 +15,7 @@ import net.minecraft.world.entity.projectile.hurtingprojectile.LargeFireball;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -38,7 +39,7 @@ public final class Abilities {
     private Abilities() {
     }
 
-    static void onGhastLoad(HappyGhast ghast, long now) {
+    static void onGhastLoad(HappyGhast ghast) {
         ServerPlayerDetonationAccess access = ServerPlayerDetonationAccess.INSTANCE;
         FUSES.onGhastLoad(ghast, access.attachedState(ghast), access);
     }
@@ -199,8 +200,11 @@ public final class Abilities {
             }
         }
         if (overheat.breaksBlocks()) {
-            for (int index = 0; index < overheat.firePlacementAttempts(); index++) {
-                Vec3 offset = fireOffset(index, overheat.firePlacementAttempts(), overheat.firePlacementRadius());
+            int fireAttempts = overheat.firePlacementRadius() == 0.0
+                    && overheat.firePlacementAttempts() > 0
+                    ? 1 : overheat.firePlacementAttempts();
+            for (int index = 0; index < fireAttempts; index++) {
+                Vec3 offset = fireOffset(index, fireAttempts, overheat.firePlacementRadius());
                 if (access.placeFire(ghast, offset) == FireAttempt.REJECTED) {
                     rejectedAttempts++;
                 }
@@ -847,7 +851,12 @@ public final class Abilities {
                 return FireAttempt.SKIPPED;
             }
             Level level = serverLevel;
-            BlockPos position = BlockPos.containing(ghast.position().add(offset));
+            BlockPos candidate = BlockPos.containing(ghast.position().add(offset));
+            if (!serverLevel.hasChunkAt(candidate)) {
+                return FireAttempt.SKIPPED;
+            }
+            BlockPos position = serverLevel.getHeightmapPos(
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, candidate);
             if (!level.isEmptyBlock(position)
                     || !BaseFireBlock.canBePlacedAt(level, position, Direction.UP)) {
                 return FireAttempt.SKIPPED;

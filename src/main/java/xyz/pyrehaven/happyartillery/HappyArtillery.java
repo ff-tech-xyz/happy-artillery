@@ -83,6 +83,19 @@ public final class HappyArtillery implements ModInitializer {
         }
     }
 
+    static void runDueFusesSafely(
+            long now, DueFuseRunner runner, DueFuseFailureLogger failureLogger) {
+        try {
+            runner.run();
+        } catch (RuntimeException failure) {
+            failureLogger.log(now, failure);
+        }
+    }
+
+    private static void logDueFuseFailure(long now, RuntimeException failure) {
+        LOGGER.error("Due fuse execution failed at tick {}", now, failure);
+    }
+
     static <P, G> void tick(DriverAccess<P, G> access) {
         Objects.requireNonNull(access, "access");
         long now = access.gameTime();
@@ -186,7 +199,6 @@ public final class HappyArtillery implements ModInitializer {
         PlayerView<P, G> inspectPlayer(P player);
         void runDueFuses(long now);
         Object ghastId(G ghast);
-        boolean inWater(G ghast);
         Config config();
         BiomeClass classify(G ghast, Config config);
         GhastState ghastState(G ghast);
@@ -214,6 +226,16 @@ public final class HappyArtillery implements ModInitializer {
                 boolean activeFireControl);
     }
 
+    @FunctionalInterface
+    interface DueFuseRunner {
+        void run();
+    }
+
+    @FunctionalInterface
+    interface DueFuseFailureLogger {
+        void log(long now, RuntimeException failure);
+    }
+
     record PlayerView<P, G>(P player, RiderState state, Optional<G> riddenGhast, boolean pilot) {
         PlayerView {
             Objects.requireNonNull(player, "player");
@@ -225,8 +247,8 @@ public final class HappyArtillery implements ModInitializer {
         }
     }
 
-    static <P, G> void ghastLoaded(G ghast, long now, LifecycleAccess<P, G> access) {
-        access.wakeGhast(ghast, now);
+    static <P, G> void ghastLoaded(G ghast, LifecycleAccess<P, G> access) {
+        access.wakeGhast(ghast);
     }
 
     static <P, G> void riderAvailable(P rider, LifecycleAccess<P, G> access) {
@@ -239,7 +261,7 @@ public final class HappyArtillery implements ModInitializer {
     }
 
     interface LifecycleAccess<P, G> {
-        void wakeGhast(G ghast, long now);
+        void wakeGhast(G ghast);
         void wakeRider(P rider);
         void clearFuses();
         void clearHud();
@@ -289,8 +311,7 @@ public final class HappyArtillery implements ModInitializer {
         public void registerGhastLoad() {
             ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
                 if (entity instanceof HappyGhast ghast) {
-                    ghastLoaded(ghast, level.getServer().overworld().getGameTime(),
-                            MinecraftLifecycleAccess.INSTANCE);
+                    ghastLoaded(ghast, MinecraftLifecycleAccess.INSTANCE);
                 }
             });
         }
@@ -354,8 +375,8 @@ public final class HappyArtillery implements ModInitializer {
             implements LifecycleAccess<ServerPlayer, HappyGhast> {
         INSTANCE;
 
-        @Override public void wakeGhast(HappyGhast ghast, long now) {
-            Abilities.onGhastLoad(ghast, now);
+        @Override public void wakeGhast(HappyGhast ghast) {
+            Abilities.onGhastLoad(ghast);
         }
         @Override public void wakeRider(ServerPlayer rider) {
             Abilities.onRiderAvailable(rider);
@@ -476,7 +497,10 @@ public final class HappyArtillery implements ModInitializer {
 
         @Override
         public void runDueFuses(long now) {
-            Abilities.runDueFuses(now, server);
+            runDueFusesSafely(
+                    now,
+                    () -> Abilities.runDueFuses(now, server),
+                    HappyArtillery::logDueFuseFailure);
         }
 
         @Override
@@ -484,10 +508,6 @@ public final class HappyArtillery implements ModInitializer {
             return ghast.getUUID();
         }
 
-        @Override
-        public boolean inWater(HappyGhast ghast) {
-            return ghast.isInWater();
-        }
 
         @Override
         public Config config() {
