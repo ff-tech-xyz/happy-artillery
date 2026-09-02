@@ -620,7 +620,8 @@ public final class HappyArtillery implements ModInitializer {
                 Optional<Controls.InventorySnapshot> pilotSnapshot,
                 boolean activeFireControl) {
             if (!(ghast.level() instanceof net.minecraft.server.level.ServerLevel level)) {
-                throw new IllegalArgumentException("HUD requires a loaded server Happy Ghast");
+                HUD.remove(rider.player());
+                return;
             }
             RiderState updated = HUD.update(
                     rider.player().getUUID(), rider.player(), ghast.getUUID(), rider.state(), now,

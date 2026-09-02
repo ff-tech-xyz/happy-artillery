@@ -718,9 +718,15 @@ final class HappyArtilleryIntegrationTest {
                         + "Lnet/minecraft/world/entity/animal/happyghast/HappyGhast;L" + PACKAGE
                         + "GhastState;JL" + PACKAGE + "Config;L" + PACKAGE + "Hud$Mode;"
                         + "Ljava/util/Optional;Z)V");
-        assertEquals(1, methodCalls(render).stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
+        List<MethodInsnNode> renderCalls = methodCalls(render);
+        assertEquals(1, renderCalls.stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
                 && call.name.equals("minecraftPresentation")).count());
-        assertEquals(1, methodCalls(render).stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
+        assertEquals(1, renderCalls.stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
+                && call.name.equals("remove")
+                && call.desc.equals("(Lnet/minecraft/server/level/ServerPlayer;)V")).count());
+        assertEquals(0, renderCalls.stream().filter(call -> call.owner.equals(
+                "java/lang/IllegalArgumentException") && call.name.equals("<init>")).count());
+        assertEquals(1, renderCalls.stream().filter(call -> call.owner.equals(PACKAGE + "Hud")
                 && call.name.equals("update")
                 && call.desc.endsWith("L" + PACKAGE + "Hud$PresentationAccess;)L"
                         + PACKAGE + "RiderState;")).count());
@@ -1040,9 +1046,7 @@ final class HappyArtilleryIntegrationTest {
                     Components.Control.CRY, new UUID(0L, 0L), GHAST_ID));
             return control;
         }
-        @Override public Controls.ObservedUse observedUse(String player) {
-            return new Controls.ObservedUse(false, ItemStack.EMPTY);
-        }
+        @Override public ItemStack activeUseItem(String player) { return ItemStack.EMPTY; }
     }
 
     private enum NoopPresentationAccess implements Hud.PresentationAccess<String, String> {

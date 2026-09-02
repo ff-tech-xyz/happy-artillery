@@ -34,6 +34,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -396,7 +397,7 @@ final class ControlsTest {
     void heldAdmissionConsumesTheSharedSnapshotAndCannotAcceptMissingGeneratedControl() {
         TestPilot pilot = TestPilot.riding();
         ItemStack fire = fireControl(OWNER, RIDE);
-        pilot.observed = new Controls.ObservedUse(true, fire);
+        pilot.activeUse = fire.copy();
         RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
         Controls.InventorySnapshot missing = new Controls.InventorySnapshot(
                 Controls.ControlLocation.MISSING,
@@ -587,7 +588,7 @@ final class ControlsTest {
     void holdSamplingAndCallbackShareSameTickDeduplication() {
         TestPilot pilot = TestPilot.riding();
         ItemStack fire = fireControl(OWNER, RIDE);
-        pilot.observed = new Controls.ObservedUse(true, fire);
+        pilot.activeUse = fire.copy();
         pilot.main = cryControl(OWNER, RIDE);
         RiderState state = new RiderState(Optional.of(RIDE), 30L, Optional.empty());
 
@@ -766,19 +767,30 @@ final class ControlsTest {
     }
 
     @Test
-    void observedUseSamplesActiveStackAndDefensivelyOwnsIt() {
-        ItemStack source = fireControl(OWNER, RIDE);
-        Controls.ObservedUse observed = Controls.observeUse(source,
-                new Controls.UseObservation<>() {
-                    @Override public boolean isUsingItem(ItemStack ignored) { return true; }
-                    @Override public ItemStack getUseItem(ItemStack value) { return value; }
-                });
-        source.setCount(0);
-        ItemStack firstRead = observed.stack();
-        firstRead.setCount(0);
+    void activeUseItemIsOneDirectDefensiveProductionBoundary() throws Exception {
+        ClassNode controls = BytecodeTestSupport.classNode(Controls.class.getName());
+        assertFalse(controls.innerClasses.stream().anyMatch(inner ->
+                inner.name.endsWith("$ObservedUse") || inner.name.endsWith("$UseObservation")));
 
-        assertTrue(observed.using());
-        assertFalse(observed.stack().isEmpty());
+        ClassNode access = BytecodeTestSupport.classNode(
+                Controls.class.getName() + "$ServerPlayerControlAccess");
+        MethodNode active = access.methods.stream()
+                .filter(method -> method.name.equals("activeUseItem"))
+                .findFirst().orElseThrow();
+        List<MethodInsnNode> calls = Stream.iterate(active.instructions.getFirst(),
+                        java.util.Objects::nonNull, org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast).toList();
+        assertEquals(1, calls.stream().filter(call -> call.name.equals("isUsingItem")).count());
+        assertEquals(1, calls.stream().filter(call -> call.name.equals("getUseItem")).count());
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(
+                "net/minecraft/world/item/ItemStack") && call.name.equals("copy")).count());
+        assertEquals(1, Stream.iterate(active.instructions.getFirst(),
+                        java.util.Objects::nonNull, org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(FieldInsnNode.class::isInstance)
+                .map(FieldInsnNode.class::cast)
+                .filter(field -> field.owner.equals("net/minecraft/world/item/ItemStack")
+                        && field.name.equals("EMPTY"))
+                .count());
     }
 
 
@@ -980,7 +992,7 @@ final class ControlsTest {
         private ItemStack offhand = ItemStack.EMPTY;
         private boolean riding = true;
         private boolean controllingFirstPassenger = true;
-        private Controls.ObservedUse observed = new Controls.ObservedUse(false, ItemStack.EMPTY);
+        private ItemStack activeUse = ItemStack.EMPTY;
         static TestPilot riding() { return new TestPilot(); }
         @Override public Optional<UUID> riddenHappyGhast(TestPilot player) {
             return riding ? Optional.of(RIDE) : Optional.empty();
@@ -993,8 +1005,8 @@ final class ControlsTest {
         @Override public ItemStack itemInHand(TestPilot player, InteractionHand hand) {
             return (hand == InteractionHand.MAIN_HAND ? main : offhand).copy();
         }
-        @Override public Controls.ObservedUse observedUse(TestPilot player) {
-            return observed;
+        @Override public ItemStack activeUseItem(TestPilot player) {
+            return activeUse.copy();
         }
     }
 }

@@ -149,9 +149,8 @@ public final class Abilities {
         if (current.detonateAtTick().isEmpty() || current.detonatingRiderId().isEmpty()) {
             return new DetonationIgnored();
         }
-        ExecutionEvidence evidence = new ExecutionEvidence();
         return executeDetonation(ghast, current.detonateAtTick().getAsLong(),
-                current.detonatingRiderId().orElseThrow(), now, config, access, evidence, attached);
+                current.detonatingRiderId().orElseThrow(), now, config, access, attached);
     }
 
     private static <P, G> DetonationOutcome executeDetonation(
@@ -161,12 +160,10 @@ public final class Abilities {
             long now,
             Config config,
             DetonationAccess<P, G> access,
-            ExecutionEvidence evidence,
             Optional<GhastState> attached) {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(access, "access");
         if (attached.isEmpty()) {
-            evidence.stale = true;
             return new DetonationIgnored();
         }
         GhastState current = attached.orElseThrow();
@@ -175,7 +172,6 @@ public final class Abilities {
                 || current.detonatingRiderId().isEmpty()
                 || !current.detonatingRiderId().orElseThrow().equals(expectedRiderId)
                 || now < expectedDeadline) {
-            evidence.stale = true;
             return new DetonationIgnored();
         }
         P storedRider = access.resolveRider(ghast, expectedRiderId);
@@ -218,9 +214,6 @@ public final class Abilities {
                 : new DetonationConsumedWithFailures(rejectedAttempts);
     }
 
-    private static final class ExecutionEvidence {
-        private boolean stale;
-    }
 
     private static Vec3 sphereDirection(int index, int count) {
         double y = 1.0 - 2.0 * (index + 0.5) / count;
@@ -463,19 +456,14 @@ public final class Abilities {
                 long now,
                 Config config,
                 DetonationAccess<P, G> access) {
-            ExecutionEvidence evidence = new ExecutionEvidence();
             try {
                 G ghast = access.resolveGhast(task.ghastId());
                 if (ghast == null) {
                     return new DetonationDeferred(DetonationDeferral.GHAST_UNLOADED);
                 }
-                return executeOwnedTask(task, ghast, now, config, access, evidence);
+                return executeOwnedTask(task, ghast, now, config, access);
             } catch (RuntimeException | Error failure) {
-                if (evidence.stale) {
-                    removeOwner(task);
-                } else {
-                    makeDormant(task);
-                }
+                makeDormant(task);
                 throw failure;
             }
         }
@@ -485,10 +473,9 @@ public final class Abilities {
                 G ghast,
                 long now,
                 Config config,
-                DetonationAccess<P, G> access,
-                ExecutionEvidence evidence) {
+                DetonationAccess<P, G> access) {
             DetonationOutcome outcome = executeDetonation(
-                    ghast, task.deadline(), task.riderId(), now, config, access, evidence,
+                    ghast, task.deadline(), task.riderId(), now, config, access,
                     access.attachedState(ghast));
             if (outcome instanceof DetonationDeferred deferred
                     && deferred.reason() == DetonationDeferral.RIDER_UNAVAILABLE) {

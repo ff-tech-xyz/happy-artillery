@@ -11,7 +11,6 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
@@ -231,13 +230,6 @@ public final class Controls {
                 ? InteractionResult.FAIL : InteractionResult.PASS;
     }
 
-    static ObservedUse observeUse(LivingEntity entity) {
-        return observeUse(entity, LivingEntityUseObservation.INSTANCE);
-    }
-
-    static <T> ObservedUse observeUse(T source, UseObservation<T> observation) {
-        return new ObservedUse(observation.isUsingItem(source), observation.getUseItem(source));
-    }
 
     static Admission handleUseItem(
             ServerPlayer player, InteractionHand hand, RiderState state, long gameTick,
@@ -281,8 +273,7 @@ public final class Controls {
     static <P, G> Admission sampleHeld(
             P player, RiderState state, long gameTick, Config.Controls settings,
             InventorySnapshot snapshot, ControlAccess<P, G> access) {
-        ObservedUse observed = access.observedUse(player);
-        ItemStack input = observed.using() ? observed.stack() : ItemStack.EMPTY;
+        ItemStack input = access.activeUseItem(player);
         return admit(player, CallbackSource.SERVER_TICK, input, Optional.empty(), state, gameTick,
                 settings, Optional.of(snapshot), access);
     }
@@ -404,17 +395,6 @@ public final class Controls {
         }
     }
 
-    record ObservedUse(boolean using, ItemStack stack) {
-        ObservedUse {
-            stack = Objects.requireNonNull(stack, "stack").copy();
-        }
-        @Override public ItemStack stack() { return stack.copy(); }
-    }
-
-    interface UseObservation<T> {
-        boolean isUsingItem(T source);
-        ItemStack getUseItem(T source);
-    }
 
     @FunctionalInterface
     interface DropAccess<T> {
@@ -427,7 +407,7 @@ public final class Controls {
         UUID ghastId(G ghast);
         UUID playerId(P player);
         ItemStack itemInHand(P player, InteractionHand hand);
-        ObservedUse observedUse(P player);
+        ItemStack activeUseItem(P player);
     }
 
     enum ServerPlayerControlAccess implements ControlAccess<ServerPlayer, HappyGhast> {
@@ -443,7 +423,9 @@ public final class Controls {
         @Override public ItemStack itemInHand(ServerPlayer player, InteractionHand hand) {
             return player.getItemInHand(hand).copy();
         }
-        @Override public ObservedUse observedUse(ServerPlayer player) { return observeUse(player); }
+        @Override public ItemStack activeUseItem(ServerPlayer player) {
+            return player.isUsingItem() ? player.getUseItem().copy() : ItemStack.EMPTY;
+        }
     }
 
     interface InventoryAccess<T> {
@@ -467,9 +449,4 @@ public final class Controls {
         }
     }
 
-    enum LivingEntityUseObservation implements UseObservation<LivingEntity> {
-        INSTANCE;
-        @Override public boolean isUsingItem(LivingEntity entity) { return entity.isUsingItem(); }
-        @Override public ItemStack getUseItem(LivingEntity entity) { return entity.getUseItem(); }
-    }
 }

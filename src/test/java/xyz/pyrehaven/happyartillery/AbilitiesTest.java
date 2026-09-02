@@ -660,6 +660,29 @@ final class AbilitiesTest {
     }
 
     @Test
+    void staleOutcomeRemovesItsQueueOwnerWithoutExecutionEvidence() throws Exception {
+        ClassNode owner = BytecodeTestSupport.classNode(Abilities.class.getName());
+        assertFalse(owner.innerClasses.stream()
+                .anyMatch(inner -> inner.name.endsWith("$ExecutionEvidence")));
+        assertTrue(owner.methods.stream()
+                .filter(method -> method.name.equals("executeDetonation"))
+                .noneMatch(method -> method.desc.contains("ExecutionEvidence")));
+
+        Object ghast = new Object();
+        GhastState pending = new GhastState(101.0, 100L, 120L, 105L, 300L,
+                java.util.OptionalLong.of(140L), java.util.Optional.of(RIDER_ID));
+        RecordingDetonationAccess access = new RecordingDetonationAccess();
+        access.state = pending;
+        Abilities.FuseQueue<Object, Object> queue = new Abilities.FuseQueue<>();
+        queue.onGhastLoad(ghast, java.util.Optional.of(pending), access);
+        access.missingAttachments.add(ghast);
+
+        assertEquals(0, queue.runDue(140L, Config.defaults(), access));
+        assertEquals(0, fieldSize(queue, "scheduled"));
+        assertEquals(0, fieldSize(queue, "tasks"));
+    }
+
+    @Test
     void missingAttachmentIsStaleAndLaterEqualDeadlineTaskStillConsumesInStableOrder() {
         Object staleGhast = new Object();
         Object liveGhast = new Object();
@@ -1010,7 +1033,6 @@ final class AbilitiesTest {
                 "(Ljava/lang/Object;JLjava/util/UUID;J"
                         + "Lxyz/pyrehaven/happyartillery/Config;"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;"
-                        + "Lxyz/pyrehaven/happyartillery/Abilities$ExecutionEvidence;"
                         + "Ljava/util/Optional;)"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationOutcome;");
         List<MethodInsnNode> removals = callsTo(effects,
@@ -1771,7 +1793,6 @@ final class AbilitiesTest {
                 "(Ljava/lang/Object;JLjava/util/UUID;J"
                         + "Lxyz/pyrehaven/happyartillery/Config;"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationAccess;"
-                        + "Lxyz/pyrehaven/happyartillery/Abilities$ExecutionEvidence;"
                         + "Ljava/util/Optional;)"
                         + "Lxyz/pyrehaven/happyartillery/Abilities$DetonationOutcome;");
         String sphereDescriptor = "(II)Lnet/minecraft/world/phys/Vec3;";
@@ -1792,14 +1813,14 @@ final class AbilitiesTest {
         assertEquals(List.of(
                 "ALOAD 7",
                 "ALOAD 0",
-                "ILOAD 15",
-                "ALOAD 12",
+                "ILOAD 14",
+                "ALOAD 11",
                 "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballCount ()I",
                 "INVOKESTATIC xyz/pyrehaven/happyartillery/Abilities.sphereDirection "
                         + sphereDescriptor,
-                "ALOAD 12",
+                "ALOAD 11",
                 "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballSpeed ()D",
-                "ALOAD 12",
+                "ALOAD 11",
                 "INVOKEVIRTUAL xyz/pyrehaven/happyartillery/Config$Overheat.fireballPower ()I",
                 "INVOKEINTERFACE "
                         + "xyz/pyrehaven/happyartillery/Abilities$DetonationAccess.spawnFireball "
