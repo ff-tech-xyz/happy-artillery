@@ -6,8 +6,8 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 
 ### Changed
 
-- Pilots now receive temporary Fire and Cry controls in the first two free hotbar or main-inventory slots. The controls can move within the owner's inventory and offhand without overwriting ordinary items.
-- Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is always blocked underwater.
+- Pilots now receive one temporary control per enabled ability in free hotbar or main-inventory slots. Allocation is all-or-nothing, and the controls can move within the owner's inventory and offhand without overwriting ordinary items.
+- Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is always blocked underwater. A pending overheat fuse blocks more Fire shots but does not block Cry.
 - Dropping a generated control or moving it into an external container consumes it. Lost controls stay missing until the pilot dismounts and rides again.
 - Removed the ammunition pool and passive refill. Firing is now limited by cooldown, heat, and overheat behavior.
 - Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location and firing state; water cooling has been removed.
@@ -24,7 +24,7 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 - Added an annotated admin reference with every default, unit, range, and accepted zero behavior. Runtime configuration remains strict JSON.
 - Renamed draft heat and overheat settings for clearer purpose. Servers carrying an earlier 1.2.0 draft config must update the old names; startup and reload name the required replacement.
 - Fire cooldown can now be set to zero for continuous admission while heat and overheat continue to govern firing.
-- Added configurable zero, slow, normal, and fast cooling text/color bands under `hud.cooling`. `hud.refreshTicks` must be at least 4.
+- Added configurable firing color and zero, slow, normal, and fast cooling text/color bands. The firing color defaults to gold, while the heat warning remains red. `hud.refreshTicks` must be at least 4.
 
 ## [1.1.2.2] - 2026-08-04 (pre-release)
 

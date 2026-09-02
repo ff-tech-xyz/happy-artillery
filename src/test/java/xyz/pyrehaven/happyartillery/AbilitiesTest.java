@@ -92,7 +92,7 @@ final class AbilitiesTest {
     }
 
     @Test
-    void acceptedCryPlaysConfiguredSoundThenCommitsOnlyCryDeadline() {
+    void acceptedCryDuringPendingDetonationCommitsOnlyCryDeadlineAndPreservesFuseOwner() {
         RecordingCryAccess access = new RecordingCryAccess();
         GhastState original = new GhastState(20.0, 50L, 75L, 90L, 100L,
                 java.util.OptionalLong.of(600L), java.util.Optional.of(RIDER_ID));

@@ -96,8 +96,11 @@
     // Exact integer from 0 through 2147483647. Zero gives emitted fireballs no explosion power.
     "fireballPower": 2,
     // Exact integer from 0 through 2147483647. Zero performs no direct fire-placement attempts.
+    // A positive count samples horizontal positions within firePlacementRadius. Only loaded columns
+    // are resolved to their world surface; the mod does not load or scan chunks for placement.
+    // When firePlacementRadius is zero, any positive count becomes one center attempt.
     "firePlacementAttempts": 24,
-    // Placement radius in blocks, minimum 0. Zero limits attempts to the center position.
+    // Horizontal placement radius in blocks, minimum 0. Zero uses the center rule above.
     "firePlacementRadius": 8.0,
     // true removes the Happy Ghast after detonation; false leaves it alive.
     "killsGhast": true,

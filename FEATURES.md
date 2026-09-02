@@ -7,9 +7,8 @@ specification overrides the earlier G1-G9 questions. Released 1.1.2.2 behavior a
 it is useful regression evidence; defects are not compatibility requirements.
 
 The current branch contains a runnable 1.2.0 candidate. `MIGRATION_PLAN.md` records the completed
-rebuild, and the `.hermes/plans/` files are historical implementation intake. This file is the
-canonical behavior contract. The candidate is not release-ready until exact-head review, deployment,
-and manual acceptance pass.
+rebuild, while this file is the canonical behavior contract. The candidate is not release-ready until
+exact-head review, deployment, and manual acceptance pass.
 
 ## Product boundary
 
@@ -28,11 +27,12 @@ and manual acceptance pass.
   plus `PlayerDropMixin` and `ExternalContainerMixin`. Mapped Minecraft 26.2 evidence proves that
   `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor drops,
   menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. External chest/container
-  insertion does not reach that method, so `ExternalContainerMixin` observes the single post-mutation
-  `Slot.setChanged():void` boundary at `HEAD`. `Controls` inspects `Slot.getItem()` and `Slot.container`,
-  preserves only owner-matching player `Inventory` destinations, and consumes marked controls from every
-  other container. This covers ordinary placement, `QUICK_MOVE` empty/merge, number/offhand swaps, and
-  `QUICK_CRAFT` without reproducing `AbstractContainerMenu.doClick`. `PICKUP_ALL` is inbound
+  insertion does not reach that method, so `ExternalContainerMixin` transforms the incoming stack at
+  `Slot.set(ItemStack)` `HEAD`. `Controls` preserves owner-matching writes to that player's `Inventory`
+  and crafting-input writes, while marked writes to every other container become `ItemStack.EMPTY`
+  before the slot mutation. This covers ordinary placement, `QUICK_MOVE` empty/merge, number/offhand
+  swaps, and `QUICK_CRAFT` without re-entering `Slot.set` or reproducing
+  `AbstractContainerMenu.doClick`. `PICKUP_ALL` is inbound
   slot-to-cursor collection, not outbound chest insertion. Both mixins delegate policy to `Controls`;
   there is no `DeathDropMixin` or predictive `SlotGuardMixin` in the proposed tree.
 - Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
@@ -72,7 +72,7 @@ reference only; runtime never parses it. A root `preset` key is a removed settin
 fails transactionally, preserving the active object and existing file bytes.
 `/ha reload` requires gamemaster permission level 2.
 
-Defaults (seven top-level groups, 35 declared settings and 46 scalar leaves):
+Defaults (seven top-level groups, 36 declared settings and 47 scalar leaves):
 
 | Group | Keys and values |
 |---|---|
@@ -82,11 +82,11 @@ Defaults (seven top-level groups, 35 declared settings and 46 scalar leaves):
 | water | `blocksFiring=true` |
 | overheat | `fuseTicks=0`, `explosionPower=6.0`, `fireballCount=24`, `fireballSpeed=0.4`, `fireballPower=2` (strict integer), `firePlacementAttempts=24`, `firePlacementRadius=8.0`, `killsGhast=true`, `breaksBlocks=true` |
 | cry | `enabled=true`, `volume=10.0`, `cooldownSeconds=10.0` |
-| hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85`, `cooling=(noCoolingText=NO COOLING, noCoolingColor=RED, slowMaxPerSecond=0.5, slowColor=GOLD, normalMaxPerSecond=1.0, normalColor=GREEN, fastColor=BLUE)` |
+| hud | `bossBar=true`, `actionBar=true`, `refreshTicks=4`, `warningFromPercent=85`, `firingColor=GOLD`, `cooling=(noCoolingText=NO COOLING, noCoolingColor=RED, slowMaxPerSecond=0.5, slowColor=GOLD, normalMaxPerSecond=1.0, normalColor=GREEN, fastColor=BLUE)` |
 
 The declared-setting count is the sum of direct members in the seven groups
-(`4 + 3 + 10 + 1 + 9 + 3 + 5 = 35`); recursively expanding five heat profiles and `hud.cooling`
-produces 46 scalar leaves. All configurable numeric values are finite. Negative values are invalid
+(`4 + 3 + 10 + 1 + 9 + 3 + 6 = 36`); recursively expanding five heat profiles and `hud.cooling`
+produces 47 scalar leaves. All configurable numeric values are finite. Negative values are invalid
 except the two biome-temperature thresholds. Zero means no Fire or Cry cooldown, immediate overheat
 fuse, no attempts for count settings, and no passive cooling for a zero-rate heat profile; `heat.limit`
 and each profile's `heatPerShot` remain strictly positive. Nether and End always use their fixed
@@ -115,6 +115,8 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   elapsed interval twice. An unloaded ghast catches up once on return; Nether heat remains unchanged.
 
 - Cry admission compares `now` with `cryReadyTick`; accepted cry sets a new absolute game-time deadline.
+  A pending detonation blocks further Fire shots only. Cry remains available when enabled, above water,
+  and off cooldown, and an accepted Cry preserves the pending detonation deadline and rider UUID.
 - A pending fuse detonates once when `now >= detonateAtTick`. `Abilities.FuseQueue` is the only fuse
   scheduler. Every task stores only ghast UUID, absolute deadline, and rider UUID; it never retains a live
   entity, level, or passenger graph. Execution resolves the currently loaded ghast by UUID, then re-reads
@@ -174,11 +176,11 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   boundary and discards marked control drops. This covers direct Q, cursor and menu `THROW`, creative,
   and ordinary/offhand/equipment death drops while ordinary drops remain vanilla. Player death lets
   vanilla empty the inventory; there is no pre-drop restoration.
-- `ExternalContainerMixin` observes `Slot.setChanged()` after menu mutation. At that boundary,
-  `Controls` first returns for an empty stack or one without vanilla `CUSTOM_DATA`, before any marker
-  decode or custom-data copy. It preserves an owner-matching control only when the destination container
-  is that owner's player `Inventory`; it consumes a marked control in every other container through the
-  menu mutation owner with `Slot.set(ItemStack.EMPTY)`, never by changing the observed stack's count.
+- `ExternalContainerMixin` transforms the incoming argument at `Slot.set(ItemStack)` `HEAD`.
+  `Controls` first returns the original stack when it is empty or lacks vanilla `CUSTOM_DATA`, before
+  any marker decode or custom-data copy. It also preserves crafting-input writes and owner-matching
+  controls written to that owner's player `Inventory`. A marked write to every other container becomes
+  `ItemStack.EMPTY` before the original slot mutation; the mixin does not re-enter `Slot.set`.
   Ordinary placement,
   `QUICK_MOVE` empty/merge, number/offhand swaps, and `QUICK_CRAFT` are covered without predicting or
   cancelling `doClick`. `PICKUP_ALL` is inbound slot-to-cursor collection, not outbound container
@@ -267,7 +269,9 @@ Overheat:
   loads, including after restart.
 - At the ghast position, make one best-effort effect pass: attempt the configured power-6 explosion,
   every one of the 24 evenly distributed sphere fireballs at speed 0.4/power 2, and each of up to 24 fire
-  candidates within radius 8 without aborting later attempts after a rejection. Each sphere direction
+  fire candidates sampled horizontally within radius 8 without aborting later attempts after a rejection.
+  Fire candidates resolve only to loaded world-surface positions and never load or scan chunks. A zero
+  radius with a positive attempt count makes one center attempt. Each sphere direction
   uses the same authoritative launch calculation as normal fire, against one union of the ghast and its
   complete passenger-tree collision bounds, so every real fireball AABB starts disjoint from that union.
   The 24 directions and spawn positions remain distinct. Occupied or unsupported
@@ -337,8 +341,10 @@ Cry:
   that it uses `fastColor`. Threshold equality belongs to the lower band.
 - Boss color is red when that same bounded normalized progress reaches
   `clamp(hud.warningFromPercent / 100, 0, 1)`—equivalently, when heat reaches the configured
-  `heat.limit` multiplied by that fraction. Otherwise firing retains its firing theme and cooling uses
-  the effective-rate theme above; biome identity never hardcodes HUD text or color. Warning particles use
+  `heat.limit` multiplied by that fraction. Otherwise firing uses configured `hud.firingColor` for both
+  boss-bar and action-bar presentation, while cooling uses the effective-rate theme above. The default
+  firing color is `GOLD`; warning `RED` still takes precedence. Biome identity never hardcodes HUD text
+  or color. Warning particles use
   the same configured normalized threshold (85% by default) and are sent only to riders in the ghast's
   region.
 - The sole tick driver groups ridden players by ghast, performs one bounded rider/status reconciliation
@@ -372,11 +378,11 @@ Tests must prove the rewrite does not restore these released faults:
 
 Before release, run the current audit-repair intake's final exact-head and gameplay handoff gates on the
 same checksum-matched candidate on Java and Bedrock through Geyser. Acceptance must cover atomic
-first-two-free allocation; zero/one-free refusal with no writes; arbitrary
+allocation for zero, one, and two enabled abilities; insufficient-space refusal with no writes; arbitrary
 hotbar and offhand held use; inventory-only and missing-control HUD priority; same-player movement; direct
 Q, cursor/menu `THROW`, creative, ordinary/offhand/equipment death-drop consumption; external-container
 placement, `QUICK_MOVE` empty/merge, number/offhand swap, and `QUICK_CRAFT` consumption at the proven
-post-mutation boundary; inbound `PICKUP_ALL` slot-to-cursor behavior; no same-ride regeneration; dismount/
+incoming `Slot.set` transformation boundary; inbound `PICKUP_ALL` slot-to-cursor behavior; no same-ride regeneration; dismount/
 remount regeneration without overwrite; scoped cleanup across logout, hard stop, dimension change, and
 ghast removal; two-rider pilot authorization plus passenger HUD; plain-item admission-only behavior; and
 Bedrock mount/fire/dismount without ghost items. Verify vanilla normal-fire `mobGriefing` on/off behavior

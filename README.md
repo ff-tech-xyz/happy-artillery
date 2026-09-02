@@ -11,7 +11,7 @@ When you become the pilot, the mod allocates one temporary control for each enab
 The generated controls can move normally within their owner's hotbar, main inventory, and offhand. Hold one in either hand to use it:
 
 - Fire Control fires on right-click and supports hold-to-fire by default.
-- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used underwater.
+- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used underwater. A pending overheat fuse blocks more Fire shots, not Cry.
 
 Controls are tied to their owner and the current ride. A marked control cannot activate a block, so the default Fire Control cannot be consumed as a fire charge or ignite terrain. Trying to drop a control or place it in an external container consumes it. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive the configured control or controls. Ordinary items are never overwritten to make room.
 
@@ -63,7 +63,7 @@ used an earlier 1.2.0 draft config, update these names before startup or reload:
 
 The old names fail with the replacement named; they aren't accepted as aliases.
 
-`hud.refreshTicks` has a minimum of `4`. The `hud.cooling` section controls the zero-rate text and color (`noCoolingText`, `noCoolingColor`) and the slow, normal, and fast cooling bands (`slowMaxPerSecond`, `slowColor`, `normalMaxPerSecond`, `normalColor`, `fastColor`).
+`hud.refreshTicks` has a minimum of `4`. `hud.firingColor` controls firing status on both HUD channels and defaults to `GOLD`; the heat warning still turns the HUD red. The `hud.cooling` section controls the zero-rate text and color (`noCoolingText`, `noCoolingColor`) and the slow, normal, and fast cooling bands (`slowMaxPerSecond`, `slowColor`, `normalMaxPerSecond`, `normalColor`, `fastColor`).
 
 ## Building from source
 

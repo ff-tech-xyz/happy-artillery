@@ -6,9 +6,6 @@ The ground-up 1.2.0 rebuild and the disposable movable-control migration describ
 complete. This is a historical record, not an active execution plan. The canonical target behavior is
 `FEATURES.md`, and the annotated proposed ownership tree is `ARCHITECTURE.md`.
 
-The `.hermes/plans/` files are historical implementation intake. They do not override the current
-behavior in `FEATURES.md`, and the retired phases below are not a second queue of instructions.
-
 ## Completed rebuild
 
 The rebuild established one owner graph with thirteen production Java files, eight risk-grouped tests,
@@ -16,9 +13,9 @@ and exactly two narrow mixins: `PlayerDropMixin` and `ExternalContainerMixin`.
 
 | Historical checkpoint | Completed result |
 |---|---|
-| Boundary evidence and canonical docs | Mapped Minecraft 26.2 routes established the three-argument `ServerPlayer.drop` return boundary and post-mutation `Slot.setChanged` external-container boundary. |
+| Boundary evidence and canonical docs | Mapped Minecraft 26.2 routes established the three-argument `ServerPlayer.drop` return boundary and the incoming `Slot.set(ItemStack)` external-container transformation boundary. |
 | Strict configuration lifecycle | `Config` became the sole schema, codec, validation, registry-resolution, atomic publication, and active-state owner. Unknown and removed settings fail transactionally. |
-| Disposable movable controls | Fixed slots, stashes, restoration, locks, predictive click logic, `DeathDropMixin`, and `SlotGuardMixin` were removed. Controls allocate atomically into the first two free inventory candidates and carry type, owner, and ride identity. |
+| Disposable movable controls | Fixed slots, stashes, restoration, locks, predictive click logic, `DeathDropMixin`, and `SlotGuardMixin` were removed. Controls allocate one stack per enabled ability atomically into free inventory candidates and carry type, owner, and ride identity. |
 | Bounded integration and HUD | Input callbacks became actor-local; the normal tick shares one bounded pilot inventory snapshot, groups riders by ghast, removes pilotless HUD, and preserves the presentation packet bounds. |
 | Truthful ability boundaries | Fire and cry report only observable outcomes. Normal fire remains a real Happy-Ghast-owned vanilla `LargeFireball` launched clear of the complete ridden collision graph. |
 | Exact-candidate activation groundwork | The rebuilt owner graph became runnable and machine-tested; release remained gated on exact-head review, deployment, and manual acceptance. |
@@ -47,14 +44,15 @@ changes them explicitly.
 
 The current audit intake updates the final target without reopening the completed rebuild:
 
-- Configuration has seven top-level groups, 35 direct declared settings, and 46 recursively expanded
+- Configuration has seven top-level groups, 36 direct declared settings, and 47 recursively expanded
   scalar leaves. Defaults plus individual overrides are the only model. Missing files receive complete
   defaults; existing valid sparse files preserve their exact bytes through load and reload. Root `preset`
   is a removed setting and fails transactionally. The six draft heat/overheat names are rejected with
   their canonical replacements, Fire cooldown accepts zero, and full dotted paths identify type errors.
   `docs/happy-artillery-config.jsonc` is the documentation-only annotated reference; runtime remains
   strict JSON and never parses it.
-- `hud.cooling` supplies configurable zero/slow/normal/fast text and vanilla colors. HUD receives one
+- `hud.firingColor` supplies the firing theme and `hud.cooling` supplies configurable
+  zero/slow/normal/fast text and vanilla colors. HUD receives one
   typed mode: firing-window status or the selected profile rate; water does not affect cooling.
   It does not re-derive timing or biome policy, and action cadence and packet bounds remain unchanged.
 - `Abilities.FuseQueue` owns UUID-only tasks, resolves entities at execution, removes stale attachment
@@ -62,8 +60,9 @@ The current audit intake updates the final target without reopening the complete
 - Overheat with `breaksBlocks=false` changes no terrain and starts no fire. With `breaksBlocks=true`, it
   uses `ExplosionInteraction.MOB`, leaving terrain damage to vanilla `mobGriefing`. All configured sphere
   fireballs use the one authoritative complete-passenger-union collision-clear launch calculation.
-- External-container consumption uses cheap empty/custom-data preflight and removes a marked destination
-  through `Slot.set(ItemStack.EMPTY)`, not an in-notification count mutation.
+- External-container consumption uses cheap empty/custom-data preflight. `Controls` preserves crafting
+  inputs and owner-matching player-inventory writes, and returns `ItemStack.EMPTY` for marked external
+  writes before the original `Slot.set(ItemStack)` mutation; the mixin does not re-enter `Slot.set`.
 - Launch rejection and ghast removal expose only truthful outcomes, and production HUD teardown routes
   through the same typed implementation as normal tested presentation.
 

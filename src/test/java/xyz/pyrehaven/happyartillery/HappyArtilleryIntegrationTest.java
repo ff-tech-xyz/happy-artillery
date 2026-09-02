@@ -38,12 +38,14 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class HappyArtilleryIntegrationTest {
     private static final String PACKAGE = "xyz/pyrehaven/happyartillery/";
@@ -319,6 +321,23 @@ final class HappyArtilleryIntegrationTest {
                 .filter(line -> line.strip().equals(
                         "archivesName = \"${project.archives_base_name}\""))
                 .count());
+    }
+
+    @Test
+    void buildAndTrackedAuthorityDocsMatchTheImplementedProjectBoundaries() throws Exception {
+        String properties = Files.readString(Path.of("gradle.properties"));
+        String agents = Files.readString(Path.of("AGENTS.md"));
+        String features = Files.readString(Path.of("FEATURES.md"));
+        String migration = Files.readString(Path.of("MIGRATION_PLAN.md"));
+
+        assertAll(
+                () -> assertTrue(properties.lines().anyMatch(
+                        line -> line.equals("maven_group=xyz.pyrehaven"))),
+                () -> assertFalse(features.contains(".hermes/plans")),
+                () -> assertFalse(migration.contains(".hermes/plans")),
+                () -> assertFalse(agents.contains("Slot.setChanged")),
+                () -> assertFalse(features.contains("Slot.setChanged")),
+                () -> assertFalse(migration.contains("Slot.setChanged")));
     }
 
     @Test
