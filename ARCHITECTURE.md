@@ -48,8 +48,8 @@ happy-artillery/
 │   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
 │   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
 │   │   │       └── ExternalContainerMixin.java
-│   │   │           # Observes Slot.setChanged() at HEAD after menu mutation and delegates cheap marker
-│   │   │           # preflight plus external-destination removal through Slot.set(ItemStack.EMPTY).
+│   │   │           # Transforms the ItemStack argument at Slot.set(ItemStack) HEAD, preserving player
+│   │   │           # crafting inputs and replacing marked external-container writes with ItemStack.EMPTY.
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.

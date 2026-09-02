@@ -370,7 +370,11 @@ public final class HappyArtillery implements ModInitializer {
 
     private static InteractionResult onUseBlock(
             Player player, Level level, InteractionHand hand, BlockHitResult hit) {
-        return Controls.blockUseResult(player.getItemInHand(hand));
+        InteractionResult result = Controls.blockUseResult(player.getItemInHand(hand));
+        if (result == InteractionResult.FAIL && player instanceof ServerPlayer serverPlayer) {
+            handleCallback(serverPlayer, null, hand);
+        }
+        return result;
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {
@@ -545,7 +549,7 @@ public final class HappyArtillery implements ModInitializer {
             LOGGER.warn("Resetting invalid persisted rider state for {}: {}",
                     player.getUUID(), failure.getMessage());
             RiderState.replace((AttachmentTarget) (Object) player,
-                    Controls.recoverInvalidState(player, failure));
+                    Controls.recoverInvalidState(player));
             HUD.remove(player);
         }
 

@@ -210,7 +210,6 @@ public final class Hud<R, H> {
             Controls.InventorySnapshot controls = snapshot.pilotControls().orElseThrow();
             if (missingControl(controls, config)) {
                 return matchingControls(controls, config, Controls.ControlLocation.MISSING) == 1
-                        && enabledControlCount(config) == 1
                         ? "CONTROL MISSING · DISMOUNT AND REMOUNT"
                         : "CONTROLS MISSING · DISMOUNT AND REMOUNT";
             }
@@ -239,9 +238,6 @@ public final class Hud<R, H> {
         return BigDecimal.valueOf(perSecond).stripTrailingZeros().toPlainString();
     }
 
-    private static int enabledControlCount(Config config) {
-        return (config.fire().enabled() ? 1 : 0) + (config.cry().enabled() ? 1 : 0);
-    }
 
     private static int matchingControls(
             Controls.InventorySnapshot controls, Config config, Controls.ControlLocation location) {

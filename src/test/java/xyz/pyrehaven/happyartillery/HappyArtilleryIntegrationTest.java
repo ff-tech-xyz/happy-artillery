@@ -444,6 +444,22 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(List.of(), unexpected.recovered);
     }
     @Test
+    void productionBlockUseRoutesMarkedControlsThroughActorAdmissionBeforeFailingVanillaUse()
+            throws IOException {
+        ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
+        MethodNode block = method(root, "onUseBlock",
+                "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/level/Level;"
+                        + "Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)"
+                        + "Lnet/minecraft/world/InteractionResult;");
+        List<MethodInsnNode> calls = methodCalls(block);
+
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(ROOT)
+                && call.name.equals("handleCallback")).count());
+        assertEquals(1, calls.stream().filter(call -> call.owner.equals(PACKAGE + "Controls")
+                && call.name.equals("blockUseResult")).count());
+    }
+
+    @Test
     void productionCallbackIsActorLocalAndDefersHudFanOut() throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
         MethodNode callback = method(root, "handleCallback",
@@ -824,7 +840,7 @@ final class HappyArtilleryIntegrationTest {
             playerChecks.merge(player, 1, Integer::sum);
             order.add("check:" + player);
             if (player.equals(invalidPlayer)) {
-                throw new Controls.InvalidRiderState(Optional.empty(), "invalid test state");
+                throw new Controls.InvalidRiderState("invalid test state");
             }
             if (player.equals(unexpectedPlayer)) {
                 throw new RuntimeException("unexpected world failure");
@@ -982,7 +998,7 @@ final class HappyArtilleryIntegrationTest {
             return control;
         }
         @Override public Controls.ObservedUse observedUse(String player) {
-            return new Controls.ObservedUse(false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+            return new Controls.ObservedUse(false, ItemStack.EMPTY);
         }
     }
 

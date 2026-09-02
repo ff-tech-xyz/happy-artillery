@@ -333,19 +333,33 @@ final class HudTest {
     }
 
     @Test
-    void twoEnabledControlsUsePluralMissingWarningWhenEitherIsMissing() {
-        RecordingAccess access = new RecordingAccess();
-        Hud<UUID, String> hud = new Hud<>(access);
-        Controls.InventorySnapshot controls = controlSnapshot(
-                Controls.ControlLocation.MISSING,
-                Controls.ControlLocation.HAND_ACCESSIBLE);
+    void controlWarningPluralityMatchesAffectedControlCount() {
+        List<Controls.InventorySnapshot> controls = List.of(
+                controlSnapshot(Controls.ControlLocation.MISSING,
+                        Controls.ControlLocation.HAND_ACCESSIBLE),
+                controlSnapshot(Controls.ControlLocation.MISSING,
+                        Controls.ControlLocation.MISSING),
+                controlSnapshot(Controls.ControlLocation.MAIN_INVENTORY_ONLY,
+                        Controls.ControlLocation.HAND_ACCESSIBLE),
+                controlSnapshot(Controls.ControlLocation.MAIN_INVENTORY_ONLY,
+                        Controls.ControlLocation.MAIN_INVENTORY_ONLY));
+        List<String> expected = List.of(
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
+                "action:GOLD:CONTROL IN INVENTORY",
+                "action:GOLD:CONTROLS IN INVENTORY");
 
-        hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
-                snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0), Optional.of(controls)),
-                Config.defaults(), access);
+        for (int index = 0; index < controls.size(); index++) {
+            RecordingAccess access = new RecordingAccess();
+            Hud<UUID, String> hud = new Hud<>(access);
 
-        assertEquals(List.of("action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"),
-                access.actionEvents());
+            hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
+                    snapshot(25.0, BiomeClass.BASE, new Hud.Cooling(1.0),
+                            Optional.of(controls.get(index))),
+                    Config.defaults(), access);
+
+            assertEquals(List.of(expected.get(index)), access.actionEvents(), "case " + index);
+        }
     }
 
     @Test
@@ -429,7 +443,7 @@ final class HudTest {
                 controlSnapshot(Controls.ControlLocation.HAND_ACCESSIBLE,
                         Controls.ControlLocation.HAND_ACCESSIBLE));
         List<String> expected = List.of(
-                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
                 "action:GOLD:CONTROL IN INVENTORY",
                 "action:GOLD:CONTROLS IN INVENTORY",
                 "action:GREEN:HEAT 25% · COOLING 1/s");
@@ -482,8 +496,8 @@ final class HudTest {
                 warning, Config.defaults(), access);
 
         assertEquals(List.of(
-                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
-                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"),
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"),
                 access.actionEvents());
     }
 
@@ -507,7 +521,7 @@ final class HudTest {
                 Config.defaults(), access);
 
         assertTrue(access.presentationEvents().contains(
-                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT"), access.events::toString);
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT"), access.events::toString);
     }
 
     @Test
@@ -579,7 +593,7 @@ final class HudTest {
                 inventory, Config.defaults(), access);
 
         assertEquals(List.of(
-                "action:RED:CONTROLS MISSING · DISMOUNT AND REMOUNT",
+                "action:RED:CONTROL MISSING · DISMOUNT AND REMOUNT",
                 "action:GOLD:CONTROL IN INVENTORY"), access.actionEvents());
     }
 

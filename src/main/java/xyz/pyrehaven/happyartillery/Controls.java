@@ -16,6 +16,7 @@ import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.component.Consumable;
@@ -114,13 +115,12 @@ public final class Controls {
                     || cache.bossColor().equals("RED") || cache.bossColor().equals("GOLD")
                     || cache.bossColor().equals("BLUE") || cache.bossColor().equals("GREEN");
             if (!validProgress || !validColor) {
-                throw new InvalidRiderState(state.riddenGhastId(), "invalid persisted HUD cache");
+                throw new InvalidRiderState("invalid persisted HUD cache");
             }
         });
     }
 
-    static RiderState recoverInvalidState(ServerPlayer player, InvalidRiderState failure) {
-        Objects.requireNonNull(failure, "failure");
+    static RiderState recoverInvalidState(ServerPlayer player) {
         return recoverInvalidState(player, player.getUUID(), ServerPlayerInventoryAccess.INSTANCE);
     }
 
@@ -209,13 +209,15 @@ public final class Controls {
         }
     }
 
-    public static void consumeExternalControl(Slot destination) {
+    public static ItemStack transformExternalControlWrite(Slot destination, ItemStack stack) {
         Objects.requireNonNull(destination, "destination");
+        Objects.requireNonNull(stack, "stack");
+        if (destination.container instanceof TransientCraftingContainer) {
+            return stack;
+        }
         UUID destinationOwnerId = destination.container instanceof Inventory inventory
                 ? inventory.player.getUUID() : null;
-        if (shouldConsumeExternalControl(destination.getItem(), destinationOwnerId)) {
-            destination.set(ItemStack.EMPTY);
-        }
+        return shouldConsumeExternalControl(stack, destinationOwnerId) ? ItemStack.EMPTY : stack;
     }
 
     static boolean shouldConsumeExternalControl(ItemStack stack, UUID destinationOwnerId) {
@@ -234,8 +236,7 @@ public final class Controls {
     }
 
     static <T> ObservedUse observeUse(T source, UseObservation<T> observation) {
-        return new ObservedUse(observation.isUsingItem(source), observation.getUsedItemHand(source),
-                observation.getUseItem(source));
+        return new ObservedUse(observation.isUsingItem(source), observation.getUseItem(source));
     }
 
     static Admission handleUseItem(
@@ -345,7 +346,7 @@ public final class Controls {
         if (markedCry || plainCry) {
             return Optional.of(ControlIntent.CRY);
         }
-        return !settings.holdToFire() && (markedFire || plainFire)
+        return plainFire || !settings.holdToFire() && markedFire
                 ? Optional.of(ControlIntent.FIRE) : Optional.empty();
     }
 
@@ -398,21 +399,13 @@ public final class Controls {
     }
 
     static final class InvalidRiderState extends RuntimeException {
-        private final Optional<UUID> rideId;
-
-        InvalidRiderState(Optional<UUID> rideId, String message) {
+        InvalidRiderState(String message) {
             super(message);
-            this.rideId = Objects.requireNonNull(rideId, "rideId");
-        }
-
-        Optional<UUID> rideId() {
-            return rideId;
         }
     }
 
-    record ObservedUse(boolean using, InteractionHand hand, ItemStack stack) {
+    record ObservedUse(boolean using, ItemStack stack) {
         ObservedUse {
-            Objects.requireNonNull(hand, "hand");
             stack = Objects.requireNonNull(stack, "stack").copy();
         }
         @Override public ItemStack stack() { return stack.copy(); }
@@ -420,7 +413,6 @@ public final class Controls {
 
     interface UseObservation<T> {
         boolean isUsingItem(T source);
-        InteractionHand getUsedItemHand(T source);
         ItemStack getUseItem(T source);
     }
 
@@ -478,9 +470,6 @@ public final class Controls {
     enum LivingEntityUseObservation implements UseObservation<LivingEntity> {
         INSTANCE;
         @Override public boolean isUsingItem(LivingEntity entity) { return entity.isUsingItem(); }
-        @Override public InteractionHand getUsedItemHand(LivingEntity entity) {
-            return entity.getUsedItemHand();
-        }
         @Override public ItemStack getUseItem(LivingEntity entity) { return entity.getUseItem(); }
     }
 }

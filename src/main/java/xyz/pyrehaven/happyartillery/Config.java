@@ -308,6 +308,10 @@ public record Config(
 
         requireIdentifier("controls.fireItem", controls.fireItem());
         requireIdentifier("controls.cryItem", controls.cryItem());
+        if (controls.allowPlainItems() && controls.fireItem().equals(controls.cryItem())) {
+            throw new IllegalArgumentException(
+                    "controls.fireItem and controls.cryItem must differ when controls.allowPlainItems is true");
+        }
 
         requireNonNegative("fire.shotCooldownSeconds", fire.shotCooldownSeconds());
         requireRange("fire.explosionPower", fire.explosionPower(), 0, Integer.MAX_VALUE);

@@ -19,6 +19,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
@@ -352,7 +353,6 @@ final class ControlsTest {
                 Controls.InvalidRiderState.class,
                 () -> Controls.reconcile(inventory, invalid, Optional.of(RIDE), inventory));
 
-        assertEquals(Optional.of(RIDE), failure.rideId());
         assertEquals("invalid persisted HUD cache", failure.getMessage());
         assertTrue(inventory.writeSlots().isEmpty());
     }
@@ -396,7 +396,7 @@ final class ControlsTest {
     void heldAdmissionConsumesTheSharedSnapshotAndCannotAcceptMissingGeneratedControl() {
         TestPilot pilot = TestPilot.riding();
         ItemStack fire = fireControl(OWNER, RIDE);
-        pilot.observed = new Controls.ObservedUse(true, InteractionHand.MAIN_HAND, fire);
+        pilot.observed = new Controls.ObservedUse(true, fire);
         RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
         Controls.InventorySnapshot missing = new Controls.InventorySnapshot(
                 Controls.ControlLocation.MISSING,
@@ -587,7 +587,7 @@ final class ControlsTest {
     void holdSamplingAndCallbackShareSameTickDeduplication() {
         TestPilot pilot = TestPilot.riding();
         ItemStack fire = fireControl(OWNER, RIDE);
-        pilot.observed = new Controls.ObservedUse(true, InteractionHand.OFF_HAND, fire);
+        pilot.observed = new Controls.ObservedUse(true, fire);
         pilot.main = cryControl(OWNER, RIDE);
         RiderState state = new RiderState(Optional.of(RIDE), 30L, Optional.empty());
 
@@ -621,6 +621,32 @@ final class ControlsTest {
             assertInstanceOf(Controls.Ignored.class, Controls.handleUseItem(
                     pilot, InteractionHand.MAIN_HAND, state, 11L,
                     Config.current().controls(), pilot));
+        }
+    }
+
+    @Test
+    void plainFireRightClickIsAcceptedEvenWhenGeneratedControlsUseHoldToFire(@TempDir Path directory)
+            throws Exception {
+        Config original = Config.current();
+        Path file = directory.resolve("happy-artillery.json");
+        try {
+            Files.writeString(file, """
+                    {"controls":{"holdToFire":true,"allowPlainItems":true}}
+                    """);
+            Config.reload(file);
+            TestPilot pilot = TestPilot.riding();
+            pilot.main = new ItemStack(Items.FIRE_CHARGE);
+            RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+
+            Controls.Admission admission = Controls.handleUseItem(
+                    pilot, InteractionHand.MAIN_HAND, state, 11L,
+                    Config.current().controls(), pilot);
+
+            assertEquals(Controls.ControlIntent.FIRE,
+                    assertInstanceOf(Controls.Accepted.class, admission).intent());
+        } finally {
+            Files.writeString(file, new com.google.gson.Gson().toJson(original));
+            Config.reload(file);
         }
     }
 
@@ -708,37 +734,43 @@ final class ControlsTest {
     }
 
     @Test
-    void productionSlotAdapterMutatesActualExternalDestinationAndItsLiveMergedStack() {
+    void slotWriteTransformConsumesActualExternalDestinationsWithoutNestedMutation() {
         ItemStack mergedDestination = fireControl(OWNER, RIDE);
         mergedDestination.setCount(2);
         SimpleContainer chest = new SimpleContainer(1);
-        chest.setItem(0, mergedDestination);
         Slot destination = new Slot(chest, 0, 0, 0);
-        ItemStack live = destination.getItem();
 
-        Controls.consumeExternalControl(destination);
+        ItemStack transformed = Controls.transformExternalControlWrite(destination, mergedDestination);
+        destination.set(transformed);
 
-        assertNotSame(live, destination.getItem());
         assertSame(ItemStack.EMPTY, destination.getItem());
-        assertEquals(2, live.getCount());
+        assertEquals(2, mergedDestination.getCount());
         assertTrue(chest.getItem(0).isEmpty());
 
         ItemStack ordinary = new ItemStack(Items.DIAMOND, 3);
-        chest.setItem(0, ordinary);
-        Controls.consumeExternalControl(destination);
+        destination.set(Controls.transformExternalControlWrite(destination, ordinary));
         assertSame(ordinary, destination.getItem());
         assertEquals(3, destination.getItem().getCount());
     }
 
     @Test
-    void observedUseSamplesAllBoundaryValuesAndDefensivelyOwnsItsStack() {
+    void slotWriteTransformPreservesMarkedPlayerCraftingInputs() {
+        TransientCraftingContainer crafting = new TransientCraftingContainer(null, 2, 2);
+        Slot input = new Slot(crafting, 0, 0, 0);
+        ItemStack control = fireControl(OWNER, RIDE);
+
+        ItemStack transformed = Controls.transformExternalControlWrite(input, control);
+
+        assertSame(control, transformed);
+        assertFalse(transformed.isEmpty());
+    }
+
+    @Test
+    void observedUseSamplesActiveStackAndDefensivelyOwnsIt() {
         ItemStack source = fireControl(OWNER, RIDE);
         Controls.ObservedUse observed = Controls.observeUse(source,
                 new Controls.UseObservation<>() {
                     @Override public boolean isUsingItem(ItemStack ignored) { return true; }
-                    @Override public InteractionHand getUsedItemHand(ItemStack ignored) {
-                        return InteractionHand.OFF_HAND;
-                    }
                     @Override public ItemStack getUseItem(ItemStack value) { return value; }
                 });
         source.setCount(0);
@@ -746,7 +778,6 @@ final class ControlsTest {
         firstRead.setCount(0);
 
         assertTrue(observed.using());
-        assertEquals(InteractionHand.OFF_HAND, observed.hand());
         assertFalse(observed.stack().isEmpty());
     }
 
@@ -773,15 +804,29 @@ final class ControlsTest {
                 "xyz.pyrehaven.happyartillery.mixin.ExternalContainerMixin");
         assertEquals(List.of(Type.getType(Slot.class)), annotationValue(
                 annotation(external.invisibleAnnotations, "Lorg/spongepowered/asm/mixin/Mixin;"), "value"));
-        MethodNode externalHandler = injectedHandler(external);
-        AnnotationNode externalInject = annotation(externalHandler.visibleAnnotations,
-                "Lorg/spongepowered/asm/mixin/injection/Inject;");
-        assertEquals(List.of("setChanged()V"), annotationValue(externalInject, "method"));
-        assertEquals(1, annotationValue(externalInject, "require"));
-        assertEquals("HEAD", annotationValue((AnnotationNode)
-                ((List<?>) annotationValue(externalInject, "at")).getFirst(), "value"));
-        assertSingleControlsCall(externalHandler, "consumeExternalControl",
-                "(Lnet/minecraft/world/inventory/Slot;)V");
+        MethodNode externalHandler = external.methods.stream().filter(candidate -> annotation(
+                candidate.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/ModifyVariable;") != null)
+                .findFirst().orElseThrow();
+        AnnotationNode externalTransform = annotation(externalHandler.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/ModifyVariable;");
+        assertEquals(List.of("set(Lnet/minecraft/world/item/ItemStack;)V"),
+                annotationValue(externalTransform, "method"));
+        assertEquals(1, annotationValue(externalTransform, "require"));
+        assertEquals(true, annotationValue(externalTransform, "argsOnly"));
+        Object at = annotationValue(externalTransform, "at");
+        AnnotationNode externalAt = at instanceof AnnotationNode annotation
+                ? annotation
+                : (AnnotationNode) ((List<?>) at).getFirst();
+        assertEquals("HEAD", annotationValue(externalAt, "value"));
+        assertSingleControlsCall(externalHandler, "transformExternalControlWrite",
+                "(Lnet/minecraft/world/inventory/Slot;Lnet/minecraft/world/item/ItemStack;)"
+                        + "Lnet/minecraft/world/item/ItemStack;");
+        assertEquals(0, Stream.iterate(externalHandler.instructions.getFirst(),
+                        java.util.Objects::nonNull, org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast)
+                .filter(call -> call.owner.equals("net/minecraft/world/inventory/Slot")
+                        && call.name.equals("set")).count());
     }
 
     @Test
@@ -935,8 +980,7 @@ final class ControlsTest {
         private ItemStack offhand = ItemStack.EMPTY;
         private boolean riding = true;
         private boolean controllingFirstPassenger = true;
-        private Controls.ObservedUse observed = new Controls.ObservedUse(
-                false, InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        private Controls.ObservedUse observed = new Controls.ObservedUse(false, ItemStack.EMPTY);
         static TestPilot riding() { return new TestPilot(); }
         @Override public Optional<UUID> riddenHappyGhast(TestPilot player) {
             return riding ? Optional.of(RIDE) : Optional.empty();

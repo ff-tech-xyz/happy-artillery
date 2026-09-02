@@ -177,6 +177,31 @@ final class ConfigTest {
     }
 
     @Test
+    void identicalPlainControlItemsAreRejectedOnlyWhenPlainItemsAreAllowed(@TempDir Path directory)
+            throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Files.writeString(file, """
+                {"controls":{"fireItem":"minecraft:stick","cryItem":"minecraft:stick",
+                "allowPlainItems":false}}
+                """);
+
+        Config allowed = Config.load(file);
+
+        assertEquals(allowed.controls().fireItem(), allowed.controls().cryItem());
+
+        Files.writeString(file, """
+                {"controls":{"fireItem":"minecraft:stick","cryItem":"minecraft:stick",
+                "allowPlainItems":true}}
+                """);
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.load(file));
+
+        assertEquals(
+                "controls.fireItem and controls.cryItem must differ when controls.allowPlainItems is true",
+                failure.getMessage());
+    }
+
+    @Test
     void fireEnabledDefaultsTrueAndSparseOverridePreservesExactBytes(@TempDir Path directory)
             throws Exception {
         assertTrue(Config.defaults().fire().enabled());
