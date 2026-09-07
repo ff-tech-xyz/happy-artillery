@@ -11,15 +11,15 @@ When you become the pilot, the mod allocates one temporary control for each enab
 The generated controls can move normally within their owner's hotbar, main inventory, and offhand. Hold one in either hand to use it:
 
 - Fire Control fires on right-click and supports hold-to-fire by default.
-- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used underwater. A pending overheat fuse blocks more Fire shots, not Cry.
+- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used while the ghast is touching water. A pending overheat fuse blocks more Fire shots, not Cry.
 
-Controls are tied to their owner and the current ride. A marked control cannot activate a block, so the default Fire Control cannot be consumed as a fire charge or ignite terrain. Trying to drop a control or place it in an external container consumes it. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive the configured control or controls. Ordinary items are never overwritten to make room.
+Controls are tied to their owner and the current ride. A marked control cannot activate a block, so the default Fire Control cannot be consumed as a fire charge or ignite terrain. Trying to drop a control or place it in an external container consumes it; crafting-input slots are the exception and keep the control. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive the configured control or controls. Ordinary items are never overwritten to make room.
 
 ## Heat, cooling, and overheat
 
-Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water doesn't change cooling. Cry is always blocked underwater; Fire is blocked there by default and follows `water.blocksFiring`.
+Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water doesn't change cooling. Cry is blocked whenever the ghast is touching water; Fire is blocked there by default and follows `water.blocksFiring`.
 
-The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Missing and inventory warnings consider only enabled controls and use `CONTROL` or `CONTROLS` to match. Passengers see the same heat and cooling status without receiving controls.
+The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Missing and inventory warnings consider only enabled controls and use `CONTROL` for one affected control or `CONTROLS` for two. Passengers see the same heat and cooling status without receiving controls.
 
 Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod attempts direct fire placement only while `mobGriefing` is enabled. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
 

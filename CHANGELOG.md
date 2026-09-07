@@ -7,8 +7,8 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 ### Changed
 
 - Pilots now receive one temporary control per enabled ability in free hotbar or main-inventory slots. Allocation is all-or-nothing, and the controls can move within the owner's inventory and offhand without overwriting ordinary items.
-- Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is always blocked underwater. A pending overheat fuse blocks more Fire shots but does not block Cry.
-- Dropping a generated control or moving it into an external container consumes it. Lost controls stay missing until the pilot dismounts and rides again.
+- Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is blocked whenever the ghast is touching water. A pending overheat fuse blocks more Fire shots but does not block Cry.
+- Dropping a generated control or moving it into an external container consumes it. Crafting-input slots keep it. Lost controls stay missing until the pilot dismounts and rides again.
 - Removed the ammunition pool and passive refill. Firing is now limited by cooldown, heat, and overheat behavior.
 - Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location and firing state; water cooling has been removed.
 - Every rider now sees the ghast's heat HUD. It reports firing, configured no-cooling text, or the effective cooling rate; only the pilot receives controls.

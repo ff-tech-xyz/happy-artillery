@@ -16,6 +16,7 @@
     // true repeats Fire while the control remains in use; false requires separate uses.
     "holdToFire": true,
     // true admits matching plain items; false requires generated ride-bound controls.
+    // When true, fireItem and cryItem must identify different items.
     "allowPlainItems": false
   },
   // Fire cooldown uses seconds. Explosion power is an exact integer.
@@ -80,7 +81,7 @@
   },
   // Water affects ability admission, not passive cooling.
   "water": {
-    // true blocks Fire underwater. Cry remains blocked underwater regardless of this setting.
+    // true blocks Fire while the ghast is touching water. Cry is blocked there regardless.
     "blocksFiring": true
   },
   // Overheat counts and tick values are exact integers. Other numeric values are finite.
@@ -102,13 +103,14 @@
     "firePlacementAttempts": 24,
     // Horizontal placement radius in blocks, minimum 0. Zero uses the center rule above.
     "firePlacementRadius": 8.0,
-    // true removes the Happy Ghast after detonation; false leaves it alive.
+    // true removes the Happy Ghast after detonation. false skips forced removal and resets heat,
+    // but the central explosion still damages the ghast normally and may kill it.
     "killsGhast": true,
     // true permits the central explosion and direct fire placement to affect terrain.
     // Vanilla mobGriefing still governs block effects. Emitted fireballs keep vanilla behavior.
     "breaksBlocks": true
   },
-  // Cry is a pilot ability and remains unavailable underwater.
+  // Cry is a pilot ability and remains unavailable while the ghast is touching water.
   "cry": {
     // false disables Cry; true admits it when the other ability checks pass.
     "enabled": true,

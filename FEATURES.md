@@ -158,7 +158,8 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   callback arrives first.
 - `fire.enabled=false` and `cry.enabled=false` each omit that ability's control and reject both marked and
   allowed plain-item admission silently. Ability execution checks disabled before water or effects; a
-  disabled Cry used underwater therefore does not claim that surfacing would enable it.
+  disabled Cry used while the ghast is touching water therefore does not claim that leaving the water
+  would enable it.
 - Block interaction checks the held stack through `Controls` before vanilla item behavior. Any marked
   Happy Artillery control returns `FAIL`; ordinary unmarked items return `PASS`. The default Fire Control
   therefore cannot consume itself as a fire charge or ignite the targeted block.
@@ -288,14 +289,19 @@ Overheat:
   removes stale ownership, and performs no effects. Later load callbacks cannot recreate consumed work.
   When `killsGhast=true`, consumption preserves ordinary heat and cooldowns, then effects run and ghast
   discard occurs last through the synchronous removal owner; no fictional removal-rejection branch is
-  reported. When `killsGhast=false`, pre-effect consumption keeps the ghast alive and resets heat and
-  timing. A geometry or entity-add rejection is an explicit failed effect with no fallback launch path;
-  genuinely impossible non-finite internal state remains loud. The rider takes the blast normally.
-- `overheat.breaksBlocks` is the sole block-mutation toggle. When false, the explosion uses a
-  non-terrain interaction and fire placement is skipped: it changes no terrain and starts no fire. When
-  true, the explosion uses `ExplosionInteraction.MOB`, so vanilla `mobGriefing` decides terrain damage,
-  and configured fire placement is attempted only while `mobGriefing` is enabled. Happy Artillery adds
-  no claims adapter, veto, or bypass.
+  reported. When `killsGhast=false`, pre-effect consumption resets heat and Fire timing, preserves the
+  Cry cooldown, and skips forced removal. The central explosion still damages the ghast normally and may
+  kill it. A geometry or entity-add rejection is an explicit failed effect with no fallback launch path;
+  genuinely impossible non-finite internal state remains loud. The detonating rider is the central
+  explosion's source and is excluded from its primary damage and knockback; emitted fireballs can still
+  hit that rider normally.
+- `overheat.breaksBlocks` controls the central explosion and direct fire placement, not the emitted
+  vanilla fireballs. When false, the central explosion uses a non-terrain interaction and direct fire
+  placement is skipped. Emitted fireballs keep their normal impact behavior and can still damage terrain
+  or start fire while `mobGriefing` is enabled. When true, the central explosion uses
+  `ExplosionInteraction.MOB`, so vanilla `mobGriefing` decides terrain damage, and configured direct fire
+  placement is attempted only while `mobGriefing` is enabled. Happy Artillery adds no claims adapter,
+  veto, or bypass.
 - Event consumption is one-shot in both branches: a successful pass and a consumed pass with rejected
   attempts both leave non-pending state, so stale or duplicate queued tasks cannot repeat effects. With
   `fuseTicks=0`, those outcomes map to `Detonated` and `Rejected(EFFECT_FAILED)` respectively. A pass
@@ -306,8 +312,8 @@ Cry:
 
 - Enabled pilot input outside water and cooldown plays one `GHAST_SCREAM` at the ghast, hostile source,
   volume 10.0, pitch 0.8. It has no damage, debuff, reveal, or heat effect.
-- Cry is unconditionally blocked underwater. `water.blocksFiring` controls fire admission only and does
-  not make cry available in water.
+- Cry is unconditionally blocked while the ghast is touching water. `water.blocksFiring` controls Fire
+  admission only and does not make Cry available in water.
 - Sound playback supplies no rejection result. The cooldown is committed after the infallible sound call
   completes and is stored on the ghast. Ordinary admission denial does not start it.
 
@@ -324,10 +330,11 @@ Cry:
   cadence and still converges during continuous fire, keeping total presentation traffic below ten
   packets in every sliding 20-tick window. Pilot control status ignores disabled controls and has exact
   priority: if any enabled generated control is absent, show `CONTROL MISSING · DISMOUNT AND REMOUNT`
-  for one enabled control or `CONTROLS MISSING · DISMOUNT AND REMOUNT` for two; otherwise, if any enabled
-  control is in main inventory rather than a hand-accessible hotbar/offhand location, show
-  `CONTROL IN INVENTORY` or `CONTROLS IN INVENTORY` as appropriate; otherwise show the normal heat/cooling
-  line. Missing wins when one enabled control is absent and another is merely in inventory. Control warnings
+  when one control is missing or `CONTROLS MISSING · DISMOUNT AND REMOUNT` when two are missing; otherwise,
+  if any enabled control is in main inventory rather than a hand-accessible hotbar/offhand location, show
+  `CONTROL IN INVENTORY` for one affected control or `CONTROLS IN INVENTORY` for two. Otherwise show the
+  normal heat/cooling line. Missing wins when one enabled control is absent and another is merely in
+  inventory. Control warnings
   are pilot-only and are delivered on the next eligible
   action-bar update without waiting behind another presentation channel. Passengers retain heat/status
   presentation.
