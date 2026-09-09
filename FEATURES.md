@@ -51,8 +51,12 @@ exact-head review, deployment, and manual acceptance pass.
   receives marked controls, advances state, or triggers abilities. No passenger action or feedback
   input is promised while marked controls are pilot-only and plain items are disabled.
 - Startup config has a strict transaction boundary. A missing file is created atomically from validated
-  complete defaults. An existing valid file overlays its supplied known keys onto defaults in memory and
-  preserves its exact bytes. Malformed JSON, unknown or removed keys, invalid identifier syntax, non-finite
+  complete defaults. A released 1.1.x flat config is converted once, with its exact original bytes retained
+  beside it as `happy-artillery.json.v1.1.2.bak`; settings with direct 1.2.0 equivalents are preserved.
+  Customized removed settings and differing biome-specific heat limits fail before either file changes,
+  because 1.2.0 cannot represent them honestly. An existing valid current file overlays its supplied known
+  keys onto defaults in memory and preserves its exact bytes. Malformed JSON, unknown or removed keys,
+  invalid identifier syntax, non-finite
   number, impossible range, or cross-field violation aborts startup loudly; the file is never replaced with
   defaults. Unknown keys are rejected recursively with their full path. Item identifier syntax is checked
   while parsing, and configured registry entries are resolved at the later server lifecycle point after
@@ -64,8 +68,9 @@ exact-head review, deployment, and manual acceptance pass.
 
 Config is feature-grouped nested immutable values held in one `AtomicReference` and read at call time.
 Validated defaults are the only baseline; an operator supplies individual known-key overrides. Missing
-files receive the complete defaults, while existing valid sparse files retain their exact bytes through
-load and reload. Runtime files are strict JSON and reject comments, trailing commas/content, duplicate
+files receive the complete defaults. Released 1.1.x flat files migrate to the nested schema after an exact
+backup is secured, while existing valid current sparse files retain their exact bytes through load and
+reload. Runtime files are strict JSON and reject comments, trailing commas/content, duplicate
 or unknown keys, wrong types, nulls, and arrays. The checked-in
 [`docs/happy-artillery-config.jsonc`](docs/happy-artillery-config.jsonc) file is an annotated admin
 reference only; runtime never parses it. A root `preset` key is a removed setting: startup or reload

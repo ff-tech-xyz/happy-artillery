@@ -14,9 +14,9 @@ happy-artillery/
 │   │   │   │   # use/block/entity callbacks, ghast-load callback, and bounded player-availability
 │   │   │   │   # wake-up; no gameplay policy.
 │   │   │   ├── Config.java
-│   │   │   │   # Sole config schema/codec, defaults, individual overrides, validation, and atomic live
-│   │   │   │   # value owner; creates full defaults only when the file is missing and preserves exact
-│   │   │   │   # bytes for successful existing sparse loads/reloads; removed/renamed settings fail.
+│   │   │   │   # Sole config schema/codec, released-flat-config migration, defaults, individual overrides,
+│   │   │   │   # validation, backup/replacement, and atomic live-value owner; preserves exact bytes for
+│   │   │   │   # successful current sparse loads/reloads, while unsupported legacy settings fail safely.
 │   │   │   ├── BiomeClass.java
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
@@ -62,7 +62,8 @@ happy-artillery/
 │           ├── ConfigTest.java
 │           │   # Config defaults, individual overrides, removed/unknown-key rejection, validation,
 │           │   # rename diagnostics, path-aware type errors, cooling-theme thresholds/colors,
-│           │   # sparse-byte preservation, missing-file publication, reference parity,
+│           │   # sparse-byte preservation, released-config migration/backup, missing-file publication,
+│           │   # reference parity,
 │           │   # registry-lifecycle resolution, and reload-failure contract.
 │           ├── BiomeClassTest.java
 │           │   # Dimension identity, custom-dimension, temperature-edge, and profile tests.

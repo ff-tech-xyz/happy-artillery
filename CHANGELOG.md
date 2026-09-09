@@ -21,6 +21,7 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 - Happy Artillery remains server-side. Unmodded Java clients and Bedrock players joining through Geyser are supported.
 - Added `/ha reload` for admins with gamemaster permission level 2.
 - Configuration now uses defaults plus individual overrides only. Existing valid sparse files stay sparse through startup and `/ha reload`; the removed root `preset` key, unknown keys, malformed values, and invalid ranges fail clearly without replacing the active configuration or invalid file.
+- Released 1.1.x flat configs now migrate once to the nested format after an exact backup is written to `happy-artillery.json.v1.1.2.bak`. Equivalent cooldown, heat, explosion, and Cry settings carry forward; customized settings that no longer have an honest equivalent stop migration without changing either file.
 - Added an annotated admin reference with every default, unit, range, and accepted zero behavior. Runtime configuration remains strict JSON.
 - Renamed draft heat and overheat settings for clearer purpose. Servers carrying an earlier 1.2.0 draft config must update the old names; startup and reload name the required replacement.
 - Fire cooldown can now be set to zero for continuous admission while heat and overheat continue to govern firing.

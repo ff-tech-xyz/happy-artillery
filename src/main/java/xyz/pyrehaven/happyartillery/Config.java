@@ -16,9 +16,12 @@ import net.minecraft.resources.Identifier;
 import java.io.IOException;
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -40,6 +43,15 @@ public record Config(
     private static final Pattern IDENTIFIER = Pattern.compile(
             "[a-z0-9_.-]+:[a-z0-9/._-]+");
     private static final AtomicReference<Config> ACTIVE = new AtomicReference<>(defaults());
+    private static final Set<String> LEGACY_KEYS = Set.of(
+            "fireballAmmoMax", "fireballAmmoCost", "ammoDeliveryIntervalMin",
+            "shootCooldownSeconds", "fireRestartDelaySeconds", "cryCooldownSeconds",
+            "baseOverheatLimit", "baseHeatPerShot", "baseCoolIntervalSeconds",
+            "hotBiomeOverheatLimit", "hotBiomeHeatPerShot", "hotBiomeCoolIntervalSeconds",
+            "coldBiomeOverheatLimit", "coldBiomeHeatPerShot", "coldBiomeCoolIntervalSeconds",
+            "netherOverheatLimit", "netherHeatPerShot", "netherNoCooldown",
+            "waterCooldownRate", "waterCooldownLimit", "fireballExplosionPower",
+            "overheatExplosionPower", "overheatExplosionCreatesFire", "cryVolume");
 
     public static Config current() {
         return ACTIVE.get();
@@ -71,9 +83,13 @@ public record Config(
         if (Files.notExists(path)) {
             Config defaults = defaults();
             validate(defaults);
-            return new Candidate(defaults, true);
+            return new Candidate(defaults, true, null);
         }
-        JsonObject explicit = parseStrictObject(Files.readString(path));
+        byte[] original = Files.readAllBytes(path);
+        JsonObject explicit = parseStrictObject(new String(original, StandardCharsets.UTF_8));
+        if (explicit.keySet().stream().anyMatch(LEGACY_KEYS::contains)) {
+            return new Candidate(migrateLegacy(explicit), true, original);
+        }
         rejectRenamedSettings(explicit);
         rejectRemovedSettings(explicit);
         rejectUnknownKeys(JSON.toJsonTree(defaults()).getAsJsonObject(), explicit, "");
@@ -82,11 +98,11 @@ public record Config(
         mergeKnown(complete, explicit, "");
         Config loaded = JSON.fromJson(complete, Config.class);
         validate(loaded);
-        return new Candidate(loaded, false);
+        return new Candidate(loaded, false, null);
     }
 
     private static void publish(Path path, Candidate candidate, AtomicMove move) throws IOException {
-        if (!candidate.missing()) {
+        if (!candidate.write()) {
             ACTIVE.set(candidate.config());
             return;
         }
@@ -94,6 +110,9 @@ public record Config(
         Path target = path.toAbsolutePath();
         Path parent = target.getParent();
         Files.createDirectories(parent);
+        if (candidate.legacyBytes() != null) {
+            preserveLegacyBackup(target, candidate.legacyBytes());
+        }
         Path temporary = null;
         try {
             temporary = Files.createTempFile(parent, target.getFileName() + ".", ".tmp");
@@ -109,6 +128,128 @@ public record Config(
                 }
             }
         }
+    }
+
+    private static void preserveLegacyBackup(Path target, byte[] original) throws IOException {
+        Path backup = target.resolveSibling(target.getFileName() + ".v1.1.2.bak");
+        Path temporary = Files.createTempFile(target.getParent(), backup.getFileName() + ".", ".tmp");
+        try {
+            Files.write(temporary, original);
+            try {
+                Files.createLink(backup, temporary);
+            } catch (FileAlreadyExistsException raced) {
+                requireMatchingBackup(backup, original);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void requireMatchingBackup(Path backup, byte[] original) throws IOException {
+        if (!Arrays.equals(Files.readAllBytes(backup), original)) {
+            throw new IOException("Legacy config backup already exists with different contents: " + backup);
+        }
+    }
+
+    private static Config migrateLegacy(JsonObject explicit) {
+        JsonObject complete = legacyDefaults();
+        rejectUnknownKeys(complete, explicit, "");
+        validateLegacyIntegerLeaves(explicit);
+        mergeKnown(complete, explicit, "");
+        LegacyConfig legacy = JSON.fromJson(complete, LegacyConfig.class);
+        rejectCustomizedRemovedLegacySettings(legacy);
+        if (legacy.baseOverheatLimit() != legacy.hotBiomeOverheatLimit()
+                || legacy.baseOverheatLimit() != legacy.coldBiomeOverheatLimit()
+                || legacy.baseOverheatLimit() != legacy.netherOverheatLimit()) {
+            throw new IllegalArgumentException("Cannot migrate differing legacy overheat limits");
+        }
+
+        Config defaults = defaults();
+        double baseCooling = coolingRate("baseCoolIntervalSeconds", legacy.baseCoolIntervalSeconds());
+        double coldCooling = coolingRate(
+                "coldBiomeCoolIntervalSeconds", legacy.coldBiomeCoolIntervalSeconds());
+        Config migrated = new Config(
+                defaults.controls(),
+                new Fire(defaults.fire().enabled(), legacy.shootCooldownSeconds(),
+                        legacy.fireballExplosionPower()),
+                new Heat(
+                        legacy.baseOverheatLimit(),
+                        legacy.fireRestartDelaySeconds(),
+                        new HeatProfile(legacy.coldBiomeHeatPerShot(), coldCooling),
+                        new HeatProfile(legacy.baseHeatPerShot(), baseCooling),
+                        new HeatProfile(legacy.hotBiomeHeatPerShot(),
+                                coolingRate("hotBiomeCoolIntervalSeconds",
+                                        legacy.hotBiomeCoolIntervalSeconds())),
+                        new HeatProfile(legacy.netherHeatPerShot(),
+                                legacy.netherNoCooldown() ? 0.0 : baseCooling),
+                        new HeatProfile(legacy.coldBiomeHeatPerShot(), coldCooling),
+                        0.0,
+                        defaults.heat().hotBiomeMinTemperature(),
+                        defaults.heat().otherDimensionsUseBiomeTemperature()),
+                defaults.water(),
+                new Overheat(
+                        defaults.overheat().fuseTicks(), legacy.overheatExplosionPower(),
+                        defaults.overheat().fireballCount(), defaults.overheat().fireballSpeed(),
+                        defaults.overheat().fireballPower(), defaults.overheat().firePlacementAttempts(),
+                        defaults.overheat().firePlacementRadius(), defaults.overheat().killsGhast(),
+                        defaults.overheat().breaksBlocks()),
+                new Cry(defaults.cry().enabled(), legacy.cryVolume(), legacy.cryCooldownSeconds()),
+                defaults.hud());
+        validate(migrated);
+        return migrated;
+    }
+
+    private static double coolingRate(String path, double intervalSeconds) {
+        requirePositive(path, intervalSeconds);
+        return 1.0 / intervalSeconds;
+    }
+
+    private static void rejectCustomizedRemovedLegacySettings(LegacyConfig legacy) {
+        requireLegacyDefault("fireballAmmoMax", legacy.fireballAmmoMax(), 200);
+        requireLegacyDefault("fireballAmmoCost", legacy.fireballAmmoCost(), 1);
+        requireLegacyDefault("ammoDeliveryIntervalMin", legacy.ammoDeliveryIntervalMin(), 5);
+        requireLegacyDefault("waterCooldownRate", legacy.waterCooldownRate(), 8);
+        requireLegacyDefault("waterCooldownLimit", legacy.waterCooldownLimit(), 5);
+        if (!legacy.overheatExplosionCreatesFire()) {
+            throw new IllegalArgumentException(
+                    "Cannot migrate customized removed setting: overheatExplosionCreatesFire");
+        }
+    }
+
+    private static void requireLegacyDefault(String path, int actual, int expected) {
+        if (actual != expected) {
+            throw new IllegalArgumentException("Cannot migrate customized removed setting: " + path);
+        }
+    }
+
+    private static void validateLegacyIntegerLeaves(JsonObject explicit) {
+        for (String key : Set.of(
+                "fireballAmmoMax", "fireballAmmoCost", "ammoDeliveryIntervalMin",
+                "baseOverheatLimit", "hotBiomeOverheatLimit", "coldBiomeOverheatLimit",
+                "netherOverheatLimit", "waterCooldownRate", "waterCooldownLimit",
+                "fireballExplosionPower")) {
+            requireExactInteger(explicit, key);
+        }
+    }
+
+    private static void requireExactInteger(JsonObject root, String key) {
+        if (!root.has(key) || !root.get(key).isJsonPrimitive()
+                || !root.get(key).getAsJsonPrimitive().isNumber()) {
+            return;
+        }
+        try {
+            root.get(key).getAsBigDecimal().intValueExact();
+        } catch (ArithmeticException | NumberFormatException exception) {
+            throw new IllegalArgumentException(key + " must be an exact 32-bit integer", exception);
+        }
+    }
+
+    private static JsonObject legacyDefaults() {
+        return JSON.toJsonTree(new LegacyConfig(
+                200, 1, 5, 0.25, 0.5, 10.0,
+                60, 1.0, 3.0, 60, 2.0, 6.0,
+                60, 0.5, 1.5, 60, 3.0, true,
+                8, 5, 2, 4.0, true, 3.0)).getAsJsonObject();
     }
 
     private static void replaceAtomically(Path temporary, Path target) throws IOException {
@@ -511,7 +652,34 @@ public record Config(
             Color fastColor) {
     }
 
-    private record Candidate(Config config, boolean missing) {
+    private record Candidate(Config config, boolean write, byte[] legacyBytes) {
+    }
+
+    private record LegacyConfig(
+            int fireballAmmoMax,
+            int fireballAmmoCost,
+            int ammoDeliveryIntervalMin,
+            double shootCooldownSeconds,
+            double fireRestartDelaySeconds,
+            double cryCooldownSeconds,
+            int baseOverheatLimit,
+            double baseHeatPerShot,
+            double baseCoolIntervalSeconds,
+            int hotBiomeOverheatLimit,
+            double hotBiomeHeatPerShot,
+            double hotBiomeCoolIntervalSeconds,
+            int coldBiomeOverheatLimit,
+            double coldBiomeHeatPerShot,
+            double coldBiomeCoolIntervalSeconds,
+            int netherOverheatLimit,
+            double netherHeatPerShot,
+            boolean netherNoCooldown,
+            int waterCooldownRate,
+            int waterCooldownLimit,
+            int fireballExplosionPower,
+            double overheatExplosionPower,
+            boolean overheatExplosionCreatesFire,
+            double cryVolume) {
     }
 
     public enum Color {

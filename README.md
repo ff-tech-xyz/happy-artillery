@@ -39,6 +39,12 @@ Existing valid files can contain only the settings you want to override; load an
 exact bytes alone. The full defaults, units, ranges, and examples are in the
 [annotated admin reference](docs/happy-artillery-config.jsonc).
 
+When upgrading from a released 1.1.x version, Happy Artillery converts the old flat config to the new
+nested format and keeps the exact original file as `config/happy-artillery.json.v1.1.2.bak`. Cooldown,
+heat, explosion, and Cry settings with direct equivalents are carried forward. If removed ammo or water-
+cooling settings were customized, or the old biome-specific heat limits differ, startup stops without
+changing either file because those values no longer have an honest one-to-one equivalent.
+
 The reference is documentation, not a runtime config. Happy Artillery reads strict JSON: comments,
 trailing commas or content, duplicate or unknown keys, wrong value types, nulls, and arrays fail
 instead of being ignored. Don't copy the JSONC file verbatim into `config/happy-artillery.json`.

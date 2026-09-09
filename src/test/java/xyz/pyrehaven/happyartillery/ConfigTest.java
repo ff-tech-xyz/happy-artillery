@@ -309,6 +309,159 @@ final class ConfigTest {
     }
 
     @Test
+    void releasedFlatConfigMigratesEquivalentSettingsAndKeepsExactBackup(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] legacy = releasedFlatConfig().getBytes(StandardCharsets.UTF_8);
+        Files.write(file, legacy);
+
+        Config loaded = Config.load(file);
+
+        assertEquals(0.25, loaded.fire().shotCooldownSeconds());
+        assertEquals(2, loaded.fire().explosionPower());
+        assertEquals(60.0, loaded.heat().limit());
+        assertEquals(0.5, loaded.heat().coolingDelayAfterShotSeconds());
+        assertEquals(new Config.HeatProfile(0.5, 1.0 / 1.5), loaded.heat().cold());
+        assertEquals(new Config.HeatProfile(1.0, 1.0 / 3.0), loaded.heat().base());
+        assertEquals(new Config.HeatProfile(2.0, 1.0 / 6.0), loaded.heat().hot());
+        assertEquals(new Config.HeatProfile(3.0, 0.0), loaded.heat().nether());
+        assertEquals(loaded.heat().cold(), loaded.heat().end());
+        assertEquals(0.0, loaded.heat().coldBiomeMaxTemperature());
+        assertEquals(1.0, loaded.heat().hotBiomeMinTemperature());
+        assertEquals(4.0, loaded.overheat().explosionPower());
+        assertEquals(3.0, loaded.cry().volume());
+        assertEquals(10.0, loaded.cry().cooldownSeconds());
+        assertArrayEquals(legacy,
+                Files.readAllBytes(directory.resolve("happy-artillery.json.v1.1.2.bak")));
+        assertEquals(new Gson().toJsonTree(loaded),
+                JsonParser.parseString(Files.readString(file)));
+
+        Config repeated = Config.load(file);
+
+        assertEquals(loaded, repeated);
+        assertArrayEquals(legacy,
+                Files.readAllBytes(directory.resolve("happy-artillery.json.v1.1.2.bak")));
+    }
+
+    @Test
+    void customizedEquivalentLegacySettingsAreConvertedWithoutResettingThem(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        String legacy = releasedFlatConfig()
+                .replace("\"shootCooldownSeconds\": 0.25", "\"shootCooldownSeconds\": 0.75")
+                .replace("\"fireRestartDelaySeconds\": 0.5", "\"fireRestartDelaySeconds\": 2.0")
+                .replace("\"cryCooldownSeconds\": 10.0", "\"cryCooldownSeconds\": 4.0")
+                .replace("OverheatLimit\": 60", "OverheatLimit\": 80")
+                .replace("\"baseHeatPerShot\": 1.0", "\"baseHeatPerShot\": 1.5")
+                .replace("\"baseCoolIntervalSeconds\": 3.0", "\"baseCoolIntervalSeconds\": 4.0")
+                .replace("\"hotBiomeHeatPerShot\": 2.0", "\"hotBiomeHeatPerShot\": 2.5")
+                .replace("\"hotBiomeCoolIntervalSeconds\": 6.0", "\"hotBiomeCoolIntervalSeconds\": 8.0")
+                .replace("\"coldBiomeHeatPerShot\": 0.5", "\"coldBiomeHeatPerShot\": 0.25")
+                .replace("\"coldBiomeCoolIntervalSeconds\": 1.5", "\"coldBiomeCoolIntervalSeconds\": 1.25")
+                .replace("\"netherHeatPerShot\": 3.0", "\"netherHeatPerShot\": 4.0")
+                .replace("\"netherNoCooldown\": true", "\"netherNoCooldown\": false")
+                .replace("\"fireballExplosionPower\": 2", "\"fireballExplosionPower\": 5")
+                .replace("\"overheatExplosionPower\": 4.0", "\"overheatExplosionPower\": 8.0")
+                .replace("\"cryVolume\": 3.0", "\"cryVolume\": 2.0");
+        Files.writeString(file, legacy);
+
+        Config loaded = Config.load(file);
+
+        assertEquals(0.75, loaded.fire().shotCooldownSeconds());
+        assertEquals(5, loaded.fire().explosionPower());
+        assertEquals(80.0, loaded.heat().limit());
+        assertEquals(2.0, loaded.heat().coolingDelayAfterShotSeconds());
+        assertEquals(new Config.HeatProfile(0.25, 1.0 / 1.25), loaded.heat().cold());
+        assertEquals(new Config.HeatProfile(1.5, 0.25), loaded.heat().base());
+        assertEquals(new Config.HeatProfile(2.5, 0.125), loaded.heat().hot());
+        assertEquals(new Config.HeatProfile(4.0, 0.25), loaded.heat().nether());
+        assertEquals(8.0, loaded.overheat().explosionPower());
+        assertEquals(2.0, loaded.cry().volume());
+        assertEquals(4.0, loaded.cry().cooldownSeconds());
+    }
+
+    @Test
+    void customizedRemovedLegacySettingFailsWithoutRewritingOrBackup(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] legacy = releasedFlatConfig()
+                .replace("\"fireballAmmoMax\": 200", "\"fireballAmmoMax\": 201")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, legacy);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.load(file));
+
+        assertEquals("Cannot migrate customized removed setting: fireballAmmoMax", failure.getMessage());
+        assertArrayEquals(legacy, Files.readAllBytes(file));
+        assertFalse(Files.exists(directory.resolve("happy-artillery.json.v1.1.2.bak")));
+    }
+
+    @Test
+    void differingLegacyHeatLimitsFailInsteadOfLosingBiomeSpecificSettings(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        byte[] legacy = releasedFlatConfig()
+                .replace("\"hotBiomeOverheatLimit\": 60", "\"hotBiomeOverheatLimit\": 70")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, legacy);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class, () -> Config.load(file));
+
+        assertEquals("Cannot migrate differing legacy overheat limits", failure.getMessage());
+        assertArrayEquals(legacy, Files.readAllBytes(file));
+        assertFalse(Files.exists(directory.resolve("happy-artillery.json.v1.1.2.bak")));
+    }
+
+    @Test
+    void legacyReplacementFailureKeepsOriginalAndAllowsExactRetry(
+            @TempDir Path directory) throws Exception {
+        Path baseline = directory.resolve("baseline.json");
+        Config previous = Config.load(baseline);
+        Path file = directory.resolve("happy-artillery.json");
+        Path backup = directory.resolve("happy-artillery.json.v1.1.2.bak");
+        byte[] legacy = releasedFlatConfig().getBytes(StandardCharsets.UTF_8);
+        Files.write(file, legacy);
+        IOException replacementFailure = new IOException("replacement failed");
+
+        IOException failure = assertThrows(IOException.class,
+                () -> Config.reload(file, item -> true, (temporary, target) -> {
+                    assertEquals(file, target);
+                    throw replacementFailure;
+                }));
+
+        assertSame(replacementFailure, failure);
+        assertSame(previous, Config.current());
+        assertArrayEquals(legacy, Files.readAllBytes(file));
+        assertArrayEquals(legacy, Files.readAllBytes(backup));
+
+        Config migrated = Config.load(file);
+
+        assertSame(migrated, Config.current());
+        assertEquals(60.0, migrated.heat().limit());
+        assertArrayEquals(legacy, Files.readAllBytes(backup));
+    }
+
+    @Test
+    void conflictingLegacyBackupStopsMigrationWithoutChangingEitherFile(
+            @TempDir Path directory) throws Exception {
+        Path file = directory.resolve("happy-artillery.json");
+        Path backup = directory.resolve("happy-artillery.json.v1.1.2.bak");
+        byte[] legacy = releasedFlatConfig().getBytes(StandardCharsets.UTF_8);
+        byte[] conflict = "different backup".getBytes(StandardCharsets.UTF_8);
+        Files.write(file, legacy);
+        Files.write(backup, conflict);
+
+        IOException failure = assertThrows(IOException.class, () -> Config.load(file));
+
+        assertTrue(failure.getMessage().startsWith(
+                "Legacy config backup already exists with different contents:"));
+        assertArrayEquals(legacy, Files.readAllBytes(file));
+        assertArrayEquals(conflict, Files.readAllBytes(backup));
+    }
+
+    @Test
     void failedReloadPreservesExactActiveObjectAndInvalidBytes(@TempDir Path directory)
             throws Exception {
         Path file = directory.resolve("happy-artillery.json");
@@ -1022,6 +1175,37 @@ final class ConfigTest {
 
     private static String controlItemDocument(String key, String itemId) {
         return "{\"controls\":{\"" + key + "\":\"" + itemId + "\"}}";
+    }
+
+    private static String releasedFlatConfig() {
+        return """
+                {
+                  "fireballAmmoMax": 200,
+                  "fireballAmmoCost": 1,
+                  "ammoDeliveryIntervalMin": 5,
+                  "shootCooldownSeconds": 0.25,
+                  "fireRestartDelaySeconds": 0.5,
+                  "cryCooldownSeconds": 10.0,
+                  "baseOverheatLimit": 60,
+                  "baseHeatPerShot": 1.0,
+                  "baseCoolIntervalSeconds": 3.0,
+                  "hotBiomeOverheatLimit": 60,
+                  "hotBiomeHeatPerShot": 2.0,
+                  "hotBiomeCoolIntervalSeconds": 6.0,
+                  "coldBiomeOverheatLimit": 60,
+                  "coldBiomeHeatPerShot": 0.5,
+                  "coldBiomeCoolIntervalSeconds": 1.5,
+                  "netherOverheatLimit": 60,
+                  "netherHeatPerShot": 3.0,
+                  "netherNoCooldown": true,
+                  "waterCooldownRate": 8,
+                  "waterCooldownLimit": 5,
+                  "fireballExplosionPower": 2,
+                  "overheatExplosionPower": 4.0,
+                  "overheatExplosionCreatesFire": true,
+                  "cryVolume": 3.0
+                }
+                """;
     }
 
     private static Stream<Arguments> duplicateKeyDocuments() {
