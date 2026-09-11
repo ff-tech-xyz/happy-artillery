@@ -18,7 +18,7 @@ Compared with the latest stable release, v1.1.2, this update replaces fixed-slot
 ### Server and configuration
 
 - Updated support to Minecraft 26.2 with Fabric Loader 0.19.3 or newer, Fabric API, and Java 21 or newer.
-- Happy Artillery remains server-side. Unmodded Java clients and Bedrock players joining through Geyser are supported.
+- Happy Artillery remains server-side. Players can join with an unmodded Java client.
 - Added `/ha reload` for admins with gamemaster permission level 2.
 - Configuration now uses defaults plus individual overrides only. Existing valid sparse files stay sparse through startup and `/ha reload`; the removed root `preset` key, unknown keys, malformed values, and invalid ranges fail clearly without replacing the active configuration or invalid file.
 - Released 1.1.x flat configs now migrate once to the nested format after an exact backup is written to `happy-artillery.json.v1.1.2.bak`. Equivalent cooldown, heat, explosion, and Cry settings carry forward; customized settings that no longer have an honest equivalent stop migration without changing either file.

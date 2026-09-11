@@ -2,7 +2,7 @@
 
 Happy Artillery turns the Happy Ghast into a rideable siege machine. Pilots can fire vanilla fireballs, use a Ghast Cry, and push the ghast into a dangerous overheat. Every rider gets a HUD showing the ghast's current heat and cooling state.
 
-Happy Artillery runs on the server. Players can join with an unmodded Java client or through Geyser on Bedrock.
+Happy Artillery runs on the server. Players can join with an unmodded Java client.
 
 ## Controls
 

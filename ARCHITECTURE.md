@@ -98,7 +98,7 @@ happy-artillery/
 │       # Documentation-only annotated admin reference kept in parity with Config defaults; runtime
 │       # remains strict JSON and does not parse this file.
 ├── README.md
-│   # Installation, controls, configuration, Geyser support, and supported-version documentation.
+│   # Installation, controls, configuration, and supported-version documentation.
 ├── CHANGELOG.md
 │   # Public released-version history, not intermediate rewrite state.
 ├── LICENSE

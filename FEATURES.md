@@ -13,7 +13,7 @@ exact-head review, deployment, and manual acceptance pass.
 ## Product boundary
 
 - Fabric server mod for Minecraft 26.2, Fabric Loader >=0.19.3, Fabric API, official mappings, and
-  Java >=21. Clients do not install the mod. Java and Bedrock-through-Geyser are supported together.
+  Java >=21. Clients do not install the mod.
 - The mod id remains `happy-artillery`; config remains `config/happy-artillery.json`.
 - Happy Ghasts provide pilot-only fire and cry controls, heat/cooling/overheat, and status presentation
   for every rider.
@@ -202,7 +202,7 @@ control remains in the server-observed using-item state, firing repeats at the c
 A `shotCooldownSeconds` value of `0` means no Fire cooldown; negative values are invalid.
 Automated component and server-observed use-state seams establish the preferred implementation before
 activation. The behavior is accepted only when the runnable exact candidate proves a steady four
-shots/second on Java and Bedrock through Geyser in the same session.
+shots/second on an unmodded Java client.
 
 If the preferred candidate's runtime hold test fails, click-rate heuristics are forbidden. The accepted
 fallback changes the default shot cooldown to `0.5` seconds and doubles every heat-per-shot default
@@ -210,8 +210,8 @@ fallback changes the default shot cooldown to `0.5` seconds and doubles every he
 `1.40`) so time to detonation remains unchanged. The chosen branch and resulting defaults must be
 recorded in this contract, independently reviewed, committed, and pushed as a replacement activation
 candidate before that candidate is deployed or activation can pass. The preferred path may be the first
-reviewed, committed, and pushed activation candidate; its Java and Bedrock result is recorded in the
-acceptance evidence without changing the tested candidate bytes.
+reviewed, committed, and pushed activation candidate; its Java result is recorded in the acceptance
+evidence without changing the tested candidate bytes.
 
 ## Biome and heat
 
@@ -389,21 +389,21 @@ Tests must prove the rewrite does not restore these released faults:
 ## Manual acceptance boundary
 
 Before release, run the current audit-repair intake's final exact-head and gameplay handoff gates on the
-same checksum-matched candidate on Java and Bedrock through Geyser. Acceptance must cover atomic
+same checksum-matched candidate on an unmodded Java client. Acceptance must cover atomic
 allocation for zero, one, and two enabled abilities; insufficient-space refusal with no writes; arbitrary
 hotbar and offhand held use; inventory-only and missing-control HUD priority; same-player movement; direct
 Q, cursor/menu `THROW`, creative, ordinary/offhand/equipment death-drop consumption; external-container
 placement, `QUICK_MOVE` empty/merge, number/offhand swap, and `QUICK_CRAFT` consumption at the proven
 incoming `Slot.set` transformation boundary; inbound `PICKUP_ALL` slot-to-cursor behavior; no same-ride regeneration; dismount/
 remount regeneration without overwrite; scoped cleanup across logout, hard stop, dimension change, and
-ghast removal; two-rider pilot authorization plus passenger HUD; plain-item admission-only behavior; and
-Bedrock mount/fire/dismount without ghost items. Verify vanilla normal-fire `mobGriefing` on/off behavior
+ghast removal; two-rider pilot authorization plus passenger HUD; and plain-item admission-only behavior.
+Verify vanilla normal-fire `mobGriefing` on/off behavior
 and real `LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat
 and an in-flight vanilla fireball across restart; paused cooldown/fuse while stopped; one-time unload
 catch-up with no repeated cooling; single-digit HUD packet updates per rider/second; bounded per-online-
 player idle work; effective-rate zero/slow/normal/fast HUD text and color; UUID-only fuse isolation;
 external slot-owned removal; and README/jar version agreement. Automated seams may cover these contracts
-earlier, but no Java/Bedrock, mod-compatibility, packet-capture, restart, or gameplay evidence is credited
+earlier, but no Java, mod-compatibility, packet-capture, restart, or gameplay evidence is credited
 until the complete graph is runnable.
 
 ## Minecraft 26.2 mapped behavior evidence
