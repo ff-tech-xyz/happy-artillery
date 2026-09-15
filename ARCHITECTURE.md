@@ -1,6 +1,6 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-The annotated tree is the complete proposed source-controlled shape: thirteen production Java files
+The annotated tree is the complete proposed source-controlled shape: fourteen production Java files
 and eight risk-grouped test files.
 
 ```text
@@ -21,7 +21,8 @@ happy-artillery/
 │   │   │   │   # Sole dimension/temperature classifier and finite heat-profile selector.
 │   │   │   ├── GhastState.java
 │   │   │   │   # Immutable persistent Happy Ghast attachment value/codec: heat anchor plus independent
-│   │   │   │   # fire-ready and cry-ready ticks, plus paired pending-detonation deadline/rider identity.
+│   │   │   │   # fire-ready and cry-ready ticks, paired pending-detonation deadline/rider identity, and
+│   │   │   │   # shared saturated seconds-to-tick deadline arithmetic.
 │   │   │   ├── Heat.java
 │   │   │   │   # Pure heat authority: anchored, non-double-counted profile cooling, firing window,
 │   │   │   │   # shot addition, and the codebase's only heat-limit comparison.
@@ -47,14 +48,16 @@ happy-artillery/
 │   │   │       ├── PlayerDropMixin.java
 │   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
 │   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
-│   │   │       └── ExternalContainerMixin.java
-│   │   │           # Transforms the ItemStack argument at Slot.set(ItemStack) HEAD, preserving player
-│   │   │           # crafting inputs and replacing marked external-container writes with ItemStack.EMPTY.
+│   │   │       ├── ExternalContainerMixin.java
+│   │   │       │   # Transforms Slot.set(ItemStack) writes, consuming marked controls outside their
+│   │   │       │   # owner's inventory, including inventory and table crafting inputs.
+│   │   │       └── BundleContentsMixin.java
+│   │   │           # Delegates bundle insertion eligibility to Controls before vanilla accepts a stack.
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.
 │   │       ├── happy-artillery.mixins.json
-│   │       │   # Declares both narrow mixins with their fail-closed injection requirements.
+│   │       │   # Declares the narrow mixins with their fail-closed injection requirements.
 │   │       └── assets/happy-artillery/icon.png
 │   │           # Packaged Happy Artillery icon.
 │   └── test/
