@@ -2,32 +2,47 @@
 
 ## [1.2.0] - Unreleased
 
-Compared with the latest stable release, v1.1.2, this update replaces fixed-slot controls and ammunition with movable, ride-bound controls, persistent heat, clearer rider status, and stricter live configuration.
+This section records the player-facing, server-admin, and compatibility changes from `main` version 1.1.2.2.
+
+### Added
+
+- Added a rider HUD that shows heat, firing state, and the effective cooling rate. Passengers see the same status, while only the pilot receives controls.
+- Added `/ha reload` for admins with gamemaster permission level 2. A failed reload keeps the previous valid configuration active.
+- Added an [annotated configuration reference](docs/happy-artillery-config.jsonc) with every default, unit, range, and accepted zero behavior.
+- Added one-time migration for released 1.1.x flat configs. The exact original file is saved as `happy-artillery.json.v1.1.2.bak` before equivalent settings are moved to the nested format.
 
 ### Changed
 
-- Pilots now receive one temporary control per enabled ability in free hotbar or main-inventory slots. Allocation is all-or-nothing, and the controls can move within the owner's inventory and offhand without overwriting ordinary items.
-- Fire supports hold-to-fire by default. Cry is click-only, keeps its own cooldown, and is blocked whenever the ghast is touching water. A pending overheat fuse blocks more Fire shots but does not block Cry.
-- Dropping a generated control or moving it into an external container consumes it. Crafting-input slots keep it. Lost controls stay missing until the pilot dismounts and rides again.
-- Removed the ammunition pool and passive refill. Firing is now limited by cooldown, heat, and overheat behavior.
-- Heat, cooldowns, and pending overheat fuses now survive chunk unloads and server restarts. Cooling reflects the ghast's current location and firing state; water cooling has been removed.
-- Every rider now sees the ghast's heat HUD. It reports firing, configured no-cooling text, or the effective cooling rate; only the pilot receives controls.
-- Normal shots use vanilla large fireballs launched clear of the ridden ghast and its passengers.
-- `overheat.breaksBlocks=false` keeps the central explosion from damaging terrain and skips direct fire placement. When enabled, the central explosion and direct fire placement still obey `mobGriefing`. Emitted vanilla fireballs keep their normal impact behavior in either mode.
+- Replaced fixed control slots with temporary, ride-bound Fire and Cry controls. The mod places all enabled controls only when enough hotbar or main-inventory space is available, and it never overwrites ordinary items.
+- Controls can move through their owner's hotbar, main inventory, offhand, and cursor. Dropping one or moving it into a container or crafting grid consumes it. Bundles reject controls, and controls cannot be used as crafting ingredients. A missing control returns only after dismounting and riding again.
+- Fire supports hold-to-fire by default. Cry remains click-only, has its own cooldown, and is always blocked while the ghast is touching water.
+- Heat, cooldowns, and pending overheat fuses now persist across chunk unloads and server restarts. Cooling uses the ghast's current dimension, biome, and firing state.
+- Normal shots now use vanilla large fireballs launched clear of the Happy Ghast and its passengers.
+- `overheat.breaksBlocks=false` now prevents terrain damage from the central explosion and skips direct fire placement. When enabled, both follow the vanilla `mobGriefing` rule. Emitted vanilla fireballs retain their normal impact behavior in either mode.
+- Configuration now uses nested feature groups with defaults plus individual overrides. Valid sparse files remain unchanged during startup and reload; malformed values, invalid ranges, removed settings, and unknown keys fail clearly instead of being ignored.
+- Fire cooldown can be set to zero. Heat and overheat still limit firing.
+- HUD firing color and zero, slow, normal, and fast cooling bands are configurable. Firing defaults to gold, while the heat warning remains red.
 
-### Server and configuration
+### Fixed
 
-- Updated support to Minecraft 26.2 with Fabric Loader 0.19.3 or newer, Fabric API, and Java 21 or newer.
+- Fire Control now starts hold-to-fire while aiming at a nearby block without igniting that block.
+- Allowed plain Fire items now activate artillery instead of vanilla block ignition when an authorized pilot aims at a block.
+- Control-item validation now rejects `minecraft:air`, which cannot create a usable control stack.
+
+### Removed
+
+- Removed ammunition and passive ammunition refill. Firing is governed by cooldown, heat, and overheat instead.
+- Removed water cooling. Water blocks Fire by default through `water.blocksFiring`, and it always blocks Cry.
+- Removed the root `preset` configuration model and obsolete 1.1.x fixed-slot, stash, and item-restoration behavior.
+
+### Compatibility
+
+- Updated the supported game version to Minecraft `26.2`, with Fabric Loader `0.19.3` or newer, Fabric API, and Java 25 or newer.
 - Happy Artillery remains server-side. Players can join with an unmodded Java client.
-- Added `/ha reload` for admins with gamemaster permission level 2.
-- Configuration now uses defaults plus individual overrides only. Existing valid sparse files stay sparse through startup and `/ha reload`; the removed root `preset` key, unknown keys, malformed values, and invalid ranges fail clearly without replacing the active configuration or invalid file.
-- Released 1.1.x flat configs now migrate once to the nested format after an exact backup is written to `happy-artillery.json.v1.1.2.bak`. Equivalent cooldown, heat, explosion, and Cry settings carry forward; customized settings that no longer have an honest equivalent stop migration without changing either file.
-- Added an annotated admin reference with every default, unit, range, and accepted zero behavior. Runtime configuration remains strict JSON.
-- Renamed draft heat and overheat settings for clearer purpose. Servers carrying an earlier 1.2.0 draft config must update the old names; startup and reload name the required replacement.
-- Fire cooldown can now be set to zero for continuous admission while heat and overheat continue to govern firing.
-- Added configurable firing color and zero, slow, normal, and fast cooling text/color bands. The firing color defaults to gold, while the heat warning remains red. `hud.refreshTicks` must be at least 4.
+- Earlier 1.2.0 development config names for firing delay, biome thresholds, custom-dimension classification, and fire placement are rejected with the required replacement name.
+- Changed the project license from MIT to [CC0 1.0 Universal](LICENSE).
 
-## [1.1.2.2] - 2026-08-04 (pre-release)
+## [1.1.2.2] - 2026-08-04
 
 ### Fixed
 

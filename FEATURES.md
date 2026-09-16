@@ -13,7 +13,7 @@ exact-head review, deployment, and manual acceptance pass.
 ## Product boundary
 
 - Fabric server mod for Minecraft 26.2, Fabric Loader >=0.19.3, Fabric API, official mappings, and
-  Java >=21. Clients do not install the mod.
+  Java >=25 as required by Minecraft 26.2. Clients do not install the mod.
 - The mod id remains `happy-artillery`; config remains `config/happy-artillery.json`.
 - Happy Ghasts provide pilot-only fire and cry controls, heat/cooling/overheat, and status presentation
   for every rider.
@@ -23,17 +23,19 @@ exact-head review, deployment, and manual acceptance pass.
 
 ## Architecture decisions and explicit assumptions
 
-- The complete smallest tree is **thirteen production Java files**: the eleven accepted non-mixin owners
-  plus `PlayerDropMixin` and `ExternalContainerMixin`. Mapped Minecraft 26.2 evidence proves that
+- The tree has **fourteen production Java files**: the eleven non-mixin owners
+  plus `PlayerDropMixin`, `ExternalContainerMixin`, and `BundleContentsMixin`. Mapped Minecraft 26.2 evidence proves that
   `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor drops,
   menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. External chest/container
   insertion does not reach that method, so `ExternalContainerMixin` transforms the incoming stack at
-  `Slot.set(ItemStack)` `HEAD`. `Controls` preserves owner-matching writes to that player's `Inventory`
-  and crafting-input writes, while marked writes to every other container become `ItemStack.EMPTY`
+  `Slot.set(ItemStack)` `HEAD`. `Controls` preserves owner-matching writes to that player's `Inventory`,
+  while marked writes to every other container, including both crafting grids, become `ItemStack.EMPTY`
   before the slot mutation. This covers ordinary placement, `QUICK_MOVE` empty/merge, number/offhand
   swaps, and `QUICK_CRAFT` without re-entering `Slot.set` or reproducing
   `AbstractContainerMenu.doClick`. `PICKUP_ALL` is inbound
-  slot-to-cursor collection, not outbound chest insertion. Both mixins delegate policy to `Controls`;
+  slot-to-cursor collection, not outbound chest insertion. `BundleContentsMixin` rejects marked controls
+  at `BundleContents.canItemBeInBundle` before either cursor insertion or slot transfer removes them.
+  All mixins delegate policy to `Controls`;
   there is no `DeathDropMixin` or predictive `SlotGuardMixin` in the proposed tree.
 - Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
   only with server ticks, survives restart without interpreting a new process-local counter, and provides
@@ -100,6 +102,7 @@ and custom non-Nether/non-End dimensions, with cold and hot boundaries inclusive
 `hud.cooling` thresholds are finite, non-negative, and strictly increasing
 (`slowMaxPerSecond < normalMaxPerSecond`); each band includes its upper threshold, and colors are the
 uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` must be at least 4.
+Both configured control-item identifiers must resolve to registered, non-air items.
 
 ## Persistent state and time
 
@@ -166,8 +169,10 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   disabled Cry used while the ghast is touching water therefore does not claim that leaving the water
   would enable it.
 - Block interaction checks the held stack through `Controls` before vanilla item behavior. Any marked
-  Happy Artillery control returns `FAIL`; ordinary unmarked items return `PASS`. The default Fire Control
-  therefore cannot consume itself as a fire charge or ignite the targeted block.
+  Happy Artillery control returns `FAIL`; an authorized configured plain item also returns `FAIL` when
+  `allowPlainItems=true`, while unrelated unmarked items return `PASS`. A marked Fire Control starts its
+  server-observed hold state and accepts the first shot, so aiming at a nearby block neither prevents
+  hold-to-fire nor consumes the control or ignites that block.
 - Controls move freely among the owning player's hotbar, main inventory, and offhand. There are no fixed
   slots, stashes, restoration writes, or locked slots. No mount, dismount, reload, death, or recovery path
   overwrites an ordinary ItemStack.
@@ -177,16 +182,19 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
   entities, or other players to locate a missing control.
 - Missing controls are not regenerated during the same ride. Dismounting and remounting is the only
   regeneration path. Dismount, loss of pilot status, disconnect recovery, dimension transition, and
-  ghast removal remove only marked controls owned by that rider/ride and clear ride identity.
+  ghast removal remove only marked controls owned by that rider/ride from inventory, offhand, the active
+  menu cursor, and crafting inputs, then clear ride identity.
 - `PlayerDropMixin` observes the returned `ItemEntity` from the three-argument `ServerPlayer.drop`
   boundary and discards marked control drops. This covers direct Q, cursor and menu `THROW`, creative,
   and ordinary/offhand/equipment death drops while ordinary drops remain vanilla. Player death lets
   vanilla empty the inventory; there is no pre-drop restoration.
 - `ExternalContainerMixin` transforms the incoming argument at `Slot.set(ItemStack)` `HEAD`.
   `Controls` first returns the original stack when it is empty or lacks vanilla `CUSTOM_DATA`, before
-  any marker decode or custom-data copy. It also preserves crafting-input writes and owner-matching
-  controls written to that owner's player `Inventory`. A marked write to every other container becomes
+  any marker decode or custom-data copy. It preserves owner-matching controls written to that owner's
+  player `Inventory`. A marked write to any other container, including a crafting input, becomes
   `ItemStack.EMPTY` before the original slot mutation; the mixin does not re-enter `Slot.set`.
+- Bundles reject marked controls without consuming them. Ordinary items keep vanilla bundle eligibility.
+  Block-use rejection also prevents hand insertion into blocks without menus, such as decorated pots.
   Ordinary placement,
   `QUICK_MOVE` empty/merge, number/offhand swaps, and `QUICK_CRAFT` are covered without predicting or
   cancelling `doClick`. `PICKUP_ALL` is inbound slot-to-cursor collection, not outbound container
@@ -199,6 +207,8 @@ uppercase vanilla names `RED`, `GOLD`, `GREEN`, or `BLUE`. `hud.refreshTicks` mu
 
 The preferred control uses a long-duration, no-animation/no-sound consumable component. While the
 control remains in the server-observed using-item state, firing repeats at the configured cooldown.
+A block-targeted press starts that state explicitly after admission and accepts the first shot through
+the same per-tick deduplication path.
 A `shotCooldownSeconds` value of `0` means no Fire cooldown; negative values are invalid.
 Automated component and server-observed use-state seams establish the preferred implementation before
 activation. The behavior is accepted only when the runnable exact candidate proves a steady four
@@ -274,8 +284,9 @@ Overheat:
   while that same queue owns the absolute deadline. The same owner re-establishes the task when the ghast
   loads, including after restart.
 - At the ghast position, make one best-effort effect pass: attempt the configured power-6 explosion,
-  every one of the 24 evenly distributed sphere fireballs at speed 0.4/power 2, and each of up to 24 fire
-  fire candidates sampled horizontally within radius 8 without aborting later attempts after a rejection.
+  every one of the 24 evenly distributed sphere fireballs with initial speed 0.4 and power 2, and each
+  of up to 24 fire candidates sampled horizontally within radius 8 without aborting later attempts after
+  a rejection.
   Fire candidates resolve only to loaded world-surface positions and never load or scan chunks. A zero
   radius with a positive attempt count makes one center attempt. Each sphere direction
   uses the same authoritative launch calculation as normal fire, against one union of the ghast and its
@@ -343,10 +354,10 @@ Cry:
   are pilot-only and are delivered on the next eligible
   action-bar update without waiting behind another presentation channel. Passengers retain heat/status
   presentation.
-- The integration/heat context computes one typed presentation mode for the tick and passes it through the
-  sole typed HUD path. Precedence is explicit: an active firing window produces `FIRING`; otherwise the mode
-  is `COOLING(currentProfile.coolPerSecond)`. `Hud` receives that mode and rate together and does not infer
-  firing state, biome, dimension, or cooling policy. A zero rate in `COOLING` mode displays configured
+- `Hud` computes one typed presentation mode for the tick from the post-transition state and captured heat
+  profile. Precedence is explicit: an active firing window produces `FIRING`; otherwise the mode is
+  `COOLING(currentProfile.coolPerSecond)`. It does not reclassify biome or dimension or mutate gameplay
+  state. A zero rate in `COOLING` mode displays configured
   `hud.cooling.noCoolingText` with `noCoolingColor`. Every positive cooling rate displays the
   exact shape `COOLING <rate>/s` with deterministic numeric formatting: at or below
   `slowMaxPerSecond` it uses `slowColor`, at or below `normalMaxPerSecond` it uses `normalColor`, and above
@@ -395,8 +406,10 @@ hotbar and offhand held use; inventory-only and missing-control HUD priority; sa
 Q, cursor/menu `THROW`, creative, ordinary/offhand/equipment death-drop consumption; external-container
 placement, `QUICK_MOVE` empty/merge, number/offhand swap, and `QUICK_CRAFT` consumption at the proven
 incoming `Slot.set` transformation boundary; inbound `PICKUP_ALL` slot-to-cursor behavior; no same-ride regeneration; dismount/
-remount regeneration without overwrite; scoped cleanup across logout, hard stop, dimension change, and
-ghast removal; two-rider pilot authorization plus passenger HUD; and plain-item admission-only behavior.
+remount regeneration without overwrite; cursor and crafting-grid cleanup from both active and inventory
+menus; scoped cleanup across logout, hard stop, dimension change, and ghast removal; block-targeted
+hold-to-fire start/release without ignition; authorized plain Fire block use without ignition or duplicate
+same-tick fire; two-rider pilot authorization plus passenger HUD; and plain-item admission-only behavior.
 Verify vanilla normal-fire `mobGriefing` on/off behavior
 and real `LargeFireball` identity, both overheat `breaksBlocks` settings, persistent heat
 and an in-flight vanilla fireball across restart; paused cooldown/fuse while stopped; one-time unload

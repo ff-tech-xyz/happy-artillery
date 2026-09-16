@@ -19,8 +19,6 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -106,7 +104,7 @@ public final class Abilities {
                 heated.heat(),
                 heated.heatAnchorTick(),
                 heated.firingWindowEndTick(),
-                cooldownDeadline(now, config.fire().shotCooldownSeconds()),
+                GhastState.deadlineAfterSeconds(now, config.fire().shotCooldownSeconds()),
                 heated.cryReadyTick(),
                 heated.detonateAtTick(),
                 heated.detonatingRiderId());
@@ -327,7 +325,7 @@ public final class Abilities {
                 state.heatAnchorTick(),
                 state.firingWindowEndTick(),
                 state.fireReadyTick(),
-                cooldownDeadline(now, config.cry().cooldownSeconds()),
+                GhastState.deadlineAfterSeconds(now, config.cry().cooldownSeconds()),
                 state.detonateAtTick(),
                 state.detonatingRiderId());
         access.playCry(ghast, config.cry().volume());
@@ -336,17 +334,6 @@ public final class Abilities {
     }
 
 
-    private static long cooldownDeadline(long now, double seconds) {
-        double tickCount = seconds * 20.0;
-        if (!Double.isFinite(tickCount)) {
-            return Long.MAX_VALUE;
-        }
-        BigDecimal deadline = BigDecimal.valueOf(now).add(
-                new BigDecimal(tickCount).setScale(0, RoundingMode.CEILING));
-        return deadline.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0
-                ? Long.MAX_VALUE
-                : deadline.longValueExact();
-    }
 
     private static long saturatedAdd(long value, long increment) {
         return increment > 0L && value > Long.MAX_VALUE - increment

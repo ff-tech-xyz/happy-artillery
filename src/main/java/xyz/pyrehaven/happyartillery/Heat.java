@@ -1,7 +1,5 @@
 package xyz.pyrehaven.happyartillery;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Objects;
 
 /** Pure authority for heat transitions in saved Overworld game time. */
@@ -48,7 +46,8 @@ public final class Heat {
         GhastState advanced = advance(state, now, profile);
         double shotHeat = advanced.heat() + profile.heatPerShot();
         requireFinite("shot heat", shotHeat);
-        long shotWindowEnd = firingWindowDeadline(now, heat.coolingDelayAfterShotSeconds());
+        long shotWindowEnd = GhastState.deadlineAfterSeconds(
+                now, heat.coolingDelayAfterShotSeconds());
         long firingWindowEnd = Math.max(advanced.firingWindowEndTick(), shotWindowEnd);
         GhastState updated = new GhastState(
                 shotHeat,
@@ -61,17 +60,6 @@ public final class Heat {
         return new ShotResult(updated, shotHeat >= heat.limit());
     }
 
-    private static long firingWindowDeadline(long now, double seconds) {
-        double windowTickCount = seconds * 20.0;
-        if (!Double.isFinite(windowTickCount)) {
-            return Long.MAX_VALUE;
-        }
-        BigDecimal deadline = BigDecimal.valueOf(now).add(
-                new BigDecimal(windowTickCount).setScale(0, RoundingMode.CEILING));
-        return deadline.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0
-                ? Long.MAX_VALUE
-                : deadline.longValueExact();
-    }
 
     private static void requirePositiveFinite(String name, double value) {
         requireFinite(name, value);

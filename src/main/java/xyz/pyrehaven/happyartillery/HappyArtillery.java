@@ -167,7 +167,7 @@ public final class HappyArtillery implements ModInitializer {
             }
             post = access.ghastState(ghast);
         }
-        Hud.Mode mode = presentationMode(post, now, config, biomeClass);
+        Hud.Mode mode = Hud.mode(post, now, biomeClass.profile(config));
         for (PlayerView<P, G> rider : riders) {
             if (rider.riddenGhast().isPresent()
                     && ghastId.equals(access.ghastId(rider.riddenGhast().orElseThrow()))) {
@@ -182,16 +182,6 @@ public final class HappyArtillery implements ModInitializer {
         }
     }
 
-    static Hud.Mode presentationMode(
-            GhastState state, long now, Config config, BiomeClass biomeClass) {
-        Objects.requireNonNull(state, "state");
-        Objects.requireNonNull(config, "config");
-        Objects.requireNonNull(biomeClass, "biomeClass");
-        if (now <= state.firingWindowEndTick()) {
-            return Hud.Firing.FIRING;
-        }
-        return new Hud.Cooling(biomeClass.profile(config).coolPerSecond());
-    }
 
     interface DriverAccess<P, G> {
         long gameTime();
@@ -211,7 +201,8 @@ public final class HappyArtillery implements ModInitializer {
                 Controls.InventorySnapshot snapshot);
         Controls.Admission callbackControls(
                 P pilot, Object target, InteractionHand hand,
-                RiderState state, long now, Config config);
+                RiderState state, long now, Config config,
+                Controls.CallbackSource source);
         void recoverInvalidRiderState(P player, Controls.InvalidRiderState failure);
         void removeHud(P player);
         void replaceRiderState(P player, RiderState state);
@@ -391,16 +382,15 @@ public final class HappyArtillery implements ModInitializer {
 
     private static InteractionResult onUseBlock(
             Player player, Level level, InteractionHand hand, BlockHitResult hit) {
-        InteractionResult result = Controls.blockUseResult(player.getItemInHand(hand));
-        if (result == InteractionResult.FAIL && player instanceof ServerPlayer serverPlayer) {
-            handleCallback(serverPlayer, null, hand);
-        }
-        return result;
+        boolean handled = player instanceof ServerPlayer serverPlayer
+                && handleCallback(
+                serverPlayer, null, hand, Controls.CallbackSource.BLOCK_CALLBACK);
+        return Controls.blockUseResult(player.getItemInHand(hand), handled);
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {
         if (player instanceof ServerPlayer serverPlayer) {
-            handleCallback(serverPlayer, null, hand);
+            handleCallback(serverPlayer, null, hand, Controls.CallbackSource.CALLBACK);
         }
         return InteractionResult.PASS;
     }
@@ -408,18 +398,21 @@ public final class HappyArtillery implements ModInitializer {
     private static InteractionResult onUseEntity(
             Player player, Level level, InteractionHand hand, Entity entity, EntityHitResult hit) {
         if (player instanceof ServerPlayer serverPlayer) {
-            handleCallback(serverPlayer, entity, hand);
+            handleCallback(serverPlayer, entity, hand, Controls.CallbackSource.CALLBACK);
         }
         return InteractionResult.PASS;
     }
 
-    private static void handleCallback(ServerPlayer player, Entity target, InteractionHand hand) {
+    private static boolean handleCallback(
+            ServerPlayer player, Entity target, InteractionHand hand,
+            Controls.CallbackSource source) {
         MinecraftDriverAccess access = new MinecraftDriverAccess(player.level().getServer());
-        handleCallback(access, player, target, hand);
+        return handleCallback(access, player, target, hand, source);
     }
 
-    static <P, G> void handleCallback(
-            DriverAccess<P, G> access, P player, Object target, InteractionHand hand) {
+    static <P, G> boolean handleCallback(
+            DriverAccess<P, G> access, P player, Object target,
+            InteractionHand hand, Controls.CallbackSource source) {
         long now = access.gameTime();
         Config config = access.config();
         PlayerView<P, G> view;
@@ -427,14 +420,15 @@ public final class HappyArtillery implements ModInitializer {
             view = access.inspectPlayer(player);
         } catch (Controls.InvalidRiderState failure) {
             access.recoverInvalidRiderState(player, failure);
-            return;
+            return false;
         }
         if (!view.pilot()) {
-            return;
+            return false;
         }
         Controls.Admission admission = access.callbackControls(
-                player, target, hand, view.state(), now, config);
+                player, target, hand, view.state(), now, config, source);
         processActorInput(access, view, now, config, admission);
+        return admission.handled();
     }
 
     private static <P, G> void processActorInput(
@@ -555,8 +549,11 @@ public final class HappyArtillery implements ModInitializer {
         @Override
         public Controls.Admission callbackControls(
                 ServerPlayer pilot, Object target, InteractionHand hand,
-                RiderState state, long now, Config config) {
-            return target == null
+                RiderState state, long now, Config config,
+                Controls.CallbackSource source) {
+            return source == Controls.CallbackSource.BLOCK_CALLBACK
+                    ? Controls.handleUseBlock(pilot, hand, state, now, config.controls())
+                    : target == null
                     ? Controls.handleUseItem(pilot, hand, state, now, config.controls())
                     : Controls.handleUseEntity(
                             pilot, target, hand, state, now, config.controls(),

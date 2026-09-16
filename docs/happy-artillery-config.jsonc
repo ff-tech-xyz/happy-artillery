@@ -92,7 +92,8 @@
     "explosionPower": 6.0,
     // Exact integer from 0 through 2147483647. Zero emits no overheat fireballs.
     "fireballCount": 24,
-    // Fireball speed in blocks per tick, minimum 0. Zero creates stationary fireballs.
+    // Initial fireball movement in blocks per tick, minimum 0. Vanilla inertia and acceleration
+    // apply after spawning. Zero leaves the initial movement at zero.
     "fireballSpeed": 0.4,
     // Exact integer from 0 through 2147483647. Zero gives emitted fireballs no explosion power.
     "fireballPower": 2,

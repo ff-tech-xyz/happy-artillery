@@ -863,6 +863,29 @@ final class ConfigTest {
         assertSame(loaded, Config.current());
     }
 
+    @Test
+    void lifecycleRejectsRegisteredAirForEitherGeneratedControl() throws Exception {
+        var method = Config.class.getDeclaredMethod(
+                "resolveConfiguredItems", Config.class, Predicate.class);
+        for (String key : List.of("fireItem", "cryItem")) {
+            Config defaults = Config.defaults();
+            Config.Controls controls = new Config.Controls(
+                    key.equals("fireItem") ? "minecraft:air" : defaults.controls().fireItem(),
+                    key.equals("cryItem") ? "minecraft:air" : defaults.controls().cryItem(),
+                    defaults.controls().holdToFire(), defaults.controls().allowPlainItems());
+            Config candidate = new Config(
+                    controls, defaults.fire(), defaults.heat(), defaults.water(),
+                    defaults.overheat(), defaults.cry(), defaults.hud());
+
+            InvocationTargetException failure = assertThrows(
+                    InvocationTargetException.class,
+                    () -> method.invoke(null, candidate, (Predicate<String>) ignored -> true));
+
+            assertEquals("Configured item controls." + key + " must not be minecraft:air",
+                    failure.getCause().getMessage());
+        }
+    }
+
     @ParameterizedTest(name = "lifecycle rejects missing controls.{0}")
     @MethodSource("unregisteredControlItems")
     void lifecycleResolutionFailsWithExactConfigPathAndId(

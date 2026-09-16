@@ -1,64 +1,69 @@
 # Happy Artillery
 
-Happy Artillery turns the Happy Ghast into a rideable siege machine. Pilots can fire vanilla fireballs, use a Ghast Cry, and push the ghast into a dangerous overheat. Every rider gets a HUD showing the ghast's current heat and cooling state.
+Happy Artillery turns Happy Ghasts into rideable siege machines. The pilot can launch vanilla fireballs, use a Ghast Cry, and risk an overheat by firing too often. Every rider sees the ghast's heat and cooling status.
 
-Happy Artillery runs on the server. Players can join with an unmodded Java client.
+Happy Artillery runs on the server. Players join with an unmodded Java client.
 
 ## Controls
 
-When you become the pilot, the mod allocates one temporary control for each enabled ability. With Fire and Cry enabled, allocation requires two free hotbar or main-inventory slots; one enabled ability requires one; both disabled require none. Allocation is all-or-nothing. The refusal says `Controls need 2 free slots.` or `Control needs 1 free slot.` to match the configured controls.
+When you become the pilot, the mod gives you one temporary control for each enabled ability:
 
-The generated controls can move normally within their owner's hotbar, main inventory, and offhand. Hold one in either hand to use it:
+- **Fire Control:** right-click to fire. Holding the control repeats fire by default.
+- **Cry Control:** right-click to play the Happy Ghast's cry. Cry has its own cooldown and does not work while the ghast is touching water.
 
-- Fire Control fires on right-click and supports hold-to-fire by default.
-- Cry Control is click-only. It plays the Happy Ghast's cry and has its own cooldown, but it cannot be used while the ghast is touching water. A pending overheat fuse blocks more Fire shots, not Cry.
+The controls need free space in your hotbar or main inventory. Two enabled abilities need two free slots; one enabled ability needs one. If there is not enough room, the mod adds nothing and leaves your existing items alone.
 
-Controls are tied to their owner and the current ride. A marked control cannot activate a block, so the default Fire Control cannot be consumed as a fire charge or ignite terrain. Trying to drop a control or place it in an external container consumes it; crafting-input slots are the exception and keep the control. A lost or consumed control does not regenerate during the same ride; dismount and ride again to receive the configured control or controls. Ordinary items are never overwritten to make room.
+You can move your controls through your hotbar, main inventory, and offhand. Hold a control in either hand to use it. Each control belongs to one player and one ride, so another player cannot use it.
 
-## Heat, cooling, and overheat
+Dropping a control or moving it into a container or crafting grid consumes it. Controls cannot be stored in bundles or used as crafting ingredients. A lost control does not return during the same ride; dismount and ride again to receive a new one.
 
-Each shot adds heat. Heat gain and passive cooling depend on the dimension and biome: cold areas and the End heat more slowly and cool faster, hot areas heat faster and cool more slowly, and the Nether has no passive cooling by default. Water doesn't change cooling. Cry is blocked whenever the ghast is touching water; Fire is blocked there by default and follows `water.blocksFiring`.
+## Heat and overheat
 
-The rider HUD shows effective cooling rather than a generic biome label. It distinguishes firing, no cooling, and the current cooling rate. Missing and inventory warnings consider only enabled controls and use `CONTROL` for one affected control or `CONTROLS` for two. Passengers see the same heat and cooling status without receiving controls.
+Every Fire shot adds heat. Cold areas and the End add less heat and cool faster. Hot areas add more heat and cool more slowly. The Nether has no passive cooling by default. Water does not cool the ghast.
 
-Reaching the heat limit triggers the configured overheat effects. With `overheat.breaksBlocks=false`, the central explosion does not damage terrain and Happy Artillery skips its direct fire placement. With it set to `true`, that explosion follows vanilla mob rules and the mod attempts direct fire placement only while `mobGriefing` is enabled. The emitted vanilla fireballs keep their normal impact behavior in either mode, including the `mobGriefing` gamerule.
+Fire is blocked while the ghast is touching water by default. Server admins can change that with `water.blocksFiring`. Cry is always blocked in water.
 
-## Requirements
+The HUD shows when the ghast is firing, not cooling, or cooling at a specific rate. When heat reaches its limit, the configured overheat effects trigger.
+
+`overheat.breaksBlocks` controls the central explosion and direct fire placement:
+
+- `false`: the central explosion does not damage terrain, and the mod does not place fire directly.
+- `true`: terrain damage and direct fire placement follow the vanilla `mobGriefing` rule.
+
+The vanilla fireballs emitted during overheat keep their normal impact behavior in either mode.
+
+## Installation
+
+Requirements:
 
 - Minecraft `26.2`
 - Fabric Loader `0.19.3` or newer
 - Fabric API
-- Java 21 or newer
+- Java 25 or newer (required by Minecraft 26.2)
 
-Install the mod and Fabric API on the server. Clients do not install Happy Artillery.
+Place the Happy Artillery jar and Fabric API in the server's `mods/` folder, then start or restart the server. Clients do not install Happy Artillery.
 
 ## Configuration
 
-Happy Artillery creates `config/happy-artillery.json` from its defaults when the file is missing.
-Existing valid files can contain only the settings you want to override; load and reload leave their
-exact bytes alone. The full defaults, units, ranges, and examples are in the
-[annotated admin reference](docs/happy-artillery-config.jsonc).
+Happy Artillery creates `config/happy-artillery.json` when the file is missing. You can keep the full generated file or provide only the settings you want to override. Valid existing files keep their exact contents during startup and reload.
 
-When upgrading from a released 1.1.x version, Happy Artillery converts the old flat config to the new
-nested format and keeps the exact original file as `config/happy-artillery.json.v1.1.2.bak`. Cooldown,
-heat, explosion, and Cry settings with direct equivalents are carried forward. If removed ammo or water-
-cooling settings were customized, or the old biome-specific heat limits differ, startup stops without
-changing either file because those values no longer have an honest one-to-one equivalent.
+The [annotated configuration reference](docs/happy-artillery-config.jsonc) lists every setting, default, unit, range, and example. It is documentation only. Do not copy it directly into the runtime config: Happy Artillery reads strict JSON, so comments, trailing commas, duplicate or unknown keys, wrong value types, `null`, arrays, and extra content cause an error.
 
-The reference is documentation, not a runtime config. Happy Artillery reads strict JSON: comments,
-trailing commas or content, duplicate or unknown keys, wrong value types, nulls, and arrays fail
-instead of being ignored. Don't copy the JSONC file verbatim into `config/happy-artillery.json`.
-
-Admins with gamemaster permission level 2 can apply changes without restarting:
+Admins with gamemaster permission level 2 can apply a valid configuration without restarting:
 
 ```text
 /ha reload
 ```
 
-Configuration is strict. Unknown keys, removed keys, malformed values, and invalid ranges fail instead of being ignored. The old root `preset` key has been removed; defaults plus individual overrides are the only configuration model. A failed reload reports the error and keeps the current active configuration without replacing the invalid file.
+A failed reload reports the problem and keeps the previous working configuration active. It does not replace the invalid file.
 
-`fire.enabled=false` disables Fire and omits the Fire Control; `cry.enabled=false` does the same for Cry. Disabled abilities ignore generated and allowed plain-item input without presenting a rejection. `fire.shotCooldownSeconds=0` removes the Fire cooldown. Heat and overheat still limit firing. If you
-used an earlier 1.2.0 draft config, update these names before startup or reload:
+### Upgrading from 1.1.x
+
+On startup, Happy Artillery converts a released 1.1.x flat config to the new nested format and saves the exact original file as `config/happy-artillery.json.v1.1.2.bak`. Settings with direct equivalents are carried forward.
+
+Migration stops without changing either file when a customized old setting has no honest replacement. This includes removed ammunition or water-cooling settings and different biome-specific heat limits. Fix the reported setting, then start the server again.
+
+If you used an earlier 1.2.0 development config, replace these old names:
 
 - `heat.firingWindowSeconds` → `heat.coolingDelayAfterShotSeconds`
 - `heat.coldMaxTemperature` → `heat.coldBiomeMaxTemperature`
@@ -67,9 +72,7 @@ used an earlier 1.2.0 draft config, update these names before startup or reload:
 - `overheat.fireAttempts` → `overheat.firePlacementAttempts`
 - `overheat.fireRadius` → `overheat.firePlacementRadius`
 
-The old names fail with the replacement named; they aren't accepted as aliases.
-
-`hud.refreshTicks` has a minimum of `4`. `hud.firingColor` controls firing status on both HUD channels and defaults to `GOLD`; the heat warning still turns the HUD red. The `hud.cooling` section controls the zero-rate text and color (`noCoolingText`, `noCoolingColor`) and the slow, normal, and fast cooling bands (`slowMaxPerSecond`, `slowColor`, `normalMaxPerSecond`, `normalColor`, `fastColor`).
+The old names are rejected rather than treated as aliases.
 
 ## Building from source
 

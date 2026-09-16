@@ -225,7 +225,7 @@ final class HudTest {
 
         assertEquals(new ActionObservation(
                         List.of("action:GOLD:HEAT 26% · FIRING"),
-                        new RiderState.HudCache(0.26, "GREEN", "HEAT 26% · FIRING", 4L)),
+                        new RiderState.HudCache(0.26, "GREEN", "HEAT 26% · FIRING")),
                 new ActionObservation(access.actionEvents(), state.hudCache().orElseThrow()));
     }
 
@@ -335,7 +335,7 @@ final class HudTest {
         assertEquals(7, access.actionEvents().size());
         assertEquals(List.of("particle", "particle"), access.particleEvents());
         assertEquals(new RiderState.HudCache(
-                        0.9, "RED", "HEAT 90% · FIRING", 28L),
+                        0.9, "RED", "HEAT 90% · FIRING"),
                 state.hudCache().orElseThrow());
         for (int start = 1; start <= 11; start++) {
             int packets = Arrays.stream(sendsAtTick, start, start + 20).sum();
@@ -655,7 +655,7 @@ final class HudTest {
         RiderState persisted = new RiderState(
                 java.util.Optional.empty(), Long.MIN_VALUE,
                 java.util.Optional.of(new RiderState.HudCache(
-                0.9, "RED", "HEAT 90% · FIRING", 100L)));
+                0.9, "RED", "HEAT 90% · FIRING")));
         RecordingAccess access = new RecordingAccess();
 
         Hud<UUID, String> hud = new Hud<>(access);
@@ -812,32 +812,31 @@ final class HudTest {
         RiderState state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, RiderState.fresh(), 0L,
                 snapshot(10.0, BiomeClass.COLD, new Hud.Cooling(1.0)),
                 Config.defaults(), access);
-        RiderState.HudCache initial = new RiderState.HudCache(
-                0.1, "BLUE", "", Long.MIN_VALUE);
+        RiderState.HudCache initial = new RiderState.HudCache(0.1, "BLUE", "");
         assertEquals(initial, state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 4L,
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.1, "BLUE", "HEAT 50% · FIRING", 4L),
+        assertEquals(new RiderState.HudCache(0.1, "BLUE", "HEAT 50% · FIRING"),
                 state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 8L,
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING", 4L),
+        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING"),
                 state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 12L,
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING", 4L),
+        assertEquals(new RiderState.HudCache(0.5, "BLUE", "HEAT 50% · FIRING"),
                 state.hudCache().orElseThrow());
 
         state = hud.update(RIDER_ID, RIDER_ID, GHAST_ID, state, 13L,
                 snapshot(50.0, BiomeClass.HOT, Hud.Firing.FIRING),
                 Config.defaults(), access);
-        assertEquals(new RiderState.HudCache(0.5, "GOLD", "HEAT 50% · FIRING", 4L),
+        assertEquals(new RiderState.HudCache(0.5, "GOLD", "HEAT 50% · FIRING"),
                 state.hudCache().orElseThrow());
     }
 
@@ -1123,8 +1122,8 @@ final class HudTest {
 
         assertEquals(new PassengerObservation(
                         2, 0, List.of(
-                                new RiderState.HudCache(0.63, "BLUE", "", Long.MIN_VALUE),
-                                new RiderState.HudCache(0.63, "BLUE", "", Long.MIN_VALUE))),
+                                new RiderState.HudCache(0.63, "BLUE", ""),
+                                new RiderState.HudCache(0.63, "BLUE", ""))),
                 new PassengerObservation(
                         access.bossEvents().stream().filter(event -> event.equals("add")).toList().size(),
                         access.actionEvents().size(),

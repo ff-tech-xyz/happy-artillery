@@ -4,7 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "PlayerDropMixin",
-    "ExternalContainerMixin"
+    "ExternalContainerMixin",
+    "BundleContentsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

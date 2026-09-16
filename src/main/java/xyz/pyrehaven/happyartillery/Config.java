@@ -528,6 +528,9 @@ public record Config(
 
     private static void requireResolvedItem(
             String path, String itemId, Predicate<String> registeredItem) {
+        if (itemId.equals("minecraft:air")) {
+            throw new IllegalArgumentException("Configured item " + path + " must not be minecraft:air");
+        }
         if (!registeredItem.test(itemId)) {
             throw new IllegalArgumentException("Missing configured item " + path + ": " + itemId);
         }

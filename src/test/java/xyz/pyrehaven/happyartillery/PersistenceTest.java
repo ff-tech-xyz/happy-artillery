@@ -1,6 +1,8 @@
 package xyz.pyrehaven.happyartillery;
 
+import com.google.gson.JsonParser;
 import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.JsonOps;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
 import net.fabricmc.fabric.impl.attachment.AttachmentRegistryImpl;
@@ -65,7 +67,7 @@ final class PersistenceTest {
     void riderStateRoundTripsOnlyRideTickAndHudCache() {
         UUID ride = UUID.fromString("8f3f0de4-d4a8-40f5-9a8d-9fcf04e99e22");
         RiderState state = new RiderState(Optional.of(ride), 48_121L,
-                Optional.of(new RiderState.HudCache(0.875, "red", "NETHER · NO COOLING", 48_120L)));
+                Optional.of(new RiderState.HudCache(0.875, "red", "NETHER · NO COOLING")));
         Tag encoded = RiderState.CODEC.encodeStart(registryOps, state).getOrThrow();
         RiderState decoded = RiderState.CODEC.parse(registryOps, encoded).getOrThrow();
         assertEquals(state, decoded);
@@ -77,13 +79,35 @@ final class PersistenceTest {
     }
 
     @Test
+    void legacyUnusedHudTimestampIsIgnoredDuringDecode() {
+        RiderState decoded = RiderState.CODEC.parse(JsonOps.INSTANCE, JsonParser.parseString("""
+                {"last_handled_tick":12,"hud_cache":{"boss_progress":0.5,
+                "boss_color":"BLUE","action_bar_text":"READY","last_action_bar_tick":11}}
+                """)).getOrThrow();
+
+        assertEquals(12L, decoded.lastHandledTick());
+        assertEquals(Optional.of(new RiderState.HudCache(0.5, "BLUE", "READY")),
+                decoded.hudCache());
+    }
+
+    @Test
+    void oneDeadlineConversionRoundsUpAndSaturatesForEveryPersistedTimer() {
+        assertEquals(105L, GhastState.deadlineAfterSeconds(100L, 0.25));
+        assertEquals(101L, GhastState.deadlineAfterSeconds(100L, 0.001));
+        assertEquals(Long.MAX_VALUE,
+                GhastState.deadlineAfterSeconds(Long.MAX_VALUE - 1L, 1.0));
+        assertEquals(Long.MAX_VALUE,
+                GhastState.deadlineAfterSeconds(-100L, Double.MAX_VALUE));
+    }
+
+    @Test
     void riderStateRejectsNullValueFields() {
         assertThrows(NullPointerException.class, () -> new RiderState(null, 0L, Optional.empty()));
         assertThrows(NullPointerException.class, () -> new RiderState(Optional.empty(), 0L, null));
         assertThrows(NullPointerException.class,
-                () -> new RiderState.HudCache(0.0, null, "", 0L));
+                () -> new RiderState.HudCache(0.0, null, ""));
         assertThrows(NullPointerException.class,
-                () -> new RiderState.HudCache(0.0, "white", null, 0L));
+                () -> new RiderState.HudCache(0.0, "white", null));
     }
 
     @Test
@@ -111,7 +135,7 @@ final class PersistenceTest {
         FaithfulAttachmentTarget target = new FaithfulAttachmentTarget();
         RiderState initial = RiderState.fresh();
         RiderState updated = new RiderState(Optional.of(UUID.randomUUID()), 92L,
-                Optional.of(new RiderState.HudCache(0.5, "yellow", "READY", 91L)));
+                Optional.of(new RiderState.HudCache(0.5, "yellow", "READY")));
         assertNull(RiderState.replace(target, initial));
         assertSame(initial, target.getAttached(RiderState.register()));
         assertSame(initial, RiderState.replace(target, updated));

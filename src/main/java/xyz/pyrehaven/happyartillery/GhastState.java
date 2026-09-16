@@ -7,12 +7,14 @@ import net.fabricmc.fabric.api.attachment.v1.AttachmentTarget;
 import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
 import net.minecraft.resources.Identifier;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
 
-/** Immutable persistent Happy Ghast state in saved Overworld game-time ticks. */
+/** Immutable persistent Happy Ghast state and deadline arithmetic in saved Overworld game-time ticks. */
 public record GhastState(
         double heat,
         long heatAnchorTick,
@@ -57,6 +59,18 @@ public record GhastState(
     public static GhastState fresh() {
         return new GhastState(
                 0.0, 0L, 0L, 0L, 0L, OptionalLong.empty(), Optional.empty());
+    }
+
+    static long deadlineAfterSeconds(long now, double seconds) {
+        double tickCount = seconds * 20.0;
+        if (!Double.isFinite(tickCount)) {
+            return Long.MAX_VALUE;
+        }
+        BigDecimal deadline = BigDecimal.valueOf(now).add(
+                new BigDecimal(tickCount).setScale(0, RoundingMode.CEILING));
+        return deadline.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0
+                ? Long.MAX_VALUE
+                : deadline.longValueExact();
     }
 
     static synchronized AttachmentType<GhastState> register() {

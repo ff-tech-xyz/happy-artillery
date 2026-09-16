@@ -4,6 +4,7 @@ import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponents;
@@ -18,11 +19,18 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.Container;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.component.BundleContents;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -47,6 +55,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -74,9 +84,64 @@ final class ControlsTest {
 
     @Test
     void markedControlBlocksVanillaBlockUseWhileOrdinaryFireChargePasses() {
-        assertEquals(InteractionResult.FAIL, Controls.blockUseResult(fireControl(OWNER, RIDE)));
+        for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
+            assertEquals(InteractionResult.FAIL, Controls.blockUseResult(control, false));
+        }
         assertEquals(InteractionResult.PASS,
-                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE)));
+                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE), false));
+        assertEquals(InteractionResult.FAIL,
+                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE), true));
+    }
+
+    @Test
+    void blockUseStartsMarkedHoldControlAndAdmitsItsFirstShot() {
+        TestPilot pilot = TestPilot.riding();
+        pilot.main = fireControl(OWNER, RIDE);
+        RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+
+        Controls.Admission admission = Controls.handleUseBlock(
+                pilot, InteractionHand.MAIN_HAND, state, 11L,
+                Config.current().controls(), pilot);
+
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Accepted.class, admission).intent());
+        assertEquals(InteractionHand.MAIN_HAND, pilot.startedHand);
+    }
+
+    @Test
+    void blockUseAdmitsAllowedPlainFireWithoutStartingGeneratedHoldState() {
+        TestPilot pilot = TestPilot.riding();
+        pilot.main = new ItemStack(Items.FIRE_CHARGE);
+        RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+        Config.Controls settings = new Config.Controls(
+                "minecraft:fire_charge", "minecraft:ghast_tear", true, true);
+
+        Controls.Admission admission = Controls.handleUseBlock(
+                pilot, InteractionHand.MAIN_HAND, state, 11L, settings, pilot);
+
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Accepted.class, admission).intent());
+        assertSame(null, pilot.startedHand);
+    }
+
+    @Test
+    void sameTickPlainBlockUseRemainsHandledWithoutASecondShot() {
+        TestPilot pilot = TestPilot.riding();
+        ItemStack plainFire = new ItemStack(Items.FIRE_CHARGE);
+        pilot.main = plainFire.copy();
+        RiderState state = new RiderState(Optional.of(RIDE), 11L, Optional.empty());
+        Config.Controls settings = new Config.Controls(
+                "minecraft:fire_charge", "minecraft:ghast_tear", true, true);
+
+        Controls.Admission admission = Controls.handleUseBlock(
+                pilot, InteractionHand.MAIN_HAND, state, 11L, settings, pilot);
+
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Deduplicated.class, admission).intent());
+        assertTrue(admission.handled());
+        assertEquals(InteractionResult.FAIL,
+                Controls.blockUseResult(plainFire, admission.handled()));
+        assertSame(state, admission.state());
     }
 
     @Test
@@ -348,7 +413,7 @@ final class ControlsTest {
     void invalidPersistedHudCacheUsesNamedOwnerFailureWithRideIdentity() {
         RecordingInventory inventory = RecordingInventory.empty();
         RiderState invalid = new RiderState(Optional.of(RIDE), 10L,
-                Optional.of(new RiderState.HudCache(Double.NaN, "PURPLE", "bad", 9L)));
+                Optional.of(new RiderState.HudCache(Double.NaN, "PURPLE", "bad")));
 
         Controls.InvalidRiderState failure = assertThrows(
                 Controls.InvalidRiderState.class,
@@ -605,7 +670,8 @@ final class ControlsTest {
 
         assertEquals(Controls.ControlIntent.FIRE,
                 assertInstanceOf(Controls.Accepted.class, held).intent());
-        assertInstanceOf(Controls.Ignored.class, callbackSameTick);
+        assertEquals(Controls.ControlIntent.CRY,
+                assertInstanceOf(Controls.Deduplicated.class, callbackSameTick).intent());
         assertSame(held.state(), callbackSameTick.state());
         assertEquals(Controls.ControlIntent.FIRE,
                 assertInstanceOf(Controls.Accepted.class, heldNextTick).intent());
@@ -686,6 +752,25 @@ final class ControlsTest {
     }
 
     @Test
+    void dismountCleanupConsumesMatchingCursorAndCraftingControlsOnly() {
+        RecordingInventory inventory = RecordingInventory.empty();
+        ItemStack matchingCursor = fireControl(OWNER, RIDE);
+        ItemStack matchingCrafting = cryControl(OWNER, RIDE);
+        ItemStack foreignCrafting = fireControl(UUID.randomUUID(), RIDE);
+        inventory.transientStacks.add(matchingCursor.copy());
+        inventory.transientStacks.add(matchingCrafting.copy());
+        inventory.transientStacks.add(foreignCrafting.copy());
+        inventory.transientStacks.add(new ItemStack(Items.FIRE_CHARGE));
+
+        Controls.removeMatching(inventory, OWNER, RIDE, inventory);
+
+        assertTrue(inventory.transientStacks.get(0).isEmpty());
+        assertTrue(inventory.transientStacks.get(1).isEmpty());
+        assertTrue(ItemStack.matches(foreignCrafting, inventory.transientStacks.get(2)));
+        assertTrue(inventory.transientStacks.get(3).is(Items.FIRE_CHARGE));
+    }
+
+    @Test
     void externalMutationPreservesOnlyOwningPlayerInventoryAndSelectsEveryOtherDestination() {
         ItemStack ownerDestination = fireControl(OWNER, RIDE);
         ItemStack otherPlayer = fireControl(OWNER, RIDE);
@@ -735,6 +820,78 @@ final class ControlsTest {
     }
 
     @Test
+    void appliedSlotMixinConsumesControlsBeforeContainerMutation() {
+        for (SimpleContainer container : List.of(new SimpleContainer(1),
+                new net.minecraft.world.inventory.PlayerEnderChestContainer())) {
+            for (int index = 0; index < container.getContainerSize(); index++) {
+                Slot slot = new Slot(container, index, 0, 0);
+                for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
+                    slot.set(control.copy());
+                    assertTrue(container.getItem(index).isEmpty());
+                    assertTrue(slot.safeInsert(control.copy()).isEmpty());
+                    assertTrue(container.getItem(index).isEmpty());
+                }
+                ItemStack ordinary = new ItemStack(Items.FIRE_CHARGE);
+                slot.set(ordinary);
+                assertSame(ordinary, container.getItem(index));
+            }
+        }
+    }
+
+    @Test
+    void appliedSlotMixinConsumesControlsInEveryVanillaMenuBlockContainer() {
+        Set<String> checked = new TreeSet<>();
+        for (Block block : BuiltInRegistries.BLOCK) {
+            if (!(block instanceof EntityBlock factory)) {
+                continue;
+            }
+            var entity = factory.newBlockEntity(BlockPos.ZERO, block.defaultBlockState());
+            if (!(entity instanceof Container container)
+                    || !(entity instanceof MenuProvider)) {
+                continue;
+            }
+            String name = BuiltInRegistries.BLOCK.getKey(block).toString();
+            for (int index = 0; index < container.getContainerSize(); index++) {
+                Slot slot = new Slot(container, index, 0, 0);
+                for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
+                    slot.setByPlayer(control.copy());
+                    assertTrue(container.getItem(index).isEmpty(), name + " slot " + index);
+                }
+                ItemStack ordinary = new ItemStack(Items.DIAMOND);
+                assertSame(ordinary, Controls.transformExternalControlWrite(slot, ordinary),
+                        name + " ordinary item left to vanilla validation");
+            }
+            checked.add(name);
+        }
+        assertTrue(checked.containsAll(List.of("minecraft:chest", "minecraft:trapped_chest",
+                "minecraft:barrel", "minecraft:shulker_box", "minecraft:furnace",
+                "minecraft:blast_furnace", "minecraft:smoker", "minecraft:brewing_stand",
+                "minecraft:hopper", "minecraft:dispenser", "minecraft:dropper",
+                "minecraft:crafter")), checked.toString());
+        System.out.println("Control containment block-container matrix: " + checked);
+    }
+
+    @Test
+    void bundlesRejectBothControlsWithoutConsumingThemAndStillAcceptOrdinaryItems() {
+        assertFalse(BundleContents.canItemBeInBundle(ItemStack.EMPTY));
+        assertFalse(BundleContents.canItemBeInBundle(new ItemStack(Items.SHULKER_BOX)));
+        for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
+            var bundle = new BundleContents.Mutable(BundleContents.EMPTY);
+            assertFalse(BundleContents.canItemBeInBundle(control));
+            assertEquals(0, bundle.tryInsert(control));
+            assertEquals(1, control.getCount());
+            assertTrue(bundle.toImmutable().isEmpty());
+            SimpleContainer source = new SimpleContainer(control.copy());
+            assertEquals(0, bundle.tryTransfer(new Slot(source, 0, 0, 0), null));
+            assertTrue(ItemStack.matches(control, source.getItem(0)));
+            assertTrue(bundle.toImmutable().isEmpty());
+            ItemStack ordinary = new ItemStack(control.getItem());
+            assertEquals(1, bundle.tryInsert(ordinary));
+            assertTrue(ordinary.isEmpty());
+        }
+    }
+
+    @Test
     void slotWriteTransformConsumesActualExternalDestinationsWithoutNestedMutation() {
         ItemStack mergedDestination = fireControl(OWNER, RIDE);
         mergedDestination.setCount(2);
@@ -755,15 +912,74 @@ final class ControlsTest {
     }
 
     @Test
-    void slotWriteTransformPreservesMarkedPlayerCraftingInputs() {
-        TransientCraftingContainer crafting = new TransientCraftingContainer(null, 2, 2);
-        Slot input = new Slot(crafting, 0, 0, 0);
-        ItemStack control = fireControl(OWNER, RIDE);
+    void recipeBookExcludesGeneratedControlsButNotTheirOrdinaryIngredients() {
+        RecordingInventory inventory = RecordingInventory.empty();
+        Controls.reconcile(inventory, RiderState.fresh(), Optional.of(RIDE), inventory);
+        for (int slot : List.of(0, 1)) {
+            ItemStack control = inventory.read(inventory, slot);
+            assertTrue(Components.marker(control).marker().isPresent());
+            assertFalse(net.minecraft.world.entity.player.Inventory.isUsableForCrafting(control));
+            assertTrue(net.minecraft.world.entity.player.Inventory.isUsableForCrafting(
+                    new ItemStack(control.getItem())));
+        }
+    }
 
-        ItemStack transformed = Controls.transformExternalControlWrite(input, control);
+    @Test
+    void appliedSlotMixinConsumesBothControlsInInventoryAndTableCrafting() {
+        AbstractContainerMenu menu = new AbstractContainerMenu(null, 0) {
+            @Override public ItemStack quickMoveStack(Player player, int slot) { return ItemStack.EMPTY; }
+            @Override public boolean stillValid(Player player) { return true; }
+        };
+        for (int width : List.of(2, 3)) {
+            TransientCraftingContainer crafting = new TransientCraftingContainer(menu, width, width);
+            for (int index = 0; index < width * width; index++) {
+                Slot input = new Slot(crafting, index, 0, 0);
+                for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
+                    input.setByPlayer(control.copy());
+                    assertTrue(crafting.getItem(index).isEmpty());
+                    assertTrue(input.safeInsert(control.copy()).isEmpty());
+                    assertTrue(crafting.getItem(index).isEmpty());
+                }
+                ItemStack ordinary = new ItemStack(Items.FIRE_CHARGE);
+                input.setByPlayer(ordinary);
+                assertSame(ordinary, crafting.getItem(index));
+                input.set(ItemStack.EMPTY);
+            }
+        }
+    }
 
-        assertSame(control, transformed);
-        assertFalse(transformed.isEmpty());
+    @Test
+    void productionCleanupCoversDistinctActiveAndInventoryMenuCursorsAndCraftingGrids()
+            throws Exception {
+        ClassNode access = BytecodeTestSupport.classNode(
+                Controls.class.getName() + "$ServerPlayerInventoryAccess");
+        MethodNode remove = access.methods.stream()
+                .filter(candidate -> candidate.name.equals("removeTransient")
+                        && candidate.desc.startsWith("(Lnet/minecraft/server/level/ServerPlayer;"))
+                .findFirst().orElseThrow();
+        List<FieldInsnNode> fields = Stream.iterate(
+                        remove.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(FieldInsnNode.class::isInstance).map(FieldInsnNode.class::cast).toList();
+        List<MethodInsnNode> removeCalls = Stream.iterate(
+                        remove.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast).toList();
+
+        assertTrue(fields.stream().anyMatch(field -> field.name.equals("containerMenu")));
+        assertTrue(fields.stream().anyMatch(field -> field.name.equals("inventoryMenu")));
+        assertEquals(2, removeCalls.stream()
+                .filter(call -> call.name.equals("removeTransientFromMenu")).count());
+
+        MethodNode menuCleanup = method(access, "removeTransientFromMenu");
+        List<MethodInsnNode> menuCalls = Stream.iterate(
+                        menuCleanup.instructions.getFirst(), java.util.Objects::nonNull,
+                        org.objectweb.asm.tree.AbstractInsnNode::getNext)
+                .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast).toList();
+        for (String requiredCall : List.of(
+                "getCarried", "setCarried", "getInputGridSlots", "getItem", "set")) {
+            assertTrue(menuCalls.stream().anyMatch(call -> call.name.equals(requiredCall)), requiredCall);
+        }
     }
 
     @Test
@@ -842,14 +1058,14 @@ final class ControlsTest {
     }
 
     @Test
-    void mixinMetadataDeclaresExactlyTheTwoNarrowMixins() throws Exception {
+    void mixinMetadataDeclaresExactlyTheThreeNarrowMixins() throws Exception {
         try (InputStream input = ControlsTest.class.getResourceAsStream("/happy-artillery.mixins.json")) {
             assertNotNull(input);
             com.google.gson.JsonObject metadata = com.google.gson.JsonParser.parseReader(
                     new java.io.InputStreamReader(input, StandardCharsets.UTF_8)).getAsJsonObject();
             assertTrue(metadata.get("required").getAsBoolean());
             assertEquals(1, metadata.getAsJsonObject("injectors").get("defaultRequire").getAsInt());
-            assertEquals(List.of("PlayerDropMixin", "ExternalContainerMixin"),
+            assertEquals(List.of("PlayerDropMixin", "ExternalContainerMixin", "BundleContentsMixin"),
                     metadata.getAsJsonArray("mixins").asList().stream()
                             .map(com.google.gson.JsonElement::getAsString).toList());
         }
@@ -965,6 +1181,7 @@ final class ControlsTest {
         private final List<Integer> reads = new ArrayList<>();
         private final List<Integer> writes = new ArrayList<>();
         private final List<Component> messages = new ArrayList<>();
+        private final List<ItemStack> transientStacks = new ArrayList<>();
 
         private RecordingInventory(boolean filled) {
             Arrays.setAll(stacks, ignored -> filled ? new ItemStack(Items.STONE) : ItemStack.EMPTY);
@@ -985,6 +1202,14 @@ final class ControlsTest {
         }
         @Override public UUID ownerId(RecordingInventory inventory) { return OWNER; }
         @Override public void message(RecordingInventory inventory, Component message) { messages.add(message); }
+        @Override public void removeTransient(
+                RecordingInventory inventory, java.util.function.Predicate<ItemStack> shouldRemove) {
+            for (int index = 0; index < transientStacks.size(); index++) {
+                if (shouldRemove.test(transientStacks.get(index).copy())) {
+                    transientStacks.set(index, ItemStack.EMPTY);
+                }
+            }
+        }
     }
 
     private static final class TestPilot implements Controls.ControlAccess<TestPilot, UUID> {
@@ -993,6 +1218,7 @@ final class ControlsTest {
         private boolean riding = true;
         private boolean controllingFirstPassenger = true;
         private ItemStack activeUse = ItemStack.EMPTY;
+        private InteractionHand startedHand;
         static TestPilot riding() { return new TestPilot(); }
         @Override public Optional<UUID> riddenHappyGhast(TestPilot player) {
             return riding ? Optional.of(RIDE) : Optional.empty();
@@ -1007,6 +1233,10 @@ final class ControlsTest {
         }
         @Override public ItemStack activeUseItem(TestPilot player) {
             return activeUse.copy();
+        }
+        @Override public void startUsingItem(TestPilot player, InteractionHand hand) {
+            startedHand = hand;
+            activeUse = itemInHand(player, hand);
         }
     }
 }

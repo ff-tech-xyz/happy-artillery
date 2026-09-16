@@ -61,13 +61,11 @@ public record RiderState(
     public record HudCache(
             double bossProgress,
             String bossColor,
-            String actionBarText,
-            long lastActionBarTick) {
+            String actionBarText) {
         public static final Codec<HudCache> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.DOUBLE.fieldOf("boss_progress").forGetter(HudCache::bossProgress),
                 Codec.STRING.fieldOf("boss_color").forGetter(HudCache::bossColor),
-                Codec.STRING.fieldOf("action_bar_text").forGetter(HudCache::actionBarText),
-                Codec.LONG.fieldOf("last_action_bar_tick").forGetter(HudCache::lastActionBarTick)
+                Codec.STRING.fieldOf("action_bar_text").forGetter(HudCache::actionBarText)
         ).apply(instance, HudCache::new));
 
         public HudCache {

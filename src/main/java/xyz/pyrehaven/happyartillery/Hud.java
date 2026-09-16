@@ -75,7 +75,7 @@ public final class Hud<R, H> {
                 : riderState.hudCache().orElseGet(Hud::freshCache);
         if (viewerReplaced || actionReenabled) {
             cache = new RiderState.HudCache(
-                    cache.bossProgress(), cache.bossColor(), "", Long.MIN_VALUE);
+                    cache.bossProgress(), cache.bossColor(), "");
         }
         double progress = normalized(snapshot.heat(), config.heat().limit());
         Config.Color color = color(progress, snapshot.mode(), config.hud());
@@ -90,7 +90,7 @@ public final class Hud<R, H> {
             session.display = null;
             attachmentDelivered = true;
             cache = new RiderState.HudCache(
-                    -1.0, "", cache.actionBarText(), cache.lastActionBarTick());
+                    -1.0, "", cache.actionBarText());
         }
         if (config.hud().bossBar() && display == null) {
             H handle = access.createBossBar(progress, color);
@@ -98,7 +98,7 @@ public final class Hud<R, H> {
             display = handle;
             session.display = display;
             cache = new RiderState.HudCache(
-                    progress, color.name(), cache.actionBarText(), cache.lastActionBarTick());
+                    progress, color.name(), cache.actionBarText());
             attachmentDelivered = true;
         }
 
@@ -118,7 +118,7 @@ public final class Hud<R, H> {
                     : color;
             access.actionBar(rider, actionText, actionColor);
             cache = new RiderState.HudCache(
-                    cache.bossProgress(), cache.bossColor(), actionText, now);
+                    cache.bossProgress(), cache.bossColor(), actionText);
             session.lastActionTick = now;
         }
         if (attachmentDelivered) {
@@ -140,15 +140,13 @@ public final class Hud<R, H> {
                             && Double.compare(progress, cache.bossProgress()) != 0) {
                         access.setProgress(display, progress);
                         cache = new RiderState.HudCache(
-                                progress, cache.bossColor(),
-                                cache.actionBarText(), cache.lastActionBarTick());
+                                progress, cache.bossColor(), cache.actionBarText());
                         delivered = true;
                     } else if (channel == 2 && display != null
                             && !color.name().equals(cache.bossColor())) {
                         access.setColor(display, color);
                         cache = new RiderState.HudCache(
-                                cache.bossProgress(), color.name(),
-                                cache.actionBarText(), cache.lastActionBarTick());
+                                cache.bossProgress(), color.name(), cache.actionBarText());
                         delivered = true;
                     } else if (channel == 3 && display != null
                             && !access.hasCurrentName(display)) {
@@ -259,6 +257,14 @@ public final class Hud<R, H> {
         return Math.max(0.0, Math.min(1.0, heat / limit));
     }
 
+    static Mode mode(GhastState state, long now, Config.HeatProfile profile) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(profile, "profile");
+        return now <= state.firingWindowEndTick()
+                ? Firing.FIRING
+                : new Cooling(profile.coolPerSecond());
+    }
+
     private static Config.Color color(double progress, Mode mode, Config.Hud hud) {
         double warning = warningThreshold(hud.warningFromPercent());
         if (progress >= warning) {
@@ -294,7 +300,7 @@ public final class Hud<R, H> {
     }
 
     private static RiderState.HudCache freshCache() {
-        return new RiderState.HudCache(-1.0, "", "", Long.MIN_VALUE);
+        return new RiderState.HudCache(-1.0, "", "");
     }
 
     public record Snapshot(

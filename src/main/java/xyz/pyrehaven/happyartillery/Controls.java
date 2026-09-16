@@ -14,8 +14,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.component.Consumable;
@@ -23,6 +24,7 @@ import net.minecraft.world.item.component.Consumable;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /** Sole owner of generated controls, bounded inventory policy, and pilot admission. */
 public final class Controls {
@@ -139,6 +141,8 @@ public final class Controls {
         if (offhand != null && offhand.ownerId().equals(ownerId)) {
             access.write(inventory, OFFHAND, ItemStack.EMPTY);
         }
+        access.removeTransient(inventory, stack -> Components.marker(stack).marker()
+                .filter(marker -> marker.ownerId().equals(ownerId)).isPresent());
     }
 
     static <T> InventorySnapshot snapshot(
@@ -194,6 +198,7 @@ public final class Controls {
         if (Components.matches(access.read(inventory, OFFHAND), ownerId, rideId)) {
             access.write(inventory, OFFHAND, ItemStack.EMPTY);
         }
+        access.removeTransient(inventory, stack -> Components.matches(stack, ownerId, rideId));
     }
 
     public static void consumeDroppedControl(ItemStack droppedStack, ItemEntity returnedEntity) {
@@ -211,9 +216,6 @@ public final class Controls {
     public static ItemStack transformExternalControlWrite(Slot destination, ItemStack stack) {
         Objects.requireNonNull(destination, "destination");
         Objects.requireNonNull(stack, "stack");
-        if (destination.container instanceof TransientCraftingContainer) {
-            return stack;
-        }
         UUID destinationOwnerId = destination.container instanceof Inventory inventory
                 ? inventory.player.getUUID() : null;
         return shouldConsumeExternalControl(stack, destinationOwnerId) ? ItemStack.EMPTY : stack;
@@ -225,9 +227,36 @@ public final class Controls {
                 && (destinationOwnerId == null || !marker.ownerId().equals(destinationOwnerId));
     }
 
-    static InteractionResult blockUseResult(ItemStack stack) {
-        return Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent()
+    public static boolean blocksBundleInsertion(ItemStack stack) {
+        return Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent();
+    }
+
+    static InteractionResult blockUseResult(ItemStack stack, boolean artilleryHandled) {
+        return artilleryHandled
+                || Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent()
                 ? InteractionResult.FAIL : InteractionResult.PASS;
+    }
+
+
+    static Admission handleUseBlock(
+            ServerPlayer player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings) {
+        return handleUseBlock(
+                player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static <P, G> Admission handleUseBlock(
+            P player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings, ControlAccess<P, G> access) {
+        ItemStack input = access.itemInHand(player, hand);
+        Admission admission = admit(player, CallbackSource.BLOCK_CALLBACK, input, Optional.empty(),
+                state, gameTick, settings, access);
+        if (admission.handled() && settings.holdToFire()
+                && Components.marker(input).marker()
+                .filter(marker -> marker.control() == Components.Control.FIRE).isPresent()) {
+            access.startUsingItem(player, hand);
+        }
+        return admission;
     }
 
 
@@ -300,8 +329,11 @@ public final class Controls {
         }
         Optional<ControlIntent> intent = classify(
                 player, source, input, rideId, settings, snapshot, access);
-        if (intent.isEmpty() || state.lastHandledTick() == gameTick) {
+        if (intent.isEmpty()) {
             return new Ignored(state);
+        }
+        if (state.lastHandledTick() == gameTick) {
+            return new Deduplicated(intent.orElseThrow(), state);
         }
         return new Accepted(intent.orElseThrow(), state.withLastHandledTick(gameTick));
     }
@@ -337,7 +369,8 @@ public final class Controls {
         if (markedCry || plainCry) {
             return Optional.of(ControlIntent.CRY);
         }
-        return plainFire || !settings.holdToFire() && markedFire
+        return plainFire || markedFire
+                && (source == CallbackSource.BLOCK_CALLBACK || !settings.holdToFire())
                 ? Optional.of(ControlIntent.FIRE) : Optional.empty();
     }
 
@@ -371,15 +404,26 @@ public final class Controls {
         }
     }
 
-    enum CallbackSource { CALLBACK, SERVER_TICK }
+    enum CallbackSource { CALLBACK, BLOCK_CALLBACK, SERVER_TICK }
     enum ControlIntent { FIRE, CRY }
 
-    sealed interface Admission permits Accepted, Ignored {
+    sealed interface Admission permits Accepted, Deduplicated, Ignored {
         RiderState state();
+
+        default boolean handled() {
+            return this instanceof Accepted || this instanceof Deduplicated;
+        }
     }
 
     record Accepted(ControlIntent intent, RiderState state) implements Admission {
         Accepted {
+            Objects.requireNonNull(intent, "intent");
+            Objects.requireNonNull(state, "state");
+        }
+    }
+
+    record Deduplicated(ControlIntent intent, RiderState state) implements Admission {
+        Deduplicated {
             Objects.requireNonNull(intent, "intent");
             Objects.requireNonNull(state, "state");
         }
@@ -408,6 +452,7 @@ public final class Controls {
         UUID playerId(P player);
         ItemStack itemInHand(P player, InteractionHand hand);
         ItemStack activeUseItem(P player);
+        void startUsingItem(P player, InteractionHand hand);
     }
 
     enum ServerPlayerControlAccess implements ControlAccess<ServerPlayer, HappyGhast> {
@@ -426,6 +471,9 @@ public final class Controls {
         @Override public ItemStack activeUseItem(ServerPlayer player) {
             return player.isUsingItem() ? player.getUseItem().copy() : ItemStack.EMPTY;
         }
+        @Override public void startUsingItem(ServerPlayer player, InteractionHand hand) {
+            player.startUsingItem(hand);
+        }
     }
 
     interface InventoryAccess<T> {
@@ -433,6 +481,7 @@ public final class Controls {
         void write(T inventory, int slot, ItemStack stack);
         UUID ownerId(T inventory);
         void message(T inventory, Component message);
+        void removeTransient(T inventory, Predicate<ItemStack> shouldRemove);
     }
 
     enum ServerPlayerInventoryAccess implements InventoryAccess<ServerPlayer> {
@@ -446,6 +495,27 @@ public final class Controls {
         @Override public UUID ownerId(ServerPlayer player) { return player.getUUID(); }
         @Override public void message(ServerPlayer player, Component message) {
             player.sendSystemMessage(message);
+        }
+        @Override public void removeTransient(
+                ServerPlayer player, Predicate<ItemStack> shouldRemove) {
+            removeTransientFromMenu(player.containerMenu, shouldRemove);
+            if (player.inventoryMenu != player.containerMenu) {
+                removeTransientFromMenu(player.inventoryMenu, shouldRemove);
+            }
+        }
+
+        private static void removeTransientFromMenu(
+                AbstractContainerMenu menu, Predicate<ItemStack> shouldRemove) {
+            if (shouldRemove.test(menu.getCarried().copy())) {
+                menu.setCarried(ItemStack.EMPTY);
+            }
+            if (menu instanceof AbstractCraftingMenu craftingMenu) {
+                for (Slot slot : craftingMenu.getInputGridSlots()) {
+                    if (shouldRemove.test(slot.getItem().copy())) {
+                        slot.set(ItemStack.EMPTY);
+                    }
+                }
+            }
         }
     }
 

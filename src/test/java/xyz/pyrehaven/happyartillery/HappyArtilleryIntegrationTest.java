@@ -84,9 +84,9 @@ final class HappyArtilleryIntegrationTest {
                 java.util.OptionalLong.empty(), Optional.empty());
 
         assertEquals(new Hud.Cooling(config.heat().base().coolPerSecond()),
-                HappyArtillery.presentationMode(cooling, 101L, config, BiomeClass.BASE));
+                Hud.mode(cooling, 101L, BiomeClass.BASE.profile(config)));
         assertEquals(Hud.Firing.FIRING,
-                HappyArtillery.presentationMode(cooling, 100L, config, BiomeClass.BASE));
+                Hud.mode(cooling, 100L, BiomeClass.BASE.profile(config)));
     }
 
     @Test
@@ -108,11 +108,11 @@ final class HappyArtilleryIntegrationTest {
                 java.util.OptionalLong.empty(), Optional.empty());
 
         assertEquals(Hud.Firing.FIRING,
-                HappyArtillery.presentationMode(state, 100L, config, BiomeClass.NETHER));
+                Hud.mode(state, 100L, BiomeClass.NETHER.profile(config)));
         assertEquals(new Hud.Cooling(0.75),
-                HappyArtillery.presentationMode(state, 101L, config, BiomeClass.NETHER));
+                Hud.mode(state, 101L, BiomeClass.NETHER.profile(config)));
         assertEquals(new Hud.Cooling(0.0),
-                HappyArtillery.presentationMode(state, 101L, config, BiomeClass.END));
+                Hud.mode(state, 101L, BiomeClass.END.profile(config)));
     }
 
     @Test
@@ -425,7 +425,9 @@ final class HappyArtilleryIntegrationTest {
         RecordingDriver access = RecordingDriver.ridden();
         access.onlinePlayersForbidden = true;
 
-        HappyArtillery.handleCallback(access, "pilot", null, InteractionHand.MAIN_HAND);
+        assertTrue(HappyArtillery.handleCallback(
+                access, "pilot", null, InteractionHand.MAIN_HAND,
+                Controls.CallbackSource.CALLBACK));
 
         assertEquals(1, access.playerChecks.get("pilot"));
         assertEquals(1, access.fireCalls);
@@ -480,7 +482,8 @@ final class HappyArtilleryIntegrationTest {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
         MethodNode callback = method(root, "handleCallback",
                 "(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/entity/Entity;"
-                        + "Lnet/minecraft/world/InteractionHand;)V");
+                        + "Lnet/minecraft/world/InteractionHand;L" + PACKAGE
+                        + "Controls$CallbackSource;)Z");
         List<MethodInsnNode> calls = methodCalls(callback);
 
         assertEquals(0, calls.stream().filter(call -> call.name.equals("onlinePlayers")).count());
@@ -976,7 +979,8 @@ final class HappyArtilleryIntegrationTest {
         }
         @Override public Controls.Admission callbackControls(
                 String pilot, Object target, InteractionHand hand,
-                RiderState state, long now, Config config) {
+                RiderState state, long now, Config config,
+                Controls.CallbackSource source) {
             assertSame(expectedConfig, config);
             return new Controls.Accepted(Controls.ControlIntent.FIRE, state.withLastHandledTick(now));
         }
@@ -1066,6 +1070,7 @@ final class HappyArtilleryIntegrationTest {
             return control;
         }
         @Override public ItemStack activeUseItem(String player) { return ItemStack.EMPTY; }
+        @Override public void startUsingItem(String player, InteractionHand hand) { }
     }
 
     private enum NoopPresentationAccess implements Hud.PresentationAccess<String, String> {
