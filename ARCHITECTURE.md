@@ -1,6 +1,6 @@
 # Happy Artillery 1.2.0 Proposed Structure
 
-The annotated tree is the complete proposed source-controlled shape: fourteen production Java files
+The annotated tree is the complete proposed source-controlled shape: sixteen production Java files
 and eight risk-grouped test files.
 
 ```text
@@ -51,8 +51,13 @@ happy-artillery/
 │   │   │       ├── ExternalContainerMixin.java
 │   │   │       │   # Transforms Slot.set(ItemStack) writes, consuming marked controls outside their
 │   │   │       │   # owner's inventory, including inventory and table crafting inputs.
-│   │   │       └── BundleContentsMixin.java
-│   │   │           # Delegates bundle insertion eligibility to Controls before vanilla accepts a stack.
+│   │   │       ├── BundleContentsMixin.java
+│   │   │       │   # Delegates bundle insertion eligibility to Controls before vanilla accepts a stack.
+│   │   │       ├── HeldProjectileMixin.java
+│   │   │       │   # Excludes marked controls from projectile-weapon held-ammunition selection.
+│   │   │       └── PlayerProjectileMixin.java
+│   │   │           # Excludes marked controls from player-inventory ammunition selection while allowing
+│   │   │           # the search to continue to ordinary compatible ammunition.
 │   │   └── resources/
 │   │       ├── fabric.mod.json
 │   │       │   # Fabric identity, dependencies, entrypoint, mixin declaration, version, and icon.
