@@ -462,19 +462,28 @@ final class HappyArtilleryIntegrationTest {
         assertEquals(List.of(), unexpected.recovered);
     }
     @Test
-    void productionBlockUseRoutesMarkedControlsThroughActorAdmissionBeforeFailingVanillaUse()
+    void productionUseCallbacksRouteAdmissionBeforeBlockingEveryMarkedVanillaUse()
             throws IOException {
         ClassNode root = BytecodeTestSupport.classNode(HappyArtillery.class.getName());
-        MethodNode block = method(root, "onUseBlock",
+        Map<String, String> callbacks = Map.of(
+                "onUseBlock",
                 "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/level/Level;"
                         + "Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)"
-                        + "Lnet/minecraft/world/InteractionResult;");
-        List<MethodInsnNode> calls = methodCalls(block);
-
-        assertEquals(1, calls.stream().filter(call -> call.owner.equals(ROOT)
-                && call.name.equals("handleCallback")).count());
-        assertEquals(1, calls.stream().filter(call -> call.owner.equals(PACKAGE + "Controls")
-                && call.name.equals("blockUseResult")).count());
+                        + "Lnet/minecraft/world/InteractionResult;",
+                "onUseItem",
+                "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/level/Level;"
+                        + "Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/InteractionResult;",
+                "onUseEntity",
+                "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/level/Level;"
+                        + "Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/entity/Entity;"
+                        + "Lnet/minecraft/world/phys/EntityHitResult;)Lnet/minecraft/world/InteractionResult;");
+        for (Map.Entry<String, String> entry : callbacks.entrySet()) {
+            List<MethodInsnNode> calls = methodCalls(method(root, entry.getKey(), entry.getValue()));
+            assertEquals(1, calls.stream().filter(call -> call.owner.equals(ROOT)
+                    && call.name.equals("handleCallback")).count(), entry.getKey());
+            assertEquals(1, calls.stream().filter(call -> call.owner.equals(PACKAGE + "Controls")
+                    && call.name.equals("vanillaUseResult")).count(), entry.getKey());
+        }
     }
 
     @Test

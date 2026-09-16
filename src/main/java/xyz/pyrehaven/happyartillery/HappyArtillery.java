@@ -385,22 +385,26 @@ public final class HappyArtillery implements ModInitializer {
         boolean handled = player instanceof ServerPlayer serverPlayer
                 && handleCallback(
                 serverPlayer, null, hand, Controls.CallbackSource.BLOCK_CALLBACK);
-        return Controls.blockUseResult(player.getItemInHand(hand), handled);
+        return Controls.vanillaUseResult(player.getItemInHand(hand), handled);
     }
 
     private static InteractionResult onUseItem(Player player, Level level, InteractionHand hand) {
-        if (player instanceof ServerPlayer serverPlayer) {
-            handleCallback(serverPlayer, null, hand, Controls.CallbackSource.CALLBACK);
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.PASS;
         }
-        return InteractionResult.PASS;
+        boolean handled = handleCallback(
+                serverPlayer, null, hand, Controls.CallbackSource.CALLBACK);
+        return Controls.vanillaUseResult(player.getItemInHand(hand), handled);
     }
 
     private static InteractionResult onUseEntity(
             Player player, Level level, InteractionHand hand, Entity entity, EntityHitResult hit) {
-        if (player instanceof ServerPlayer serverPlayer) {
-            handleCallback(serverPlayer, entity, hand, Controls.CallbackSource.CALLBACK);
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.PASS;
         }
-        return InteractionResult.PASS;
+        boolean handled = handleCallback(
+                serverPlayer, entity, hand, Controls.CallbackSource.CALLBACK);
+        return Controls.vanillaUseResult(player.getItemInHand(hand), handled);
     }
 
     private static boolean handleCallback(

@@ -5,7 +5,9 @@
   "mixins": [
     "PlayerDropMixin",
     "ExternalContainerMixin",
-    "BundleContentsMixin"
+    "BundleContentsMixin",
+    "HeldProjectileMixin",
+    "PlayerProjectileMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -23,8 +23,8 @@ exact-head review, deployment, and manual acceptance pass.
 
 ## Architecture decisions and explicit assumptions
 
-- The tree has **fourteen production Java files**: the eleven non-mixin owners
-  plus `PlayerDropMixin`, `ExternalContainerMixin`, and `BundleContentsMixin`. Mapped Minecraft 26.2 evidence proves that
+- The tree has **sixteen production Java files**: the eleven non-mixin owners
+  plus five narrow mixins. Mapped Minecraft 26.2 evidence proves that
   `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor drops,
   menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. External chest/container
   insertion does not reach that method, so `ExternalContainerMixin` transforms the incoming stack at
@@ -35,7 +35,9 @@ exact-head review, deployment, and manual acceptance pass.
   `AbstractContainerMenu.doClick`. `PICKUP_ALL` is inbound
   slot-to-cursor collection, not outbound chest insertion. `BundleContentsMixin` rejects marked controls
   at `BundleContents.canItemBeInBundle` before either cursor insertion or slot transfer removes them.
-  All mixins delegate policy to `Controls`;
+  `HeldProjectileMixin` and `PlayerProjectileMixin` exclude marked controls from both hand-priority and
+  inventory ammunition selection without stopping the search for ordinary compatible ammunition. All
+  mixins delegate policy to `Controls`;
   there is no `DeathDropMixin` or predictive `SlotGuardMixin` in the proposed tree.
 - Persistent timing uses the Overworld's saved `gameTime` as the one canonical tick domain. It advances
   only with server ticks, survives restart without interpreting a new process-local counter, and provides
@@ -168,12 +170,14 @@ Both configured control-item identifiers must resolve to registered, non-air ite
   allowed plain-item admission silently. Ability execution checks disabled before water or effects; a
   disabled Cry used while the ghast is touching water therefore does not claim that leaving the water
   would enable it.
-- Block interaction checks the held stack through `Controls` before vanilla item behavior. Any marked
+- Every item, block, and entity interaction checks the held stack through `Controls` before vanilla item
+  behavior. Any marked
   Happy Artillery control returns `FAIL`; an authorized configured plain item also returns `FAIL` when
   `allowPlainItems=true`, while unrelated unmarked items return `PASS`. A marked Fire Control starts its
   server-observed hold state and accepts the first shot, so aiming at a nearby block neither prevents
   hold-to-fire nor consumes the control or ignites that block.
-- Controls move freely among the owning player's hotbar, main inventory, and offhand. There are no fixed
+- Controls move freely among the owning player's hotbar, main inventory, and offhand. Writes to armor
+  slots are consumed instead of hiding controls outside their owned inventory boundary. There are no fixed
   slots, stashes, restoration writes, or locked slots. No mount, dismount, reload, death, or recovery path
   overwrites an ordinary ItemStack.
 - `Controls` creates one bounded snapshot per active pilot tick over inventory indexes `0..35` plus
@@ -191,9 +195,11 @@ Both configured control-item identifiers must resolve to registered, non-air ite
 - `ExternalContainerMixin` transforms the incoming argument at `Slot.set(ItemStack)` `HEAD`.
   `Controls` first returns the original stack when it is empty or lacks vanilla `CUSTOM_DATA`, before
   any marker decode or custom-data copy. It preserves owner-matching controls written to that owner's
-  player `Inventory`. A marked write to any other container, including a crafting input, becomes
+  hotbar, main inventory, or offhand. A marked write to armor or any other container, including a crafting input, becomes
   `ItemStack.EMPTY` before the original slot mutation; the mixin does not re-enter `Slot.set`.
-- Bundles reject marked controls without consuming them. Ordinary items keep vanilla bundle eligibility.
+- Bundles reject marked controls without consuming them. Projectile weapons skip marked arrow and firework
+  controls in both hands and inventory, then continue looking for ordinary ammunition. Ordinary items keep
+  vanilla bundle and projectile eligibility.
   Block-use rejection also prevents hand insertion into blocks without menus, such as decorated pots.
   Ordinary placement,
   `QUICK_MOVE` empty/merge, number/offhand swaps, and `QUICK_CRAFT` are covered without predicting or

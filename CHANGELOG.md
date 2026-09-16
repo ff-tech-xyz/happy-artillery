@@ -28,6 +28,7 @@ This section records the player-facing, server-admin, and compatibility changes 
 - Fire Control now starts hold-to-fire while aiming at a nearby block without igniting that block.
 - Allowed plain Fire items now activate artillery instead of vanilla block ignition when an authorized pilot aims at a block.
 - Control-item validation now rejects `minecraft:air`, which cannot create a usable control stack.
+- Generated controls can no longer be loaded into projectile weapons, used as their underlying vanilla item, or moved into armor slots.
 
 ### Removed
 

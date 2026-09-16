@@ -15,7 +15,7 @@ The controls need free space in your hotbar or main inventory. Two enabled abili
 
 You can move your controls through your hotbar, main inventory, and offhand. Hold a control in either hand to use it. Each control belongs to one player and one ride, so another player cannot use it.
 
-Dropping a control or moving it into a container or crafting grid consumes it. Controls cannot be stored in bundles or used as crafting ingredients. A lost control does not return during the same ride; dismount and ride again to receive a new one.
+Dropping a control or moving it into a container, crafting grid, or armor slot consumes it. Controls cannot be stored in bundles, used as crafting ingredients, loaded as ammunition, or used as their underlying vanilla item. A lost control does not return during the same ride; dismount and ride again to receive a new one.
 
 ## Heat and overheat
 

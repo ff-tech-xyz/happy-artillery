@@ -83,14 +83,27 @@ final class ControlsTest {
     }
 
     @Test
-    void markedControlBlocksVanillaBlockUseWhileOrdinaryFireChargePasses() {
+    void markedControlBlocksEveryVanillaUseWhileOrdinaryItemsPass() {
         for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
-            assertEquals(InteractionResult.FAIL, Controls.blockUseResult(control, false));
+            assertEquals(InteractionResult.FAIL, Controls.vanillaUseResult(control, false));
         }
         assertEquals(InteractionResult.PASS,
-                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE), false));
+                Controls.vanillaUseResult(new ItemStack(Items.FIRE_CHARGE), false));
         assertEquals(InteractionResult.FAIL,
-                Controls.blockUseResult(new ItemStack(Items.FIRE_CHARGE), true));
+                Controls.vanillaUseResult(new ItemStack(Items.FIRE_CHARGE), true));
+    }
+
+    @Test
+    void markedArrowAndRocketControlsAreNeverSelectableAsAmmunition() {
+        for (ItemStack control : List.of(
+                markedControl(Items.ARROW, Components.Control.FIRE, OWNER, RIDE),
+                markedControl(Items.FIREWORK_ROCKET, Components.Control.CRY, OWNER, RIDE))) {
+            assertFalse(Controls.allowsProjectileSelection(control, ignored -> true));
+        }
+        assertTrue(Controls.allowsProjectileSelection(
+                new ItemStack(Items.ARROW), stack -> stack.is(Items.ARROW)));
+        assertFalse(Controls.allowsProjectileSelection(
+                new ItemStack(Items.DIAMOND), stack -> stack.is(Items.ARROW)));
     }
 
     @Test
@@ -106,6 +119,23 @@ final class ControlsTest {
         assertEquals(Controls.ControlIntent.FIRE,
                 assertInstanceOf(Controls.Accepted.class, admission).intent());
         assertEquals(InteractionHand.MAIN_HAND, pilot.startedHand);
+    }
+
+    @Test
+    void itemUseStartsMarkedHoldControlAndAdmitsItsFirstShotWithoutVanillaUse() {
+        TestPilot pilot = TestPilot.riding();
+        pilot.main = fireControl(OWNER, RIDE);
+        RiderState state = new RiderState(Optional.of(RIDE), 10L, Optional.empty());
+
+        Controls.Admission admission = Controls.handleUseItem(
+                pilot, InteractionHand.MAIN_HAND, state, 11L,
+                Config.current().controls(), pilot);
+
+        assertEquals(Controls.ControlIntent.FIRE,
+                assertInstanceOf(Controls.Accepted.class, admission).intent());
+        assertEquals(InteractionHand.MAIN_HAND, pilot.startedHand);
+        assertEquals(InteractionResult.FAIL,
+                Controls.vanillaUseResult(pilot.main, admission.handled()));
     }
 
     @Test
@@ -140,7 +170,7 @@ final class ControlsTest {
                 assertInstanceOf(Controls.Deduplicated.class, admission).intent());
         assertTrue(admission.handled());
         assertEquals(InteractionResult.FAIL,
-                Controls.blockUseResult(plainFire, admission.handled()));
+                Controls.vanillaUseResult(plainFire, admission.handled()));
         assertSame(state, admission.state());
     }
 
@@ -771,19 +801,20 @@ final class ControlsTest {
     }
 
     @Test
-    void externalMutationPreservesOnlyOwningPlayerInventoryAndSelectsEveryOtherDestination() {
-        ItemStack ownerDestination = fireControl(OWNER, RIDE);
-        ItemStack otherPlayer = fireControl(OWNER, RIDE);
-        ItemStack chest = fireControl(OWNER, RIDE);
+    void externalMutationPreservesOnlyOwningPlayerStorageAndOffhandSlots() {
+        ItemStack control = fireControl(OWNER, RIDE);
         ItemStack ordinary = new ItemStack(Items.DIAMOND);
 
-        assertFalse(Controls.shouldConsumeExternalControl(ownerDestination, OWNER));
-        assertTrue(Controls.shouldConsumeExternalControl(otherPlayer, UUID.randomUUID()));
-        assertTrue(Controls.shouldConsumeExternalControl(chest, null));
-        assertFalse(Controls.shouldConsumeExternalControl(ordinary, null));
-        assertFalse(ownerDestination.isEmpty());
-        assertFalse(otherPlayer.isEmpty());
-        assertFalse(chest.isEmpty());
+        for (int slot : List.of(0, 8, 9, 35, 40)) {
+            assertFalse(Controls.shouldConsumeExternalControl(control, OWNER, slot));
+        }
+        for (int slot : List.of(36, 37, 38, 39)) {
+            assertTrue(Controls.shouldConsumeExternalControl(control, OWNER, slot));
+        }
+        assertTrue(Controls.shouldConsumeExternalControl(control, UUID.randomUUID(), 0));
+        assertTrue(Controls.shouldConsumeExternalControl(control, null, -1));
+        assertFalse(Controls.shouldConsumeExternalControl(ordinary, null, -1));
+        assertFalse(control.isEmpty());
         assertFalse(ordinary.isEmpty());
     }
 
@@ -1055,17 +1086,47 @@ final class ControlsTest {
                 .filter(MethodInsnNode.class::isInstance).map(MethodInsnNode.class::cast)
                 .filter(call -> call.owner.equals("net/minecraft/world/inventory/Slot")
                         && call.name.equals("set")).count());
+
+        assertProjectileSelectionMixin(
+                "xyz.pyrehaven.happyartillery.mixin.HeldProjectileMixin",
+                Type.getObjectType("net/minecraft/world/item/ProjectileWeaponItem"),
+                "getHeldProjectile", 2);
+        assertProjectileSelectionMixin(
+                "xyz.pyrehaven.happyartillery.mixin.PlayerProjectileMixin",
+                Type.getType(Player.class), "getProjectile", 1);
+    }
+
+    private static void assertProjectileSelectionMixin(
+            String className, Type target, String methodName, int requiredRedirects) throws Exception {
+        ClassNode mixin = BytecodeTestSupport.classNode(className);
+        assertEquals(List.of(target), annotationValue(
+                annotation(mixin.invisibleAnnotations, "Lorg/spongepowered/asm/mixin/Mixin;"), "value"));
+        MethodNode handler = mixin.methods.stream().filter(candidate -> annotation(
+                candidate.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/Redirect;") != null)
+                .findFirst().orElseThrow();
+        AnnotationNode redirect = annotation(handler.visibleAnnotations,
+                "Lorg/spongepowered/asm/mixin/injection/Redirect;");
+        assertEquals(List.of(methodName), annotationValue(redirect, "method"));
+        assertEquals(requiredRedirects, annotationValue(redirect, "require"));
+        AnnotationNode at = (AnnotationNode) annotationValue(redirect, "at");
+        assertEquals("INVOKE", annotationValue(at, "value"));
+        assertEquals("Ljava/util/function/Predicate;test(Ljava/lang/Object;)Z",
+                annotationValue(at, "target"));
+        assertSingleControlsCall(handler, "allowsProjectileSelection",
+                "(Lnet/minecraft/world/item/ItemStack;Ljava/util/function/Predicate;)Z");
     }
 
     @Test
-    void mixinMetadataDeclaresExactlyTheThreeNarrowMixins() throws Exception {
+    void mixinMetadataDeclaresExactlyTheFiveNarrowMixins() throws Exception {
         try (InputStream input = ControlsTest.class.getResourceAsStream("/happy-artillery.mixins.json")) {
             assertNotNull(input);
             com.google.gson.JsonObject metadata = com.google.gson.JsonParser.parseReader(
                     new java.io.InputStreamReader(input, StandardCharsets.UTF_8)).getAsJsonObject();
             assertTrue(metadata.get("required").getAsBoolean());
             assertEquals(1, metadata.getAsJsonObject("injectors").get("defaultRequire").getAsInt());
-            assertEquals(List.of("PlayerDropMixin", "ExternalContainerMixin", "BundleContentsMixin"),
+            assertEquals(List.of("PlayerDropMixin", "ExternalContainerMixin", "BundleContentsMixin",
+                            "HeldProjectileMixin", "PlayerProjectileMixin"),
                     metadata.getAsJsonArray("mixins").asList().stream()
                             .map(com.google.gson.JsonElement::getAsString).toList());
         }

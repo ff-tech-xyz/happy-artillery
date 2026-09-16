@@ -218,23 +218,35 @@ public final class Controls {
         Objects.requireNonNull(stack, "stack");
         UUID destinationOwnerId = destination.container instanceof Inventory inventory
                 ? inventory.player.getUUID() : null;
-        return shouldConsumeExternalControl(stack, destinationOwnerId) ? ItemStack.EMPTY : stack;
+        int destinationSlot = destinationOwnerId == null ? -1 : destination.getContainerSlot();
+        return shouldConsumeExternalControl(stack, destinationOwnerId, destinationSlot)
+                ? ItemStack.EMPTY : stack;
     }
 
-    static boolean shouldConsumeExternalControl(ItemStack stack, UUID destinationOwnerId) {
+    static boolean shouldConsumeExternalControl(
+            ItemStack stack, UUID destinationOwnerId, int destinationSlot) {
         Components.Marker marker = Components.marker(stack).marker().orElse(null);
-        return marker != null
-                && (destinationOwnerId == null || !marker.ownerId().equals(destinationOwnerId));
+        boolean playerStorage = destinationSlot >= 0 && destinationSlot <= MAIN_END
+                || destinationSlot == OFFHAND;
+        return marker != null && (destinationOwnerId == null
+                || !marker.ownerId().equals(destinationOwnerId) || !playerStorage);
     }
 
     public static boolean blocksBundleInsertion(ItemStack stack) {
         return Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent();
     }
 
-    static InteractionResult blockUseResult(ItemStack stack, boolean artilleryHandled) {
+    static InteractionResult vanillaUseResult(ItemStack stack, boolean artilleryHandled) {
         return artilleryHandled
                 || Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent()
                 ? InteractionResult.FAIL : InteractionResult.PASS;
+    }
+
+    public static boolean allowsProjectileSelection(
+            ItemStack stack, Predicate<ItemStack> vanillaSelection) {
+        Objects.requireNonNull(stack, "stack");
+        Objects.requireNonNull(vanillaSelection, "vanillaSelection");
+        return Components.marker(stack).marker().isEmpty() && vanillaSelection.test(stack);
     }
 
 
@@ -270,8 +282,15 @@ public final class Controls {
     static <P, G> Admission handleUseItem(
             P player, InteractionHand hand, RiderState state, long gameTick,
             Config.Controls settings, ControlAccess<P, G> access) {
-        return admit(player, CallbackSource.CALLBACK, access.itemInHand(player, hand), Optional.empty(),
+        ItemStack input = access.itemInHand(player, hand);
+        Admission admission = admit(player, CallbackSource.CALLBACK, input, Optional.empty(),
                 state, gameTick, settings, access);
+        if (admission.handled() && settings.holdToFire()
+                && Components.marker(input).marker()
+                .filter(marker -> marker.control() == Components.Control.FIRE).isPresent()) {
+            access.startUsingItem(player, hand);
+        }
+        return admission;
     }
 
 
@@ -370,7 +389,6 @@ public final class Controls {
             return Optional.of(ControlIntent.CRY);
         }
         return plainFire || markedFire
-                && (source == CallbackSource.BLOCK_CALLBACK || !settings.holdToFire())
                 ? Optional.of(ControlIntent.FIRE) : Optional.empty();
     }
 
