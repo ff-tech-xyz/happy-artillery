@@ -36,10 +36,10 @@ The vanilla fireballs emitted during overheat keep their normal impact behavior 
 
 Requirements:
 
-- Minecraft `26.2`
-- Fabric Loader `0.19.3` or newer
+- Minecraft `26.3`
+- Fabric Loader `0.19.5` or newer
 - Fabric API
-- Java 25 or newer (required by Minecraft 26.2)
+- Java 25 or newer (required by Minecraft 26.3)
 
 Place the Happy Artillery jar and Fabric API in the server's `mods/` folder, then start or restart the server. Clients do not install Happy Artillery.
 

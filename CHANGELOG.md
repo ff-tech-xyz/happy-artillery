@@ -38,7 +38,7 @@ This section records the player-facing, server-admin, and compatibility changes 
 
 ### Compatibility
 
-- Updated the supported game version to Minecraft `26.2`, with Fabric Loader `0.19.3` or newer, Fabric API, and Java 25 or newer.
+- Updated the supported game version to Minecraft `26.3`, with Fabric Loader `0.19.5` or newer, Fabric API, and Java 25 or newer.
 - Happy Artillery remains server-side. Players can join with an unmodded Java client.
 - Earlier 1.2.0 development config names for firing delay, biome thresholds, custom-dimension classification, and fire placement are rejected with the required replacement name.
 - Changed the project license from MIT to [CC0 1.0 Universal](LICENSE).

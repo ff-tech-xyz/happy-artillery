@@ -12,19 +12,19 @@ exact-head review, deployment, and manual acceptance pass.
 
 ## Product boundary
 
-- Fabric server mod for Minecraft 26.2, Fabric Loader >=0.19.3, Fabric API, official mappings, and
-  Java >=25 as required by Minecraft 26.2. Clients do not install the mod.
+- Fabric server mod for Minecraft 26.3, Fabric Loader >=0.19.5, Fabric API, official mappings, and
+  Java >=25 as required by Minecraft 26.3. Clients do not install the mod.
 - The mod id remains `happy-artillery`; config remains `config/happy-artillery.json`.
 - Happy Ghasts provide pilot-only fire and cry controls, heat/cooling/overheat, and status presentation
   for every rider.
 - State persists across chunk unload and server restart. No static gameplay-state maps or wall clock are
   allowed; server ticks are the only clock.
-- 1.2.0 supports only Minecraft 26.2. Older README publication claims are history, not build targets.
+- 1.2.0 supports only Minecraft 26.3. Older README publication claims are history, not build targets.
 
 ## Architecture decisions and explicit assumptions
 
 - The tree has **sixteen production Java files**: the eleven non-mixin owners
-  plus five narrow mixins. Mapped Minecraft 26.2 evidence proves that
+  plus five narrow mixins. Historical mapped Minecraft 26.2 evidence proved that
   `ServerPlayer.drop(ItemStack, boolean, boolean):ItemEntity` at `RETURN` covers direct Q, cursor drops,
   menu `THROW`, creative drops, and ordinary/offhand/equipment death drops. External chest/container
   insertion does not reach that method, so `ExternalContainerMixin` transforms the incoming stack at
@@ -425,9 +425,9 @@ external slot-owned removal; and README/jar version agreement. Automated seams m
 earlier, but no Java, mod-compatibility, packet-capture, restart, or gameplay evidence is credited
 until the complete graph is runnable.
 
-## Minecraft 26.2 mapped behavior evidence
+## Historical Minecraft 26.2 mapped behavior evidence
 
-The pinned official-name merged jar used by this checkout establishes the normal-fire boundary:
+The official-name merged jar pinned during the Minecraft 26.2 rebuild established the normal-fire boundary:
 
 - `Ghast` initializes its integer `explosionPower` to `1`; its shoot goal calls
   `new LargeFireball(level, ghast, direction.normalize(), ghast.getExplosionPower())`, then uses a fixed

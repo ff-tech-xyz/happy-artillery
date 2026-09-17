@@ -37,10 +37,18 @@ regression boundary, not live gameplay.
 
 ## Phase 3 — Verify the artifact
 
-- [ ] Run the complete Gradle test and build suite on Java 25.
-- [ ] Inspect the built JAR metadata and contents, including `environment = "*"` and the 26.3 dependency floor.
-- [ ] Confirm no obsolete 26.2 metadata or mapping artifact is packaged or referenced.
-- [ ] Review the complete diff against the architecture contract and obtain the required independent review receipt before committing source changes.
+- [x] Run the complete Gradle test and build suite on Java 25.
+- [x] Inspect the built JAR metadata and contents, including `environment = "*"` and the 26.3 dependency floor.
+- [x] Confirm no obsolete 26.2 metadata or mapping artifact is packaged or referenced.
+- [x] Review the complete diff against the architecture contract and obtain the required independent review receipt before committing source changes.
+
+Phase 3 verification: exact committed source at `f5a6461` built successfully with 403 tests and
+zero failures/errors/skips. `happy-artillery-1.2.0.jar` SHA-256 was
+`28c8967f2e497bcc2af31ec5b969e34f2e243341a1d813b8974bd746b810ce50`; its metadata declares
+environment `"*"`, Minecraft `~26.3`, Loader `>=0.19.5`, Fabric API `>=0.160.7+26.3`, Java
+`>=25`, and mixin compatibility `JAVA_25`. The JAR and tracked files contain no obsolete 26.2
+custom-metadata or identity-mapping references. Independent review passed the staged diff as a
+direct fix rather than concealment.
 
 ## Phase 4 — Upgrade and exercise the test server
 
