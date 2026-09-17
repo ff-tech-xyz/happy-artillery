@@ -46,7 +46,7 @@ happy-artillery/
 │   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
 │   │   │       ├── PlayerDropMixin.java
-│   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
+│   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, Prediction) at RETURN and discards
 │   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
 │   │   │       ├── ExternalContainerMixin.java
 │   │   │       │   # Transforms Slot.set(ItemStack) writes, consuming marked controls outside their

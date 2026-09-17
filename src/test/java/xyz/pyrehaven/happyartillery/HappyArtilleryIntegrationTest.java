@@ -59,7 +59,7 @@ final class HappyArtilleryIntegrationTest {
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        HolderLookup.Provider registries = VanillaRegistries.createLookup();
+        HolderLookup.Provider registries = VanillaRegistries.createWorldLookup();
         BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries)
                 .forEach(initializer -> initializer.apply());
     }

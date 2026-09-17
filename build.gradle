@@ -1,40 +1,6 @@
 plugins {
-	id 'fabric-loom' version "${loom_version}"
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
 	id 'maven-publish'
-}
-
-import org.gradle.api.services.BuildService
-import org.gradle.api.services.BuildServiceParameters
-
-abstract class MinecraftMetadataServer implements BuildService<BuildServiceParameters.None>, AutoCloseable {
-	private com.sun.net.httpserver.HttpServer server
-
-	synchronized String url(File metadataFile) {
-		if (server == null) {
-			server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress('127.0.0.1', 0), 0)
-			server.createContext('/26.2-custom.json') { exchange ->
-				try {
-					byte[] body = metadataFile.bytes
-					exchange.responseHeaders.add('Content-Type', 'application/json')
-					exchange.sendResponseHeaders(200, body.length)
-					exchange.responseBody.write(body)
-				} finally {
-					exchange.close()
-				}
-			}
-			server.start()
-		}
-
-		return "http://127.0.0.1:${server.address.port}/26.2-custom.json"
-	}
-
-	@Override
-	synchronized void close() {
-		if (server != null) {
-			server.stop(0)
-			server = null
-		}
-	}
 }
 
 version = project.mod_version
@@ -48,20 +14,7 @@ repositories {
 	mavenCentral()
 }
 
-def minecraftMetadataServer = gradle.sharedServices.registerIfAbsent(
-	'minecraftMetadataServer',
-	MinecraftMetadataServer
-)
-def minecraftMetadataFile = file('gradle/minecraft/26.2-custom.json')
-def minecraftMetadataUrl = minecraftMetadataServer.map {
-	it.url(minecraftMetadataFile)
-}
-
 loom {
-	noIntermediateMappings()
-	customMinecraftMetadata.set(minecraftMetadataUrl)
-	createRemapConfigurations(sourceSets.test)
-
 	mods {
 		"happy-artillery" {
 			sourceSet sourceSets.main
@@ -72,21 +25,21 @@ loom {
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings files("gradle/minecraft/identity-official-26.2.jar")
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modLocalRuntime "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-	compileOnly "net.fabricmc.fabric-api:fabric-command-api-v2:3.1.0+00cb03469c"
-	compileOnly "net.fabricmc.fabric-api:fabric-entity-events-v1:5.0.5+06488ac19c"
-	compileOnly "net.fabricmc.fabric-api:fabric-events-interaction-v0:5.2.6+8f57f7ee9c"
-	compileOnly "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:4.1.3+4575b05f9c"
-	compileOnly "net.fabricmc.fabric-api:fabric-networking-api-v1:6.3.3+72073ef09c"
-	compileOnly "net.fabricmc.fabric-api:fabric-api-base:2.0.4+ece063239c"
-	compileOnly "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	localRuntime "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	// Compile only against the APIs used here; local runs retain the full Fabric API.
+	compileOnly("net.fabricmc.fabric-api:fabric-command-api-v2:3.1.2+fcdff87f5d") { transitive = false }
+	compileOnly("net.fabricmc.fabric-api:fabric-events-interaction-v0:5.3.6+3434d6d95d") { transitive = false }
+	compileOnly("net.fabricmc.fabric-api:fabric-lifecycle-events-v1:4.1.9+ffef5f675d") { transitive = false }
+	compileOnly("net.fabricmc.fabric-api:fabric-networking-api-v1:6.3.8+fcdff87f5d") { transitive = false }
+	compileOnly("net.fabricmc.fabric-api:fabric-api-base:2.0.6+fcdff87f5d") { transitive = false }
+	compileOnly("net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.30+3434d6d95d") { transitive = false }
 
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
-	modTestImplementation "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.16+aa0fd6fe9e"
+	testImplementation "net.fabricmc.fabric-api:fabric-data-attachment-api-v1:2.2.30+3434d6d95d"
 	testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+	testRuntimeOnly "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
 def resourceVersion = project.version
@@ -99,7 +52,7 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	it.options.release = 25
 }
 
 tasks.named('test') {
@@ -111,10 +64,11 @@ tasks.named('check') {
 }
 
 java {
+	toolchain.languageVersion = JavaLanguageVersion.of(25)
 	withSourcesJar()
 
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
 }
 
 def licenseArchiveSuffix = project.archives_base_name

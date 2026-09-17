@@ -77,7 +77,7 @@ final class ControlsTest {
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        HolderLookup.Provider registries = VanillaRegistries.createLookup();
+        HolderLookup.Provider registries = VanillaRegistries.createWorldLookup();
         BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(registries)
                 .forEach(initializer -> initializer.apply());
     }
@@ -907,7 +907,7 @@ final class ControlsTest {
         assertFalse(BundleContents.canItemBeInBundle(ItemStack.EMPTY));
         assertFalse(BundleContents.canItemBeInBundle(new ItemStack(Items.SHULKER_BOX)));
         for (ItemStack control : List.of(fireControl(OWNER, RIDE), cryControl(OWNER, RIDE))) {
-            var bundle = new BundleContents.Mutable(BundleContents.EMPTY);
+            var bundle = new BundleContents.Mutable();
             assertFalse(BundleContents.canItemBeInBundle(control));
             assertEquals(0, bundle.tryInsert(control));
             assertEquals(1, control.getCount());
@@ -1050,7 +1050,7 @@ final class ControlsTest {
         MethodNode dropHandler = injectedHandler(drop);
         AnnotationNode dropInject = annotation(dropHandler.visibleAnnotations,
                 "Lorg/spongepowered/asm/mixin/injection/Inject;");
-        assertEquals(List.of("drop(Lnet/minecraft/world/item/ItemStack;ZZ)"
+        assertEquals(List.of("drop(Lnet/minecraft/world/item/ItemStack;ZLnet/minecraft/util/Prediction;)"
                         + "Lnet/minecraft/world/entity/item/ItemEntity;"),
                 annotationValue(dropInject, "method"));
         assertEquals(1, annotationValue(dropInject, "require"));
@@ -1109,12 +1109,31 @@ final class ControlsTest {
                 "Lorg/spongepowered/asm/mixin/injection/Redirect;");
         assertEquals(List.of(methodName), annotationValue(redirect, "method"));
         assertEquals(requiredRedirects, annotationValue(redirect, "require"));
-        AnnotationNode at = (AnnotationNode) annotationValue(redirect, "at");
+        AnnotationNode at = (AnnotationNode)
+                ((List<?>) annotationValue(redirect, "at")).getFirst();
         assertEquals("INVOKE", annotationValue(at, "value"));
         assertEquals("Ljava/util/function/Predicate;test(Ljava/lang/Object;)Z",
                 annotationValue(at, "target"));
         assertSingleControlsCall(handler, "allowsProjectileSelection",
                 "(Lnet/minecraft/world/item/ItemStack;Ljava/util/function/Predicate;)Z");
+    }
+
+    @Test
+    void allFiveMixinsApplyToMinecraftClassesWithTheCurrentDropSignature() throws Exception {
+        var drop = ServerPlayer.class.getDeclaredMethod("drop", ItemStack.class,
+                boolean.class, net.minecraft.util.Prediction.class);
+        assertEquals(net.minecraft.world.entity.item.ItemEntity.class, drop.getReturnType());
+        for (var target : java.util.Map.<Class<?>, String>of(
+                ServerPlayer.class, "happyArtillery$consumeMarkedDrop",
+                Slot.class, "happyArtillery$transformExternalControlWrite",
+                BundleContents.class, "happyArtillery$blockControlInsertion",
+                net.minecraft.world.item.ProjectileWeaponItem.class,
+                        "happyArtillery$excludeControlFromHeldProjectiles",
+                Player.class, "happyArtillery$excludeControlFromInventoryProjectiles").entrySet()) {
+            assertTrue(Arrays.stream(target.getKey().getDeclaredMethods())
+                            .anyMatch(method -> method.getName().contains(target.getValue())),
+                    "missing applied mixin on " + target.getKey().getName());
+        }
     }
 
     @Test
@@ -1124,6 +1143,7 @@ final class ControlsTest {
             com.google.gson.JsonObject metadata = com.google.gson.JsonParser.parseReader(
                     new java.io.InputStreamReader(input, StandardCharsets.UTF_8)).getAsJsonObject();
             assertTrue(metadata.get("required").getAsBoolean());
+            assertEquals("JAVA_25", metadata.get("compatibilityLevel").getAsString());
             assertEquals(1, metadata.getAsJsonObject("injectors").get("defaultRequire").getAsInt());
             assertEquals(List.of("PlayerDropMixin", "ExternalContainerMixin", "BundleContentsMixin",
                             "HeldProjectileMixin", "PlayerProjectileMixin"),

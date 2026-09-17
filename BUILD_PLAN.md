@@ -11,20 +11,29 @@ Target: Minecraft 26.3, Fabric Loader 0.19.5, Fabric API 0.160.7+26.3, Java 25, 
 
 ## Phase 1 — Modernize the build boundary
 
-- [ ] Replace the legacy remapping Loom plugin with `net.fabricmc.fabric-loom` for unobfuscated Minecraft.
-- [ ] Remove the custom metadata HTTP server, identity mapping dependency, and tracked 26.2 mapping artifacts.
-- [ ] Pin Minecraft 26.3, Fabric Loader 0.19.5, Fabric API 0.160.7+26.3, a stable Loom 1.17 release, Gradle 9.6.0, and Java 25 compilation.
-- [ ] Update direct Fabric API module dependencies to the module versions shipped by Fabric API 0.160.7+26.3.
-- [ ] Keep `fabric.mod.json` environment `"*"`; do not add client-only entrypoints or synced registries.
-- [ ] Run dependency resolution and compile tests to expose real 26.3 API breaks.
+- [x] Replace the legacy remapping Loom plugin with `net.fabricmc.fabric-loom` for unobfuscated Minecraft.
+- [x] Remove the custom metadata HTTP server, identity mapping dependency, and tracked 26.2 mapping artifacts.
+- [x] Pin Minecraft 26.3, Fabric Loader 0.19.5, Fabric API 0.160.7+26.3, a stable Loom 1.17 release, Gradle 9.6.0, and Java 25 compilation.
+- [x] Update direct Fabric API module dependencies to the module versions shipped by Fabric API 0.160.7+26.3.
+- [x] Keep `fabric.mod.json` environment `"*"`; do not add client-only entrypoints or synced registries.
+- [x] Run dependency resolution and compile tests to expose real 26.3 API breaks.
 
 ## Phase 2 — Port production code
 
-- [ ] Fix only compile/runtime breaks introduced by Minecraft 26.3 and the current Fabric API.
-- [ ] Keep behavior in the existing owners defined by `ARCHITECTURE.md`; do not add parallel handlers, managers, state maps, or fallback paths.
-- [ ] Re-check mixin targets and injection requirements against 26.3.
-- [ ] Preserve config migration, persistent attachments, control containment, heat/cooldown, HUD, fire, cry, and detonation invariants.
-- [ ] Run focused tests after each owner changes.
+- [x] Fix only compile/runtime breaks introduced by Minecraft 26.3 and the current Fabric API.
+- [x] Keep behavior in the existing owners defined by `ARCHITECTURE.md`; do not add parallel handlers, managers, state maps, or fallback paths.
+- [x] Re-check mixin targets and injection requirements against 26.3.
+- [x] Preserve config migration, persistent attachments, control containment, heat/cooldown, HUD, fire, cry, and detonation invariants.
+- [x] Run focused tests after each owner changes.
+
+Phase 2 verification: resolved 26.3 class signatures/bytecode checked for all five mixin targets;
+Fabric Loader JUnit confirms all five handlers are applied. Registry fixtures use
+`createWorldLookup()` and empty bundles use the no-argument mutable constructor.
+Focused Controls/Persistence/Integration tests: 114 passed. `./gradlew clean test build` on
+Java 25: 403 passed, zero failures/errors/skips. The built JAR contains `JAVA_25` mixin
+compatibility and retains environment `"*"`. Live server startup and connected-player
+checks, including predicted drops, remain Phase 4 work; these checks prove the automated
+regression boundary, not live gameplay.
 
 ## Phase 3 — Verify the artifact
 

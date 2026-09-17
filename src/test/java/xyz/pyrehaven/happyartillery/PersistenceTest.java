@@ -37,7 +37,7 @@ final class PersistenceTest {
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        HolderLookup.Provider registries = VanillaRegistries.createLookup();
+        HolderLookup.Provider registries = VanillaRegistries.createWorldLookup();
         registryOps = RegistryOps.create(NbtOps.INSTANCE, registries);
     }
 
