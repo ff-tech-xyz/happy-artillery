@@ -1,17 +1,13 @@
 {
   "required": true,
-  "minVersion": "0.8",
-  "package": "happy.artillery.mixin",
+  "package": "xyz.pyrehaven.happyartillery.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "EntityMixin",
-    "ScreenHandlerMixin",
-    "ServerPlayerEntityMixin",
-    "accessor.EntityWorldAccessor",
-    "accessor.EntityPosAccessor"
-  ],
-  "server": [
-    "PlayerEntityMixin"
+    "PlayerDropMixin",
+    "ExternalContainerMixin",
+    "BundleContentsMixin",
+    "HeldProjectileMixin",
+    "PlayerProjectileMixin"
   ],
   "injectors": {
     "defaultRequire": 1

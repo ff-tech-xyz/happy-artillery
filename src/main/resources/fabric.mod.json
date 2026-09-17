@@ -3,7 +3,7 @@
 	"id": "happy-artillery",
 	"version": "${version}",
 	"name": "Happy Artillery",
-	"description": "Turn Happy Ghasts into rideable artillery with fireballs, a cry ability, ammo, heat, and server-side configuration.",
+	"description": "Pilot Happy Ghasts as mobile artillery with fire, cry, heat, overheat, controls, and rider HUDs.",
 	"authors": [
 		"OG Moo-cow"
 	],
@@ -11,26 +11,21 @@
 		"homepage": "https://pyrehaven.xyz",
 		"sources": "https://github.com/ff-tech-xyz/happy-artillery"
 	},
-	"license": "MIT",
+	"license": "CC0-1.0",
 	"icon": "assets/happy-artillery/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"happy.artillery.HappyArtillery"
+			"xyz.pyrehaven.happyartillery.HappyArtillery"
 		]
 	},
 	"mixins": [
 		"happy-artillery.mixins.json"
 	],
-	"custom": {
-		"loom:injected_interfaces": {
-			"net/minecraft/server/network/ServerPlayerEntity": ["happy/artillery/HappyArtilleryPlayerExtension"]
-		}
-	},
 	"depends": {
 		"fabricloader": ">=0.19.3",
 		"minecraft": "~26.2",
-		"java": ">=21",
+		"java": ">=25",
 		"fabric-api": "*"
 	}
 }

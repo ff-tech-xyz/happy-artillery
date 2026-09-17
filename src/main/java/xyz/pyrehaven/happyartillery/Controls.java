@@ -1,0 +1,540 @@
+package xyz.pyrehaven.happyartillery;
+
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.AbstractCraftingMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.item.component.Consumable;
+
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Predicate;
+
+/** Sole owner of generated controls, bounded inventory policy, and pilot admission. */
+public final class Controls {
+    private static Component allocationRefusal(int requiredSlots) {
+        String noun = requiredSlots == 1 ? "Control needs" : "Controls need";
+        return Component.literal(noun + " " + requiredSlots + " free "
+                + (requiredSlots == 1 ? "slot." : "slots."))
+                .withStyle(ChatFormatting.RED);
+    }
+    private static final int HOTBAR_END = 8;
+    private static final int MAIN_END = 35;
+    private static final int OFFHAND = 40;
+    private static final Consumable HOLD_USE = Consumable.builder()
+            .consumeSeconds(Float.MAX_VALUE)
+            .animation(ItemUseAnimation.NONE)
+            .sound(Holder.direct(SoundEvents.EMPTY))
+            .hasConsumeParticles(false)
+            .build();
+
+    private Controls() {
+    }
+
+    private static ItemStack fireControl(Config.Controls settings, UUID ownerId, UUID rideId) {
+        return control(settings.fireItem(), "Fire Control", HOLD_USE,
+                new Components.Marker(Components.Control.FIRE, ownerId, rideId));
+    }
+
+    private static ItemStack cryControl(Config.Controls settings, UUID ownerId, UUID rideId) {
+        return control(settings.cryItem(), "Cry Control", null,
+                new Components.Marker(Components.Control.CRY, ownerId, rideId));
+    }
+
+    static RiderState reconcile(ServerPlayer player, RiderState state, Optional<UUID> pilotRideId) {
+        return reconcile(player, state, pilotRideId, ServerPlayerInventoryAccess.INSTANCE);
+    }
+
+    static <T> RiderState reconcile(
+            T inventory, RiderState state, Optional<UUID> pilotRideId, InventoryAccess<T> access) {
+        Objects.requireNonNull(inventory, "inventory");
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(pilotRideId, "pilotRideId");
+        Objects.requireNonNull(access, "access");
+        validatePersistedState(state);
+        UUID ownerId = access.ownerId(inventory);
+        Optional<UUID> previousRide = state.riddenGhastId();
+        if (pilotRideId.equals(previousRide)) {
+            return state;
+        }
+        previousRide.ifPresent(rideId -> removeMatching(inventory, ownerId, rideId, access));
+        if (pilotRideId.isEmpty()) {
+            return state.withRide(Optional.empty());
+        }
+        UUID rideId = pilotRideId.orElseThrow();
+        Config config = Config.current();
+        Config.Controls settings = config.controls();
+        int requiredSlots = (config.fire().enabled() ? 1 : 0) + (config.cry().enabled() ? 1 : 0);
+        RiderState mounted = state.withRide(Optional.of(rideId));
+        if (requiredSlots == 0) {
+            return mounted;
+        }
+        int[] freeSlots = new int[requiredSlots];
+        int found = 0;
+        for (int slot = 0; slot <= MAIN_END && found < requiredSlots; slot++) {
+            if (access.read(inventory, slot).isEmpty()) {
+                freeSlots[found++] = slot;
+            }
+        }
+        if (found < requiredSlots) {
+            access.message(inventory, allocationRefusal(requiredSlots));
+            return mounted;
+        }
+        ItemStack fire = config.fire().enabled() ? fireControl(settings, ownerId, rideId) : null;
+        ItemStack cry = config.cry().enabled() ? cryControl(settings, ownerId, rideId) : null;
+        int destination = 0;
+        if (fire != null) {
+            access.write(inventory, freeSlots[destination++], fire);
+        }
+        if (cry != null) {
+            access.write(inventory, freeSlots[destination], cry);
+        }
+        return mounted;
+    }
+
+    private static void validatePersistedState(RiderState state) {
+        state.hudCache().ifPresent(cache -> {
+            boolean validProgress = Double.isFinite(cache.bossProgress())
+                    && cache.bossProgress() >= -1.0 && cache.bossProgress() <= 1.0;
+            boolean validColor = cache.bossColor().isEmpty()
+                    || cache.bossColor().equals("RED") || cache.bossColor().equals("GOLD")
+                    || cache.bossColor().equals("BLUE") || cache.bossColor().equals("GREEN");
+            if (!validProgress || !validColor) {
+                throw new InvalidRiderState("invalid persisted HUD cache");
+            }
+        });
+    }
+
+    static RiderState recoverInvalidState(ServerPlayer player) {
+        return recoverInvalidState(player, player.getUUID(), ServerPlayerInventoryAccess.INSTANCE);
+    }
+
+    static <T> RiderState recoverInvalidState(T inventory, UUID ownerId, InventoryAccess<T> access) {
+        removeOwned(inventory, ownerId, access);
+        return RiderState.fresh();
+    }
+
+    private static <T> void removeOwned(T inventory, UUID ownerId, InventoryAccess<T> access) {
+        for (int slot = 0; slot <= MAIN_END; slot++) {
+            Components.Marker marker = Components.marker(access.read(inventory, slot)).marker().orElse(null);
+            if (marker != null && marker.ownerId().equals(ownerId)) {
+                access.write(inventory, slot, ItemStack.EMPTY);
+            }
+        }
+        Components.Marker offhand = Components.marker(access.read(inventory, OFFHAND)).marker().orElse(null);
+        if (offhand != null && offhand.ownerId().equals(ownerId)) {
+            access.write(inventory, OFFHAND, ItemStack.EMPTY);
+        }
+        access.removeTransient(inventory, stack -> Components.marker(stack).marker()
+                .filter(marker -> marker.ownerId().equals(ownerId)).isPresent());
+    }
+
+    static <T> InventorySnapshot snapshot(
+            T inventory, UUID ownerId, UUID rideId, InventoryAccess<T> access) {
+        ControlLocation fire = ControlLocation.MISSING;
+        ControlLocation cry = ControlLocation.MISSING;
+        int staleOrForeign = 0;
+        for (int slot = 0; slot <= MAIN_END; slot++) {
+            Components.Marker marker = Components.marker(access.read(inventory, slot)).marker().orElse(null);
+            if (marker == null) {
+                continue;
+            }
+            if (!marker.ownerId().equals(ownerId) || !marker.rideId().equals(rideId)) {
+                staleOrForeign++;
+                continue;
+            }
+            ControlLocation location = slot <= HOTBAR_END
+                    ? ControlLocation.HAND_ACCESSIBLE : ControlLocation.MAIN_INVENTORY_ONLY;
+            if (marker.control() == Components.Control.FIRE) {
+                fire = mergeLocation(fire, location);
+            } else {
+                cry = mergeLocation(cry, location);
+            }
+        }
+        Components.Marker offhand = Components.marker(access.read(inventory, OFFHAND)).marker().orElse(null);
+        if (offhand != null) {
+            if (!offhand.ownerId().equals(ownerId) || !offhand.rideId().equals(rideId)) {
+                staleOrForeign++;
+            } else if (offhand.control() == Components.Control.FIRE) {
+                fire = ControlLocation.HAND_ACCESSIBLE;
+            } else {
+                cry = ControlLocation.HAND_ACCESSIBLE;
+            }
+        }
+        return new InventorySnapshot(fire, cry, staleOrForeign);
+    }
+
+    static InventorySnapshot snapshot(ServerPlayer player, UUID rideId) {
+        return snapshot(player, player.getUUID(), rideId, ServerPlayerInventoryAccess.INSTANCE);
+    }
+
+    private static ControlLocation mergeLocation(ControlLocation current, ControlLocation found) {
+        return current == ControlLocation.HAND_ACCESSIBLE ? current : found;
+    }
+
+    static <T> void removeMatching(
+            T inventory, UUID ownerId, UUID rideId, InventoryAccess<T> access) {
+        for (int slot = 0; slot <= MAIN_END; slot++) {
+            if (Components.matches(access.read(inventory, slot), ownerId, rideId)) {
+                access.write(inventory, slot, ItemStack.EMPTY);
+            }
+        }
+        if (Components.matches(access.read(inventory, OFFHAND), ownerId, rideId)) {
+            access.write(inventory, OFFHAND, ItemStack.EMPTY);
+        }
+        access.removeTransient(inventory, stack -> Components.matches(stack, ownerId, rideId));
+    }
+
+    public static void consumeDroppedControl(ItemStack droppedStack, ItemEntity returnedEntity) {
+        consumeDroppedControl(droppedStack, returnedEntity, ItemEntity::discard);
+    }
+
+    static <T> void consumeDroppedControl(ItemStack droppedStack, T returnedEntity, DropAccess<T> access) {
+        Objects.requireNonNull(droppedStack, "droppedStack");
+        Objects.requireNonNull(access, "access");
+        if (returnedEntity != null && Components.marker(droppedStack).marker().isPresent()) {
+            access.discard(returnedEntity);
+        }
+    }
+
+    public static ItemStack transformExternalControlWrite(Slot destination, ItemStack stack) {
+        Objects.requireNonNull(destination, "destination");
+        Objects.requireNonNull(stack, "stack");
+        UUID destinationOwnerId = destination.container instanceof Inventory inventory
+                ? inventory.player.getUUID() : null;
+        int destinationSlot = destinationOwnerId == null ? -1 : destination.getContainerSlot();
+        return shouldConsumeExternalControl(stack, destinationOwnerId, destinationSlot)
+                ? ItemStack.EMPTY : stack;
+    }
+
+    static boolean shouldConsumeExternalControl(
+            ItemStack stack, UUID destinationOwnerId, int destinationSlot) {
+        Components.Marker marker = Components.marker(stack).marker().orElse(null);
+        boolean playerStorage = destinationSlot >= 0 && destinationSlot <= MAIN_END
+                || destinationSlot == OFFHAND;
+        return marker != null && (destinationOwnerId == null
+                || !marker.ownerId().equals(destinationOwnerId) || !playerStorage);
+    }
+
+    public static boolean blocksBundleInsertion(ItemStack stack) {
+        return Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent();
+    }
+
+    static InteractionResult vanillaUseResult(ItemStack stack, boolean artilleryHandled) {
+        return artilleryHandled
+                || Components.marker(Objects.requireNonNull(stack, "stack")).marker().isPresent()
+                ? InteractionResult.FAIL : InteractionResult.PASS;
+    }
+
+    public static boolean allowsProjectileSelection(
+            ItemStack stack, Predicate<ItemStack> vanillaSelection) {
+        Objects.requireNonNull(stack, "stack");
+        Objects.requireNonNull(vanillaSelection, "vanillaSelection");
+        return Components.marker(stack).marker().isEmpty() && vanillaSelection.test(stack);
+    }
+
+
+    static Admission handleUseBlock(
+            ServerPlayer player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings) {
+        return handleUseBlock(
+                player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+    static <P, G> Admission handleUseBlock(
+            P player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings, ControlAccess<P, G> access) {
+        ItemStack input = access.itemInHand(player, hand);
+        Admission admission = admit(player, CallbackSource.BLOCK_CALLBACK, input, Optional.empty(),
+                state, gameTick, settings, access);
+        if (admission.handled() && settings.holdToFire()
+                && Components.marker(input).marker()
+                .filter(marker -> marker.control() == Components.Control.FIRE).isPresent()) {
+            access.startUsingItem(player, hand);
+        }
+        return admission;
+    }
+
+
+    static Admission handleUseItem(
+            ServerPlayer player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings) {
+        return handleUseItem(player, hand, state, gameTick, settings, ServerPlayerControlAccess.INSTANCE);
+    }
+
+
+    static <P, G> Admission handleUseItem(
+            P player, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings, ControlAccess<P, G> access) {
+        ItemStack input = access.itemInHand(player, hand);
+        Admission admission = admit(player, CallbackSource.CALLBACK, input, Optional.empty(),
+                state, gameTick, settings, access);
+        if (admission.handled() && settings.holdToFire()
+                && Components.marker(input).marker()
+                .filter(marker -> marker.control() == Components.Control.FIRE).isPresent()) {
+            access.startUsingItem(player, hand);
+        }
+        return admission;
+    }
+
+
+    static Admission handleUseEntity(
+            ServerPlayer player, Entity target, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings) {
+        return handleUseEntity(player, target, hand, state, gameTick, settings,
+                ServerPlayerControlAccess.INSTANCE);
+    }
+
+
+    static <P, G> Admission handleUseEntity(
+            P player, Object target, InteractionHand hand, RiderState state, long gameTick,
+            Config.Controls settings, ControlAccess<P, G> access) {
+        return admit(player, CallbackSource.CALLBACK, access.itemInHand(player, hand), Optional.of(target),
+                state, gameTick, settings, access);
+    }
+
+
+    static Admission sampleHeld(
+            ServerPlayer player, RiderState state, long gameTick, Config.Controls settings,
+            InventorySnapshot snapshot) {
+        return sampleHeld(player, state, gameTick, settings, snapshot,
+                ServerPlayerControlAccess.INSTANCE);
+    }
+
+
+    static <P, G> Admission sampleHeld(
+            P player, RiderState state, long gameTick, Config.Controls settings,
+            InventorySnapshot snapshot, ControlAccess<P, G> access) {
+        ItemStack input = access.activeUseItem(player);
+        return admit(player, CallbackSource.SERVER_TICK, input, Optional.empty(), state, gameTick,
+                settings, Optional.of(snapshot), access);
+    }
+
+    private static <P, G> Admission admit(
+            P player, CallbackSource source, ItemStack input, Optional<Object> clickedTarget,
+            RiderState state, long gameTick, Config.Controls settings, ControlAccess<P, G> access) {
+        return admit(player, source, input, clickedTarget, state, gameTick, settings,
+                Optional.empty(), access);
+    }
+
+    private static <P, G> Admission admit(
+            P player, CallbackSource source, ItemStack input, Optional<Object> clickedTarget,
+            RiderState state, long gameTick, Config.Controls settings,
+            Optional<InventorySnapshot> snapshot, ControlAccess<P, G> access) {
+        Optional<G> ridden = access.riddenHappyGhast(player);
+        if (ridden.isEmpty() || clickedTarget.filter(target -> target != ridden.get()).isPresent()
+                || !access.isControllingFirstPassenger(player, ridden.get())) {
+            return new Ignored(state);
+        }
+        UUID rideId = access.ghastId(ridden.get());
+        if (!state.riddenGhastId().equals(Optional.of(rideId))) {
+            return new Ignored(state);
+        }
+        Optional<ControlIntent> intent = classify(
+                player, source, input, rideId, settings, snapshot, access);
+        if (intent.isEmpty()) {
+            return new Ignored(state);
+        }
+        if (state.lastHandledTick() == gameTick) {
+            return new Deduplicated(intent.orElseThrow(), state);
+        }
+        return new Accepted(intent.orElseThrow(), state.withLastHandledTick(gameTick));
+    }
+
+    private static <P, G> Optional<ControlIntent> classify(
+            P player, CallbackSource source, ItemStack input, UUID rideId,
+            Config.Controls settings, Optional<InventorySnapshot> snapshot,
+            ControlAccess<P, G> access) {
+        Config config = Config.current();
+        UUID ownerId = access.playerId(player);
+        Components.MarkerRead markerRead = Components.marker(input);
+        Optional<Components.Marker> marker = markerRead.marker();
+        boolean markedFire = config.fire().enabled()
+                && marker.filter(value -> value.control() == Components.Control.FIRE
+                && value.ownerId().equals(ownerId) && value.rideId().equals(rideId)).isPresent();
+        boolean markedCry = config.cry().enabled()
+                && marker.filter(value -> value.control() == Components.Control.CRY
+                && value.ownerId().equals(ownerId) && value.rideId().equals(rideId)).isPresent();
+        boolean plainFire = config.fire().enabled() && settings.allowPlainItems()
+                && markerRead.isAbsent() && isConfiguredItem(input, settings.fireItem());
+        boolean plainCry = config.cry().enabled() && settings.allowPlainItems()
+                && markerRead.isAbsent() && isConfiguredItem(input, settings.cryItem());
+        if (plainFire && plainCry) {
+            plainFire = false;
+            plainCry = false;
+        }
+        if (source == CallbackSource.SERVER_TICK) {
+            boolean generatedFirePresent = markedFire
+                    && snapshot.orElseThrow().fire() != ControlLocation.MISSING;
+            return settings.holdToFire() && (generatedFirePresent || plainFire)
+                    ? Optional.of(ControlIntent.FIRE) : Optional.empty();
+        }
+        if (markedCry || plainCry) {
+            return Optional.of(ControlIntent.CRY);
+        }
+        return plainFire || markedFire
+                ? Optional.of(ControlIntent.FIRE) : Optional.empty();
+    }
+
+    private static boolean isConfiguredItem(ItemStack stack, String itemId) {
+        return stack.is(BuiltInRegistries.ITEM.getOptional(Identifier.parse(itemId))
+                .orElseThrow(() -> new IllegalStateException(
+                        "Validated control item is no longer registered: " + itemId)));
+    }
+
+    private static ItemStack control(
+            String itemId, String name, Consumable consumable, Components.Marker marker) {
+        ItemStack control = new ItemStack(BuiltInRegistries.ITEM
+                .getOptional(Identifier.parse(itemId))
+                .orElseThrow(() -> new IllegalStateException(
+                        "Validated control item is no longer registered: " + itemId)));
+        Components.mark(control, marker);
+        control.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        control.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+        if (consumable != null) {
+            control.set(DataComponents.CONSUMABLE, consumable);
+        }
+        return control;
+    }
+
+    enum ControlLocation { HAND_ACCESSIBLE, MAIN_INVENTORY_ONLY, MISSING }
+
+    record InventorySnapshot(ControlLocation fire, ControlLocation cry, int staleOrForeignCount) {
+        InventorySnapshot {
+            Objects.requireNonNull(fire, "fire");
+            Objects.requireNonNull(cry, "cry");
+        }
+    }
+
+    enum CallbackSource { CALLBACK, BLOCK_CALLBACK, SERVER_TICK }
+    enum ControlIntent { FIRE, CRY }
+
+    sealed interface Admission permits Accepted, Deduplicated, Ignored {
+        RiderState state();
+
+        default boolean handled() {
+            return this instanceof Accepted || this instanceof Deduplicated;
+        }
+    }
+
+    record Accepted(ControlIntent intent, RiderState state) implements Admission {
+        Accepted {
+            Objects.requireNonNull(intent, "intent");
+            Objects.requireNonNull(state, "state");
+        }
+    }
+
+    record Deduplicated(ControlIntent intent, RiderState state) implements Admission {
+        Deduplicated {
+            Objects.requireNonNull(intent, "intent");
+            Objects.requireNonNull(state, "state");
+        }
+    }
+
+    record Ignored(RiderState state) implements Admission {
+        Ignored { Objects.requireNonNull(state, "state"); }
+    }
+
+    static final class InvalidRiderState extends RuntimeException {
+        InvalidRiderState(String message) {
+            super(message);
+        }
+    }
+
+
+    @FunctionalInterface
+    interface DropAccess<T> {
+        void discard(T returnedEntity);
+    }
+
+    interface ControlAccess<P, G> {
+        Optional<G> riddenHappyGhast(P player);
+        boolean isControllingFirstPassenger(P player, G ghast);
+        UUID ghastId(G ghast);
+        UUID playerId(P player);
+        ItemStack itemInHand(P player, InteractionHand hand);
+        ItemStack activeUseItem(P player);
+        void startUsingItem(P player, InteractionHand hand);
+    }
+
+    enum ServerPlayerControlAccess implements ControlAccess<ServerPlayer, HappyGhast> {
+        INSTANCE;
+        @Override public Optional<HappyGhast> riddenHappyGhast(ServerPlayer player) {
+            return player.getVehicle() instanceof HappyGhast ghast ? Optional.of(ghast) : Optional.empty();
+        }
+        @Override public boolean isControllingFirstPassenger(ServerPlayer player, HappyGhast ghast) {
+            return ghast.getFirstPassenger() == player && ghast.getControllingPassenger() == player;
+        }
+        @Override public UUID ghastId(HappyGhast ghast) { return ghast.getUUID(); }
+        @Override public UUID playerId(ServerPlayer player) { return player.getUUID(); }
+        @Override public ItemStack itemInHand(ServerPlayer player, InteractionHand hand) {
+            return player.getItemInHand(hand).copy();
+        }
+        @Override public ItemStack activeUseItem(ServerPlayer player) {
+            return player.isUsingItem() ? player.getUseItem().copy() : ItemStack.EMPTY;
+        }
+        @Override public void startUsingItem(ServerPlayer player, InteractionHand hand) {
+            player.startUsingItem(hand);
+        }
+    }
+
+    interface InventoryAccess<T> {
+        ItemStack read(T inventory, int slot);
+        void write(T inventory, int slot, ItemStack stack);
+        UUID ownerId(T inventory);
+        void message(T inventory, Component message);
+        void removeTransient(T inventory, Predicate<ItemStack> shouldRemove);
+    }
+
+    enum ServerPlayerInventoryAccess implements InventoryAccess<ServerPlayer> {
+        INSTANCE;
+        @Override public ItemStack read(ServerPlayer player, int slot) {
+            return player.getInventory().getItem(slot).copy();
+        }
+        @Override public void write(ServerPlayer player, int slot, ItemStack stack) {
+            player.getInventory().setItem(slot, stack.copy());
+        }
+        @Override public UUID ownerId(ServerPlayer player) { return player.getUUID(); }
+        @Override public void message(ServerPlayer player, Component message) {
+            player.sendSystemMessage(message);
+        }
+        @Override public void removeTransient(
+                ServerPlayer player, Predicate<ItemStack> shouldRemove) {
+            removeTransientFromMenu(player.containerMenu, shouldRemove);
+            if (player.inventoryMenu != player.containerMenu) {
+                removeTransientFromMenu(player.inventoryMenu, shouldRemove);
+            }
+        }
+
+        private static void removeTransientFromMenu(
+                AbstractContainerMenu menu, Predicate<ItemStack> shouldRemove) {
+            if (shouldRemove.test(menu.getCarried().copy())) {
+                menu.setCarried(ItemStack.EMPTY);
+            }
+            if (menu instanceof AbstractCraftingMenu craftingMenu) {
+                for (Slot slot : craftingMenu.getInputGridSlots()) {
+                    if (shouldRemove.test(slot.getItem().copy())) {
+                        slot.set(ItemStack.EMPTY);
+                    }
+                }
+            }
+        }
+    }
+
+}
