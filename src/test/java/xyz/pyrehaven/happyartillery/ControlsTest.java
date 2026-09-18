@@ -28,6 +28,7 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.BundleContents;
@@ -920,6 +921,28 @@ final class ControlsTest {
             assertEquals(1, bundle.tryInsert(ordinary));
             assertTrue(ordinary.isEmpty());
         }
+    }
+
+    @Test
+    void creativeSlotWritesStripControlsForgedInsideBundlesAndKeepOrdinaryContents() {
+        ItemStack control = fireControl(OWNER, RIDE);
+        ItemStack firstOrdinary = new ItemStack(Items.DIAMOND, 3);
+        ItemStack lastOrdinary = new ItemStack(Items.EMERALD, 2);
+        ItemStack bundle = new ItemStack(Items.BUNDLE);
+        bundle.set(DataComponents.BUNDLE_CONTENTS, new BundleContents(List.of(
+                ItemStackTemplate.fromNonEmptyStack(firstOrdinary),
+                ItemStackTemplate.fromNonEmptyStack(control),
+                ItemStackTemplate.fromNonEmptyStack(lastOrdinary))));
+        Slot destination = new Slot(new SimpleContainer(1), 0, 0, 0);
+
+        destination.setByPlayer(bundle);
+
+        BundleContents stored = destination.getItem().get(DataComponents.BUNDLE_CONTENTS);
+        assertNotNull(stored);
+        List<ItemStack> contents = stored.itemCopies().toList();
+        assertEquals(2, contents.size());
+        assertTrue(ItemStack.matches(firstOrdinary, contents.get(0)));
+        assertTrue(ItemStack.matches(lastOrdinary, contents.get(1)));
     }
 
     @Test
