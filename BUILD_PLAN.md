@@ -52,11 +52,20 @@ direct fix rather than concealment.
 
 ## Phase 4 — Upgrade and exercise the test server
 
-- [ ] Rebuild the disposable `mod:happy-artillery` pyretest profile from the repository’s 26.3/0.19.5 pins.
-- [ ] Ensure exactly Fabric API 0.160.7+26.3 and the newly built Happy Artillery JAR are installed.
-- [ ] Start the server and verify a clean 26.3 Fabric startup with Happy Artillery loaded and no mixin, dependency, or config errors.
-- [ ] Exercise the available server-side gameplay checks; record anything requiring a connected player as still pending rather than pretending startup tested gameplay.
-- [ ] Stop the test profile when verification is complete.
+- [x] Rebuild the disposable `mod:happy-artillery` pyretest profile from the repository’s 26.3/0.19.5 pins.
+- [x] Ensure exactly Fabric API 0.160.7+26.3 and the newly built Happy Artillery JAR are installed.
+- [x] Start the server and verify a clean 26.3 Fabric startup with Happy Artillery loaded and no mixin, dependency, or config errors.
+- [x] Exercise the available server-side gameplay checks; record anything requiring a connected player as still pending rather than pretending startup tested gameplay.
+- [x] Stop the test profile when verification is complete.
+
+Phase 4 verification: pyretest rebuilt the disposable instance with Fabric Installer 1.1.2,
+Minecraft 26.3, and Loader 0.19.5. Its `mods/` directory contained exactly Fabric API
+0.160.7+26.3 and the exact built Happy Artillery JAR; source and deployed SHA-256 values both
+matched `28c8967f2e497bcc2af31ec5b969e34f2e243341a1d813b8974bd746b810ce50`. The server log
+loaded Happy Artillery 1.2.0, reached `Done (1.707s)`, and contained no startup, dependency,
+or mixin error. No connected player was available, so riding, firing, cry, overheat, HUD, and
+predicted-drop gameplay remain manual acceptance work. The profile was stopped and port 25565
+was verified free.
 
 ## Phase 5 — Handoff
 
