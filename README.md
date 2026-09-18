@@ -43,6 +43,8 @@ Requirements:
 
 Place the Happy Artillery jar and Fabric API in the server's `mods/` folder, then start or restart the server. Clients do not install Happy Artillery.
 
+This source branch builds the Minecraft 26.3 release. Minecraft 26.2 remains supported by Happy Artillery 1.2.0; choose the file matching the server's Minecraft version.
+
 ## Configuration
 
 Happy Artillery creates `config/happy-artillery.json` when the file is missing. You can keep the full generated file or provide only the settings you want to override. Valid existing files keep their exact contents during startup and reload.
