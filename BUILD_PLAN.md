@@ -69,5 +69,10 @@ was verified free.
 
 ## Phase 5 — Handoff
 
-- [ ] Commit coherent changes on `update/mc-26-3`, push the branch, and open or update a PR against `main`.
-- [ ] Report exact test/build/server evidence and any remaining player test. Elijah decides whether to merge or release.
+- [x] Commit coherent changes on `update/mc-26-3`, push the branch, and open or update a PR against `main`.
+- [x] Report exact test/build/server evidence and any remaining player test. Elijah decides whether to merge or release.
+
+Handoff: branch `update/mc-26-3` is pushed and PR
+[ff-tech-xyz/happy-artillery#6](https://github.com/ff-tech-xyz/happy-artillery/pull/6) targets `main`.
+The PR records the automated and server evidence plus the connected-player acceptance work that
+remains. No merge or release was performed.
