@@ -18,9 +18,13 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.item.component.BundleContents;
 import net.minecraft.world.item.component.Consumable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -216,11 +220,38 @@ public final class Controls {
     public static ItemStack transformExternalControlWrite(Slot destination, ItemStack stack) {
         Objects.requireNonNull(destination, "destination");
         Objects.requireNonNull(stack, "stack");
+        ItemStack sanitized = stripContainedControls(stack);
         UUID destinationOwnerId = destination.container instanceof Inventory inventory
                 ? inventory.player.getUUID() : null;
         int destinationSlot = destinationOwnerId == null ? -1 : destination.getContainerSlot();
-        return shouldConsumeExternalControl(stack, destinationOwnerId, destinationSlot)
-                ? ItemStack.EMPTY : stack;
+        return shouldConsumeExternalControl(sanitized, destinationOwnerId, destinationSlot)
+                ? ItemStack.EMPTY : sanitized;
+    }
+
+    private static ItemStack stripContainedControls(ItemStack stack) {
+        BundleContents contents = stack.get(DataComponents.BUNDLE_CONTENTS);
+        if (contents == null) {
+            return stack;
+        }
+        List<ItemStack> sanitizedContents = new ArrayList<>();
+        boolean changed = false;
+        for (ItemStack contained : contents.itemCopies().toList()) {
+            if (Components.marker(contained).marker().isPresent()) {
+                changed = true;
+                continue;
+            }
+            ItemStack sanitized = stripContainedControls(contained);
+            changed |= !ItemStack.matches(contained, sanitized);
+            sanitizedContents.add(sanitized);
+        }
+        if (!changed) {
+            return stack;
+        }
+        ItemStack sanitized = stack.copy();
+        sanitized.set(DataComponents.BUNDLE_CONTENTS,
+                new BundleContents(sanitizedContents.stream()
+                        .map(ItemStackTemplate::fromNonEmptyStack).toList()));
+        return sanitized;
     }
 
     static boolean shouldConsumeExternalControl(

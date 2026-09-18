@@ -1,6 +1,18 @@
 # Changelog
 
-## [1.2.0] - Unreleased
+## [1.2.1] - Unreleased
+
+### Fixed
+
+- Generated controls can no longer be stored in bundles while using Creative mode.
+
+### Compatibility
+
+- Added support for Minecraft `26.3`, with Fabric Loader `0.19.5` or newer, Fabric API `0.160.7+26.3`, and Java 25 or newer.
+- Minecraft `26.2` remains supported by Happy Artillery 1.2.0.
+- Happy Artillery remains server-side. Players can join with an unmodded Java client.
+
+## [1.2.0] - 2026-09-18
 
 This section records the player-facing, server-admin, and compatibility changes from `main` version 1.1.2.2.
 

@@ -1,4 +1,4 @@
-# Happy Artillery 1.2.0 Proposed Structure
+# Happy Artillery 1.2.0 / Minecraft 26.3 Structure
 
 The annotated tree is the complete proposed source-controlled shape: sixteen production Java files
 and eight risk-grouped test files.
@@ -46,7 +46,7 @@ happy-artillery/
 │   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
 │   │   │       ├── PlayerDropMixin.java
-│   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, boolean) at RETURN and discards
+│   │   │       │   # Observes ServerPlayer.drop(ItemStack, boolean, Prediction) at RETURN and discards
 │   │   │       │   # returned marked ItemEntity drops while leaving ordinary drops unchanged.
 │   │   │       ├── ExternalContainerMixin.java
 │   │   │       │   # Transforms Slot.set(ItemStack) writes, consuming marked controls outside their
@@ -113,8 +113,10 @@ happy-artillery/
 │   # Complete CC0 1.0 Universal legal text packaged into the artifact.
 ├── .gitignore
 │   # Excludes generated Gradle, IDE, run, world, log, and jar output.
+├── BUILD_PLAN.md
+│   # Phased Minecraft 26.3 upgrade checklist and verification boundary.
 ├── build.gradle
-│   # Loom/Java/JUnit and Fabric attachment-API compile support, resources, checks, jars, and publication.
+│   # Non-remapping Loom/Java/JUnit and Fabric API dependencies, resources, checks, jars, and publication.
 ├── gradle.properties
 │   # Pinned Minecraft, Fabric, Loom, Java-facing, artifact, and Maven-coordinate values.
 ├── settings.gradle
@@ -124,11 +126,6 @@ happy-artillery/
 ├── gradlew.bat
 │   # Windows Gradle wrapper launcher.
 └── gradle/
-    ├── minecraft/
-    │   ├── 26.2-custom.json
-    │   │   # Loom-compatible Minecraft 26.2 metadata used by the local build metadata server.
-    │   └── identity-official-26.2.jar
-    │       # Pinned official-name mapping input.
     └── wrapper/
         ├── gradle-wrapper.jar
         │   # Source-controlled Gradle wrapper bootstrap.
