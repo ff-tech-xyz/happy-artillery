@@ -49,7 +49,7 @@ final class HudTest {
 
         assertEquals(List.of(
                         "action:BLUE:HEAT 25% · PAUSED",
-                        "action:RED:HEAT 25% · COOLING 0.3333333333333333/s",
+                        "action:RED:HEAT 25% · COOLING 0.33/s",
                         "action:RED:HEAT 25% · COOLING 0.5/s",
                         "action:GOLD:HEAT 25% · COOLING 0.75/s",
                         "action:GOLD:HEAT 25% · COOLING 1/s",
@@ -61,6 +61,33 @@ final class HudTest {
                 deliveredAction(Hud.Firing.FIRING, config, 25.0));
         assertEquals("action:RED:HEAT 95% · COOLING 5/s",
                 deliveredAction(new Hud.Cooling(5.0), config, 95.0));
+    }
+
+    @Test
+    void coolingTextRoundsHalfUpWithoutRoundingTheColorBand() {
+        Config config = configWithCooling(new Config.Cooling(
+                "PAUSED", Config.Color.BLUE,
+                0.5, Config.Color.RED,
+                1.0, Config.Color.GOLD,
+                Config.Color.GREEN));
+
+        assertEquals(List.of(
+                        "action:GOLD:HEAT 25% · COOLING 0.67/s",
+                        "action:RED:HEAT 25% · COOLING 0.01/s",
+                        "action:RED:HEAT 25% · COOLING <0.01/s",
+                        "action:GOLD:HEAT 25% · COOLING 1/s",
+                        "action:GREEN:HEAT 25% · COOLING 12.5/s",
+                        "action:GREEN:HEAT 25% · COOLING 100/s",
+                        "action:GOLD:HEAT 25% · COOLING 0.5/s"),
+                List.of(2.0 / 3.0, 0.005, 0.004, 0.999, 12.5, 100.0, 0.504).stream()
+                        .map(rate -> deliveredAction(new Hud.Cooling(rate), config, 25.0))
+                        .toList());
+        RecordingAccess access = new RecordingAccess();
+        new Hud<UUID, String>(access).update(RIDER_ID, RIDER_ID, GHAST_ID,
+                RiderState.fresh(), 0L,
+                new Hud.Snapshot(25.0, new Hud.Cooling(0.004), Optional.empty(), false),
+                config, access);
+        assertEquals(List.of("create:0.25:RED", "add"), access.bossEvents());
     }
 
     @Test

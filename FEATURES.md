@@ -261,8 +261,11 @@ effect path.
 Normal fire:
 
 - Spawn the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, not a custom entity or wrapper.
-  Construct it with the ridden Happy Ghast as the `LivingEntity` owner, the pilot's normalized view as
-  the direction, and strict integer `fire.explosionPower=1` by default. Compute one launch origin along
+  Construct it with the ridden Happy Ghast as the `LivingEntity` owner, the pilot's view, limited to
+  60° left/right of the ghast's facing, as the direction, and strict integer `fire.explosionPower=1`
+  by default. The launch origin starts at the Happy Ghast's mouth, scaled with its hitbox and rotated
+  by its yaw only. Pitch is unchanged, and straight-up/down aim skips the yaw limit. Shots fly straight
+  along that aim rather than converging on the crosshair. Compute one collision-clear launch origin along
   that normalized aim beyond the union of the Happy Ghast and complete passenger-tree collision bounds,
   expanded by the spawned fireball's collision extents plus a small clearance. The resulting fireball
   AABB must be disjoint from every ridden entity AABB for upward, downward, horizontal, and diagonal aim.
@@ -365,7 +368,9 @@ Cry:
   `COOLING(currentProfile.coolPerSecond)`. It does not reclassify biome or dimension or mutate gameplay
   state. A zero rate in `COOLING` mode displays configured
   `hud.cooling.noCoolingText` with `noCoolingColor`. Every positive cooling rate displays the
-  exact shape `COOLING <rate>/s` with deterministic numeric formatting: at or below
+  exact shape `COOLING <rate>/s`, rounded half-up to at most two decimals with trailing zeros
+  removed (for example `0.33/s`, `0.5/s`, and `1/s`). A positive rate that rounds to zero
+  displays `<0.01/s`. Heat calculations and colors still use the exact rate: at or below
   `slowMaxPerSecond` it uses `slowColor`, at or below `normalMaxPerSecond` it uses `normalColor`, and above
   that it uses `fastColor`. Threshold equality belongs to the lower band.
 - Boss color is red when that same bounded normalized progress reaches

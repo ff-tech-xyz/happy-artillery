@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
@@ -33,6 +34,11 @@ import java.util.UUID;
 public final class Abilities {
     private static final FuseQueue<ServerPlayer, HappyGhast> FUSES = new FuseQueue<>();
     private static final double LAUNCH_CLEARANCE = 0.01;
+    // Vanilla HappyGhastModel harness squeeze; mouth texels sit 4.5 model pixels below face center.
+    private static final double HARNESS_SQUEEZE = 15.0 / 16.0;
+    private static final double MOUTH_FORWARD_OF_WIDTH = 0.5 * HARNESS_SQUEEZE;
+    private static final double MOUTH_HEIGHT_OF_HEIGHT = 0.5 - (4.5 / 16.0) * HARNESS_SQUEEZE;
+    private static final float MAX_AIM_YAW_FROM_FACE = 60.0F;
 
     private Abilities() {
     }
@@ -227,6 +233,29 @@ public final class Abilities {
         double distance = radius * Math.sqrt((index + 0.5) / count);
         double angle = index * Math.PI * (3.0 - Math.sqrt(5.0));
         return new Vec3(Math.cos(angle) * distance, 0.0, Math.sin(angle) * distance);
+    }
+
+    static Vec3 mouth(AABB ghastBounds, float faceYawDegrees) {
+        double yaw = Math.toRadians(faceYawDegrees);
+        double forward = ghastBounds.getXsize() * MOUTH_FORWARD_OF_WIDTH;
+        Vec3 center = ghastBounds.getCenter();
+        return new Vec3(center.x - Math.sin(yaw) * forward,
+                ghastBounds.minY + ghastBounds.getYsize() * MOUTH_HEIGHT_OF_HEIGHT,
+                center.z + Math.cos(yaw) * forward);
+    }
+
+    static Vec3 clampAimToFace(Vec3 aim, float faceYawDegrees) {
+        double horizontal = Math.sqrt(aim.x * aim.x + aim.z * aim.z);
+        if (horizontal < 1.0E-6) {
+            return aim; // Straight up/down has no meaningful yaw.
+        }
+        float aimYaw = (float) Math.toDegrees(Math.atan2(-aim.x, aim.z));
+        float offset = Mth.wrapDegrees(aimYaw - faceYawDegrees);
+        if (Math.abs(offset) <= MAX_AIM_YAW_FROM_FACE) {
+            return aim;
+        }
+        double yaw = Math.toRadians(faceYawDegrees + Math.copySign(MAX_AIM_YAW_FROM_FACE, offset));
+        return new Vec3(-Math.sin(yaw) * horizontal, aim.y, Math.cos(yaw) * horizontal);
     }
 
     static Optional<Launch> launch(Vec3 start, Vec3 aim, AABB occupied, AABB projectileAtOrigin) {
@@ -714,8 +743,10 @@ public final class Abilities {
         @Override
         public boolean addProjectile(ServerPlayer pilot, HappyGhast ghast, int explosionPower) {
             ServerLevel level = (ServerLevel) ghast.level();
+            float faceYaw = ghast.getYRot();
             Optional<Launch> candidate = launch(
-                    pilot.getEyePosition(), pilot.getViewVector(1.0F), occupiedBounds(ghast),
+                    mouth(ghast.getBoundingBox(), faceYaw),
+                    clampAimToFace(pilot.getViewVector(1.0F), faceYaw), occupiedBounds(ghast),
                     EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0));
             if (candidate.isEmpty()) {
                 return false;
