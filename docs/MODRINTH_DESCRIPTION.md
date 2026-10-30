@@ -2,15 +2,35 @@
 
 Happy Artillery turns Happy Ghasts into rideable artillery, with fireballs, a Ghast Cry, and heat that builds as you fire. It runs on the server; players don't need to install anything on their Java clients.
 
+*A Happy Ghast, a pilot, and fireballs over the forest.*
+
+![Pilot firing from a Happy Ghast above a forest](https://cdn.modrinth.com/data/8yjCPiDL/images/46c8b05852401ee058f19b4f588de5cd1890a678.webp)
+
 ## Flying and firing
 
 - **Fire Control:** right-click to launch a fireball, or hold to keep firing.
 - **Cry Control:** right-click to make the ghast scream. It's a sound, not a damage ability, and has its own cooldown.
 - **Rider HUD:** everyone aboard can see the ghast's heat and cooling status. Only the pilot can use its abilities.
 
+*Keep an eye on heat and cooling while switching between Fire and Cry.*
+
+![Heat and cooling HUD with the Cry Control selected](https://cdn.modrinth.com/data/8yjCPiDL/images/7482646db974a761629cfb917add9aa9931edeed.webp)
+
 Controls are temporary items given to the pilot when a ride begins. Move them to whichever hotbar slots you prefer, or use them from your offhand. Your existing items stay untouched.
 
+*Put your controls where you want them, not where we left them.*
+
+![Fire and Cry controls rearranged in the hotbar](https://cdn.modrinth.com/data/8yjCPiDL/images/45d6379d7ba7b8c514d4a25c47882a55b01dff96.webp)
+
 There's no ammunition to collect or refill. Heat is the limit: fire a burst, ease off, and watch the cooling rate before firing again. Cold areas and the End cool faster, hot areas cool more slowly, and the Nether has no passive cooling by default.
+
+*Cooling above the forest: 0.33 per second in this scene.*
+
+![Heat HUD showing 37% heat and 0.33 per second cooling above a forest](https://cdn.modrinth.com/data/8yjCPiDL/images/93543db6662c820fee5f41f4b3d77a8d9f98b7a2.webp)
+
+*Colder air, faster cooling: 0.67 per second over snowy terrain.*
+
+![Heat HUD showing 20% heat and 0.67 per second cooling above snowy terrain](https://cdn.modrinth.com/data/8yjCPiDL/images/4ea6211c928b9799dcbf72873f78e65956844019.webp)
 
 ## Before you install
 
@@ -21,6 +41,10 @@ There's no ammunition to collect or refill. Heat is the limit: fire a burst, eas
 - **Water doesn't cool the ghast.** Touching water blocks firing by default and always blocks Cry.
 - **Heat and cooldowns survive chunk unloads and server restarts.** Stopped-server time doesn't count as cooling time, and dismounting doesn't cancel an overheat fuse.
 - **Upgrading? Remove the old Happy Artillery jar first.** Keep only one version in `mods`.
+
+*Push the heat too far and the whole ride goes up with it.*
+
+![Pilot surrounded by an explosion and scattered fireballs](https://cdn.modrinth.com/data/8yjCPiDL/images/e236a607b5ee6e2846e1f9b0c64aca34e2ac0f35.webp)
 
 ## Server setup
 

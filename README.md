@@ -4,6 +4,10 @@ Happy Artillery turns Happy Ghasts into rideable siege machines. The pilot can l
 
 Happy Artillery runs on the server. Players join with an unmodded Java client.
 
+*A Happy Ghast, a pilot, and fireballs over the forest.*
+
+![Pilot firing from a Happy Ghast above a forest](docs/screenshots/firing.webp)
+
 ## Controls
 
 When you become the pilot, the mod gives you one temporary control for each enabled ability:
@@ -11,15 +15,31 @@ When you become the pilot, the mod gives you one temporary control for each enab
 - **Fire Control:** right-click to fire. Holding the control repeats fire by default.
 - **Cry Control:** right-click to play the Happy Ghast's cry. Cry has its own cooldown and does not work while the ghast is touching water.
 
+*Keep an eye on heat and cooling while switching between Fire and Cry.*
+
+![Heat and cooling HUD with the Cry Control selected](docs/screenshots/rider-hud.webp)
+
 The controls need free space in your hotbar or main inventory. Two enabled abilities need two free slots; one enabled ability needs one. If there is not enough room, the mod adds nothing and leaves your existing items alone.
 
 You can move your controls through your hotbar, main inventory, and offhand. Hold a control in either hand to use it. Each control belongs to one player and one ride, so another player cannot use it.
+
+*Put your controls where you want them, not where we left them.*
+
+![Fire and Cry controls rearranged in the hotbar](docs/screenshots/rearranged-controls.webp)
 
 Dropping a control or moving it into a container, crafting grid, or armor slot consumes it. Controls cannot be stored in bundles, used as crafting ingredients, loaded as ammunition, or used as their underlying vanilla item. A lost control does not return during the same ride; dismount and ride again to receive a new one.
 
 ## Heat and overheat
 
 Every Fire shot adds heat. Cold areas and the End add less heat and cool faster. Hot areas add more heat and cool more slowly. The Nether has no passive cooling by default. Water does not cool the ghast.
+
+*Cooling above the forest: 0.33 per second in this scene.*
+
+![Heat HUD showing 37% heat and 0.33 per second cooling above a forest](docs/screenshots/forest-cooling.webp)
+
+*Colder air, faster cooling: 0.67 per second over snowy terrain.*
+
+![Heat HUD showing 20% heat and 0.67 per second cooling above snowy terrain](docs/screenshots/cold-biome-cooling.webp)
 
 Fire is blocked while the ghast is touching water by default. Server admins can change that with `water.blocksFiring`. Cry is always blocked in water.
 
@@ -31,6 +51,10 @@ The HUD shows when the ghast is firing, not cooling, or cooling at a specific ra
 - `true`: terrain damage and direct fire placement follow the vanilla `mobGriefing` rule.
 
 The vanilla fireballs emitted during overheat keep their normal impact behavior in either mode.
+
+*Push the heat too far and the whole ride goes up with it.*
+
+![Pilot surrounded by an explosion and scattered fireballs](docs/screenshots/overheat-explosion.webp)
 
 ## Installation
 
