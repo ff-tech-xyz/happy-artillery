@@ -36,7 +36,7 @@ happy-artillery/
 │   │   │   │   # Sole control owner: enabled-aware atomic free-slot allocation, marked block-use policy,
 │   │   │   │   # one bounded active-pilot inventory snapshot, held admission, cleanup, and ride transitions.
 │   │   │   ├── Abilities.java
-│   │   │   │   # Sole fire/cry/detonation gate, truthful effect/removal outcome, collision-clear launch,
+│   │   │   │   # Sole fire/cry/detonation gate, truthful effect/removal outcome, mouth-origin collision-clear launch,
 │   │   │   │   # and UUID-only fuse-task owner; resolves entities at execution, isolates due tasks,
 │   │   │   │   # consumes pending state durably, and owns vanilla fireballs, effects, sound, and removal.
 │   │   │   ├── Hud.java

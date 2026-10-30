@@ -261,8 +261,11 @@ effect path.
 Normal fire:
 
 - Spawn the real vanilla `EntityTypes.FIREBALL` / `LargeFireball`, not a custom entity or wrapper.
-  Construct it with the ridden Happy Ghast as the `LivingEntity` owner, the pilot's normalized view as
-  the direction, and strict integer `fire.explosionPower=1` by default. Compute one launch origin along
+  Construct it with the ridden Happy Ghast as the `LivingEntity` owner, the pilot's view, limited to
+  60° left/right of the ghast's facing, as the direction, and strict integer `fire.explosionPower=1`
+  by default. The launch origin starts at the Happy Ghast's mouth, scaled with its hitbox and rotated
+  by its yaw only. Pitch is unchanged, and straight-up/down aim skips the yaw limit. Shots fly straight
+  along that aim rather than converging on the crosshair. Compute one collision-clear launch origin along
   that normalized aim beyond the union of the Happy Ghast and complete passenger-tree collision bounds,
   expanded by the spawned fireball's collision extents plus a small clearance. The resulting fireball
   AABB must be disjoint from every ridden entity AABB for upward, downward, horizontal, and diagonal aim.

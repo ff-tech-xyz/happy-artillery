@@ -17,6 +17,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1578,6 +1579,12 @@ final class AbilitiesTest {
                 .filter(MethodInsnNode.class::isInstance)
                 .map(MethodInsnNode.class::cast)
                 .toList();
+        assertTrue(calls.stream().noneMatch(call -> call.name.equals("getEyePosition")));
+        assertEquals(1, callsTo(method, "xyz/pyrehaven/happyartillery/Abilities", "mouth").size());
+        assertEquals(1, callsTo(method,
+                "xyz/pyrehaven/happyartillery/Abilities", "clampAimToFace").size());
+        assertEquals(1, callsTo(method,
+                "net/minecraft/world/entity/animal/happyghast/HappyGhast", "getYRot").size());
         assertEquals(1, callsTo(method,
                 "xyz/pyrehaven/happyartillery/Abilities", "occupiedBounds").size());
         assertEquals(0, callsTo(method,
@@ -1604,20 +1611,20 @@ final class AbilitiesTest {
                 .filter(IntInsnNode.class::isInstance).map(IntInsnNode.class::cast)
                 .filter(instruction -> instruction.operand == 1016).count());
         assertTrue(calls.stream().noneMatch(call -> call.name.equals("setDeltaMovement")));
-        assertOptionalLaunchBranch(method, 5, Opcodes.IFEQ);
+        assertOptionalLaunchBranch(method, 6, Opcodes.IFEQ);
         List<String> shape = instructionShape(method);
         int constructor = shape.indexOf("INVOKESPECIAL LargeFireball.<init> "
                 + "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;"
                 + "Lnet/minecraft/world/phys/Vec3;I)V");
         assertEquals(List.of(
                 "NEW net/minecraft/world/entity/projectile/hurtingprojectile/LargeFireball", "DUP",
-                "ALOAD 4", "ALOAD 2", "ALOAD 6",
+                "ALOAD 4", "ALOAD 2", "ALOAD 7",
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "ILOAD 3"), shape.subList(constructor - 7, constructor));
         int setPosition = shape.indexOf("INVOKEVIRTUAL LargeFireball.setPos "
                 + "(Lnet/minecraft/world/phys/Vec3;)V");
         assertEquals(List.of(
-                "ALOAD 7", "ALOAD 6",
+                "ALOAD 8", "ALOAD 7",
                 "INVOKEVIRTUAL Abilities$Launch.origin ()Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(setPosition - 3, setPosition));
 
@@ -1700,6 +1707,70 @@ final class AbilitiesTest {
                 "INVOKEVIRTUAL Abilities$Launch.direction ()Lnet/minecraft/world/phys/Vec3;",
                 "OPCODE_24 3", "INVOKEVIRTUAL Vec3.scale (D)Lnet/minecraft/world/phys/Vec3;"),
                 shape.subList(movement - 5, movement));
+    }
+
+    @Test
+    void mouthTracksHarnessFaceYawAndScaledBounds() {
+        AABB ghast = new AABB(0.0, 0.0, 0.0, 4.0, 4.0, 4.0);
+        assertTrue(Abilities.mouth(ghast, 0.0F)
+                .distanceTo(new Vec3(2.0, 0.9453125, 3.875)) < 1.0E-12);
+        assertTrue(Abilities.mouth(ghast, 90.0F)
+                .distanceTo(new Vec3(0.125, 0.9453125, 2.0)) < 1.0E-12);
+        AABB doubled = new AABB(0.0, 0.0, 0.0, 8.0, 8.0, 8.0);
+        for (float yaw : new float[]{0.0F, 90.0F, -170.0F}) {
+            assertTrue(Abilities.mouth(doubled, yaw)
+                    .distanceTo(Abilities.mouth(ghast, yaw).scale(2.0)) < 1.0E-12);
+            assertTrue(Abilities.mouth(ghast.move(10.0, -5.0, 20.0), yaw)
+                    .distanceTo(Abilities.mouth(ghast, yaw).add(10.0, -5.0, 20.0)) < 1.0E-12);
+        }
+    }
+
+    @Test
+    void faceAimPreservesAllowedYawVerticalAimAndWrapAround() {
+        for (Vec3 aim : List.of(new Vec3(0.25, 0.5, 1.0).normalize(),
+                new Vec3(0.0, 1.0, 0.0), new Vec3(0.0, -1.0, 0.0))) {
+            assertSame(aim, Abilities.clampAimToFace(aim, 0.0F));
+        }
+        double yaw = Math.toRadians(-170.0);
+        Vec3 wrapped = new Vec3(-Math.sin(yaw), 0.25, Math.cos(yaw));
+        assertSame(wrapped, Abilities.clampAimToFace(wrapped, 170.0F));
+        for (double aimYaw : new double[]{-120.0, 120.0, 180.0}) {
+            double radians = Math.toRadians(aimYaw);
+            Vec3 aim = new Vec3(-Math.sin(radians) * 0.8, -0.6, Math.cos(radians) * 0.8);
+            Vec3 clamped = Abilities.clampAimToFace(aim, 0.0F);
+            assertEquals(60.0, Math.abs(Math.toDegrees(Math.atan2(-clamped.x, clamped.z))), 1.0E-5);
+            assertEquals(aim.y, clamped.y);
+            assertEquals(aim.length(), clamped.length(), 1.0E-12);
+            if (aimYaw != 180.0) {
+                assertEquals(Math.signum(aimYaw), Math.signum(Math.atan2(-clamped.x, clamped.z)));
+            }
+        }
+    }
+
+    @Test
+    void mouthLaunchClearsGhastAndAllRidersWithoutChangingAim() {
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
+        AABB ghast = new AABB(-2.0, 0.0, -2.0, 2.0, 4.0, 2.0);
+        AABB topRider = new AABB(-0.4, 4.0, -0.4, 0.4, 6.0, 0.4);
+        AABB bottomRider = new AABB(-0.4, -2.0, -0.4, 0.4, 0.0, 0.4);
+        AABB occupied = ghast.minmax(topRider).minmax(bottomRider);
+        AABB projectile = net.minecraft.world.entity.EntityTypes.FIREBALL.getSpawnAABB(0.0, 0.0, 0.0);
+        Vec3 mouth = Abilities.mouth(ghast, 0.0F);
+        for (Vec3 aim : List.of(new Vec3(0.0, 0.0, 1.0), new Vec3(-1.0, 0.0, 0.0),
+                new Vec3(1.0, 0.0, 0.0), new Vec3(0.0, 1.0, 0.0), new Vec3(0.0, -1.0, 0.0))) {
+            Vec3 limited = Abilities.clampAimToFace(aim, 0.0F);
+            Abilities.Launch launch = Abilities.launch(mouth, limited, occupied, projectile).orElseThrow();
+            AABB spawned = projectile.move(launch.origin());
+            for (AABB ridden : List.of(ghast, topRider, bottomRider)) {
+                assertFalse(spawned.intersects(ridden), aim + " intersects " + ridden);
+            }
+            assertTrue(launch.direction().distanceTo(limited.normalize()) < 1.0E-12);
+            if (aim.z == 1.0) {
+                // Clearance measures the collision center; the vanilla entity origin is at its bottom.
+                assertTrue(spawned.getCenter().distanceTo(mouth) < 0.65);
+            }
+        }
     }
 
     @Test

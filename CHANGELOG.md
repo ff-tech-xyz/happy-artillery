@@ -5,6 +5,7 @@
 ### Fixed
 
 - The rider HUD now shows the cooling rate with at most two decimals (for example 0.33/s).
+- Fireballs now launch from the Happy Ghast’s mouth instead of beside the pilot’s head.
 
 ## [1.2.1] - Unreleased
 
