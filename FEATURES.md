@@ -365,7 +365,9 @@ Cry:
   `COOLING(currentProfile.coolPerSecond)`. It does not reclassify biome or dimension or mutate gameplay
   state. A zero rate in `COOLING` mode displays configured
   `hud.cooling.noCoolingText` with `noCoolingColor`. Every positive cooling rate displays the
-  exact shape `COOLING <rate>/s` with deterministic numeric formatting: at or below
+  exact shape `COOLING <rate>/s`, rounded half-up to at most two decimals with trailing zeros
+  removed (for example `0.33/s`, `0.5/s`, and `1/s`). A positive rate that rounds to zero
+  displays `<0.01/s`. Heat calculations and colors still use the exact rate: at or below
   `slowMaxPerSecond` it uses `slowColor`, at or below `normalMaxPerSecond` it uses `normalColor`, and above
   that it uses `fastColor`. Threshold equality belongs to the lower band.
 - Boss color is red when that same bounded normalized progress reaches

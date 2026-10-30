@@ -10,6 +10,7 @@ import net.minecraft.world.BossEvent;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -233,7 +234,11 @@ public final class Hud<R, H> {
     }
 
     private static String formatRate(double perSecond) {
-        return BigDecimal.valueOf(perSecond).stripTrailingZeros().toPlainString();
+        BigDecimal rounded = BigDecimal.valueOf(perSecond).setScale(2, RoundingMode.HALF_UP);
+        if (rounded.signum() == 0) {
+            return "<0.01";
+        }
+        return rounded.stripTrailingZeros().toPlainString();
     }
 
 

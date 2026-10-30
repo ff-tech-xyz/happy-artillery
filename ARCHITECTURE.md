@@ -41,7 +41,7 @@ happy-artillery/
 │   │   │   │   # consumes pending state durably, and owns vanilla fireballs, effects, sound, and removal.
 │   │   │   ├── Hud.java
 │   │   │   │   # Sole typed boss/action-bar/warning presentation path for pilots and read-only passengers;
-│   │   │   │   # consumes shared control/effective-cooling context and owns bounded display handles.
+│   │   │   │   # consumes shared control/effective-cooling context, rounds rate text only, and owns bounded display handles.
 │   │   │   ├── Feedback.java
 │   │   │   │   # Sole visible rejection to action-bar/sound mapping; cooldown and authorization stay silent.
 │   │   │   └── mixin/
