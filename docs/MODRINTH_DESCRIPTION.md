@@ -1,8 +1,8 @@
 # Happy Artillery
 
-Turn your Happy Ghast into flying artillery. Launch fireballs, make it scream, and try not to blow up your ride.
+Happy Artillery lets you fire from a Happy Ghast's pilot seat, turning your ride into flying artillery. You can launch fireballs and make it scream between shots, but keep an eye on the heat (overheating can cost you the ghast).
 
-Made for servers: install it on the server, and players can join without a client mod.
+Install it on your Fabric server and everyone can use it without installing a client mod.
 
 ## Take aim
 
@@ -18,11 +18,15 @@ Controls appear when you take the pilot's seat. Leave two inventory slots free, 
 
 ## Watch the heat
 
-Every rider can see the heat and cooling rate on the HUD. Fire in bursts, then give your ghast time to cool.
+Every rider can see the heat and cooling rate on the HUD, so you can tell when to stop firing and give your ghast time to cool. Short bursts help keep the heat down.
 
 ![Rider HUD showing heat and cooling rate](https://cdn.modrinth.com/data/8yjCPiDL/images/7482646db974a761629cfb917add9aa9931edeed.webp)
 
 Cold areas and the End cool faster; hot areas cool more slowly. The Nether has no passive cooling by default.
+
+![Cooling above the forest](https://cdn.modrinth.com/data/8yjCPiDL/images/93543db6662c820fee5f41f4b3d77a8d9f98b7a2.webp)
+
+![Cold-biome cooling](https://cdn.modrinth.com/data/8yjCPiDL/images/4ea6211c928b9799dcbf72873f78e65956844019.webp)
 
 Reach the heat limit and your ghast explodes, scattering fireballs. By default, it doesn't survive. Shots and overheat can damage terrain.
 
